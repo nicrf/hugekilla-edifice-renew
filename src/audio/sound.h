@@ -1,3 +1,6 @@
+#ifdef PlaySound
+#undef PlaySound	// <mmsystem.h> maps it to PlaySoundA
+#endif
 void LoadSounds();
 void StopSound(int num);
 void PlaySound(int num,int loop);

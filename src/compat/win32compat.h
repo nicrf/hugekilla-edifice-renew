@@ -18,6 +18,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <mmsystem.h>
+#undef PlaySound   // the game has its own PlaySound(int,int) (sound.h)
 #include <GL/gl.h>
 #include <GL/glu.h>
 
