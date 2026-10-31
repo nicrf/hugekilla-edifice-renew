@@ -24,7 +24,7 @@ int datarecvthisframe;
 
 Sock::Sock()
 {
-	ZeroMemory(this,sizeof(this));
+	ZeroMemory(this,sizeof(*this));
 	dest.sin_family=2;
 	reliablesenddata=0;
 }
@@ -54,22 +54,49 @@ int Sock::Send(void *data,int size)
 }
 
 //checks for data received by the socket, decides weather they are reliable, or are a groups of packets.
-//it returns 1 if there are more packets that can be read (by calling Receive again)
+//returns the size of the message copied into data (0 when there is nothing more to read for now).
+//every size read from the network is checked before use (roadmap M2a): a malformed packet is
+//dropped, and data never receives more than maxsize bytes. fromack is set when the message is a
+//local "reliable data acknowledged" callback rather than something sent by the peer.
 
-int Sock::Receive(void *data,SOCKADDR_IN *source)
+int Sock::Receive(void *data,SOCKADDR_IN *source,int maxsize)
 {
+	fromack=0;
 	if(!sock) return 0;
-	if(reliablerecvbufpos<reliablerecvbufsize)
+	for(;;)
 	{
-		DWORD dwsize=*(DWORD*)&reliablerecvdata[reliablerecvbufpos];
-		reliablerecvbufpos+=4;
-		CopyMemory(data,&reliablerecvdata[reliablerecvbufpos],dwsize);
-		reliablerecvbufpos+=dwsize;
-		return dwsize;
-	}
-	if(recvbufpos>=recvbufsize)
-	{
-beginning:
+		//messages left from the last complete reliable transfer
+		if(reliablerecvbufpos<reliablerecvbufsize)
+		{
+			DWORD left=reliablerecvbufsize-reliablerecvbufpos;
+			DWORD dwsize=0;
+			if(left>=4) CopyMemory(&dwsize,&reliablerecvdata[reliablerecvbufpos],4);
+			if(left>=4&&dwsize<=left-4&&dwsize<=(DWORD)maxsize)
+			{
+				reliablerecvbufpos+=4;
+				CopyMemory(data,&reliablerecvdata[reliablerecvbufpos],dwsize);
+				reliablerecvbufpos+=dwsize;
+				return dwsize;
+			}
+			reliablerecvbufpos=reliablerecvbufsize;   //malformed: drop the rest
+		}
+		//messages left in the last datagram
+		if(recvbufpos<recvbufsize)
+		{
+			WORD wsize=0;
+			int ok=recvbufpos+2<=recvbufsize;
+			if(ok) CopyMemory(&wsize,&recvbuf.data[recvbufpos],sizeof(wsize));
+			if(ok&&recvbufpos+2+wsize<=recvbufsize&&wsize<=maxsize)
+			{
+				recvbufpos+=sizeof(wsize);
+				CopyMemory(data,&recvbuf.data[recvbufpos],wsize);
+				recvbufpos+=wsize;
+				return wsize;
+			}
+			recvbufpos=recvbufsize;   //malformed: drop the rest
+		}
+
+		//next datagram
 		fd_set recv;
 		FD_ZERO(&recv);
 		FD_SET(sock,&recv);
@@ -78,28 +105,33 @@ beginning:
 		tm.tv_usec=0;
 		int readit;
 		readit=select(sock+1,&recv,0,0,&tm);
-		if(readit<0) return 0;
-		if(!readit) return 0;
+		if(readit<=0) return 0;
 #ifdef _WIN32
 		int addrsize=sizeof(SOCKADDR_IN);
 #else
 		socklen_t addrsize=sizeof(SOCKADDR_IN);
 #endif
-		recvbufsize=recvfrom(sock,(char *)&recvbuf,sizeof(recvbuf),0,(SOCKADDR*)source,&addrsize)-1;
+		int received=recvfrom(sock,(char *)&recvbuf,sizeof(recvbuf),0,(SOCKADDR*)source,&addrsize);
 		packetsreceived++;
-		if(recvbufsize<=0) return 0;
+		if(received<=0) return 0;
+		recvbufsize=received-1;   //bytes after the type
+		recvbufpos=recvbufsize;   //consumed unless it turns out to hold grouped messages
 		datarecvthissec+=recvbufsize+16;
 		datarecvthisframe+=recvbufsize+16;
-		int recvedreldata=0;
 		if(recvbuf.type==ACK)
 		{
+			if(recvbufsize<4) continue;
 			for(int i=0;i<MAXSIMULRELIABLE;i++)
 			{
 				if(reliablebuf[i].size&&reliablebuf[i].id==*(WORD*)&recvbuf.data[0]&&reliablebuf[i].num==*(WORD*)&recvbuf.data[2]&&reliablesenddata)
 				{
-						
 					reliablebuf[i].size=0;
 					reliableintransmit--;
+					SimpleMessage callback;
+					callback.type=SIMPLE;
+					callback.msg=0;
+					callback.msg2=0;
+					fromack=1;
 					if(reliablesenddata->size)
 					{
 						if(reliablesenddata->size<=RELIABLEPACKETSIZE) //will be last one
@@ -115,24 +147,11 @@ beginning:
 							reliablebufnum++;
 							PackReliable();
 						}
-						SimpleMessage callback;
-						callback.type=SIMPLE;
 						callback.type2=0;
-						callback.msg=0;
-						callback.msg2=0;
-						CopyMemory(data,&callback,sizeof(callback));
-						recvedreldata=1;
-						return sizeof(callback);
 					}
 					else
 					{
-						SimpleMessage callback;
-						callback.type=SIMPLE;
 						callback.type2=reliablesenddata->callback;
-						callback.msg=0;
-						callback.msg2=0;
-						CopyMemory(data,&callback,sizeof(callback));
-						
 						reliabledata *next=reliablesenddata->next;
 						delete []reliablesenddata->data;
 						delete reliablesenddata;
@@ -143,66 +162,57 @@ beginning:
 							reliablebufnum=0;
 							PackReliable();
 						}
-						recvbufpos=recvbufsize;
-						return sizeof(callback);
 					}
-					break;
+					CopyMemory(data,&callback,sizeof(callback));
+					return sizeof(callback);
 				}
 			}
-			goto beginning;
+			continue;
 		}
 		if(recvbuf.type==RELIABLE||recvbuf.type==LASTRELIABLE)
 		{
-			CopyMemory(&dest,source,sizeof(dest));
-			recvbufpos=recvbufsize;
+			if(recvbufsize<8) continue;   //checksum, id, part number
 			if(GetCheckSum(&recvbuf.data[4],recvbufsize-4)!=*(DWORD *)recvbuf.data)
 			{
 				*(char *)data=0;
 				return 1;
 			}
+			//answer where the data came from (lets clients behind a NAT through),
+			//only once the packet passed the checksum
+			CopyMemory(&dest,source,sizeof(dest));
 			buf ack;
 			ack.type=ACK;
 			*(WORD*)&ack.data[0]=*(WORD*)&recvbuf.data[4];
 			*(WORD*)&ack.data[2]=*(WORD*)&recvbuf.data[6];
 			sendto(sock,(char *)&ack,1+4,0,(SOCKADDR *)&dest,sizeof(SOCKADDR));
 			packetssent++;
-			if(*(WORD *)&recvbuf.data[4]!=lastreliableid+1)
+			WORD id=*(WORD *)&recvbuf.data[4];
+			if(id!=(WORD)(lastreliableid+1))   //WORD: keeps working after 65535 transfers
 			{
 				*(char *)data=0;
 				return 1;
 			}
 			if(recvbuf.type==LASTRELIABLE)
-			{
-				lastreliableid=*(WORD*)&recvbuf.data[4];
-				
-			}
+				lastreliableid=id;
 			int rbufpos=*(WORD*)&recvbuf.data[6]*RELIABLEPACKETSIZE;
-			CopyMemory(&reliablerecvdata[rbufpos],&recvbuf.data[8],recvbufsize-8);
+			int chunk=recvbufsize-8;
+			if(rbufpos+chunk>BIGBUFSIZE)
+			{
+				*(char *)data=0;
+				return 1;
+			}
+			CopyMemory(&reliablerecvdata[rbufpos],&recvbuf.data[8],chunk);
 			if(recvbuf.type==LASTRELIABLE)
 			{
 				reliablerecvbufpos=0;
-				DWORD dwsize=*(DWORD*)&reliablerecvdata[reliablerecvbufpos];
-				reliablerecvbufpos+=4;
-				CopyMemory(data,&reliablerecvdata[reliablerecvbufpos],dwsize);
-				reliablerecvbufpos+=dwsize;
-				reliablerecvbufsize=rbufpos+recvbufsize-8;
-				return dwsize;
+				reliablerecvbufsize=rbufpos+chunk;
+				continue;   //returned from the reliable buffer at the top of the loop
 			}
-			else
-			{
-				*(char *)data=0;
-				recvbufpos=recvbufsize;
-				return 1;
-			}
+			*(char *)data=0;
+			return 1;
 		}
-		recvbufpos=0;
+		recvbufpos=0;   //grouped messages: read at the top of the loop
 	}
-	WORD wsize;
-	CopyMemory(&wsize,&recvbuf.data[recvbufpos],sizeof(wsize));
-	recvbufpos+=sizeof(wsize);
-	CopyMemory(data,&recvbuf.data[recvbufpos],wsize);
-	recvbufpos+=wsize;
-	return wsize;
 }
 
 //used internally

@@ -26,7 +26,7 @@ int GetNumPlayers();
 void SendLandInfo(int num);
 void SendSimple(char num,char type,DWORD msg,DWORD msg2);
 void SendPosition(char srcnum,char destnum);
-void ReceiveBlockBuffer(char *buf,int pnum);
+void ReceiveBlockBuffer(char *buf,int pnum,int len);
 void SendBlockBuffer();
 void AddBlockBuffer(char x,char y,char z,char type,char team,char top,char side,char bottom,char del);
 void StartBlockBuffer();

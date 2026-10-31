@@ -73,7 +73,8 @@ public:
 	void CheckReliableResend();
 	int Send(void *data,int size);
 	int SendReliable(void *data,int size,int callback);
-	int Receive(void *data,SOCKADDR_IN *source);
+	int Receive(void *data,SOCKADDR_IN *source,int maxsize=sizeof(Message));
+	int fromack;   //last Receive returned a local reliable-ack callback (not peer data)
 	void ResetReliable();
 	void ResetRecvReliable();
 	void Flush();
