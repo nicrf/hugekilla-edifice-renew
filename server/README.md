@@ -1,0 +1,65 @@
+# edifice-lobby
+
+Petit service en un seul binaire Go pour jouer à Edifice par Internet :
+
+- **liste des parties** : les hôtes annoncent leur partie, les joueurs la voient dans l'écran *Join* ;
+- **signalisation P2P** pour GameNetworkingSockets : relaie les messages qui permettent à deux joueurs de se connecter directement à travers leurs box ;
+- **STUN/TURN** (via [pion/turn](https://github.com/pion/turn)) : découverte d'adresse, et relais quand le P2P direct échoue. Le trafic relayé reste chiffré de bout en bout par GameNetworkingSockets.
+
+Licence MIT (programme séparé du jeu, qui reste sous LGPL).
+
+## Lancer
+
+```bash
+go run . -public-host lobby.example.org -turn-relay-ip 203.0.113.10
+```
+
+Ou avec Docker :
+
+```bash
+docker build -t edifice-lobby . && docker run -p 8080:8080 -p 10000:10000 -p 3478:3478/udp -e EDIFICE_PUBLIC_HOST=lobby.example.org -e EDIFICE_TURN_RELAY_IP=203.0.113.10 -e EDIFICE_TURN_SECRET=change-me edifice-lobby
+```
+
+| Option | Variable | Défaut | Rôle |
+|---|---|---|---|
+| `-http` | `EDIFICE_HTTP` | `:8080` | API HTTP |
+| `-signal` | `EDIFICE_SIGNAL` | `:10000` | signalisation (TCP) |
+| `-turn` | `EDIFICE_TURN` | `:3478` | STUN/TURN (UDP) |
+| `-public-host` | `EDIFICE_PUBLIC_HOST` | — | nom ou IP que les joueurs utilisent pour joindre ce serveur (URLs STUN/TURN) |
+| `-turn-relay-ip` | `EDIFICE_TURN_RELAY_IP` | — | IPv4 publique du relais ; vide = TURN désactivé (STUN public de Google à la place) |
+| `-turn-secret` | `EDIFICE_TURN_SECRET` | aléatoire | secret des identifiants TURN (à fixer si plusieurs instances) |
+| `-trust-proxy` | `EDIFICE_TRUST_PROXY=1` | non | IP du client lue dans `X-Forwarded-For` (derrière un reverse proxy) |
+| `-ttl` | — | `60s` | une partie disparaît si son hôte ne l'a pas renouvelée depuis ce délai |
+
+Pour le relais TURN, les ports UDP des allocations (choisis par le système) doivent aussi être joignables.
+
+## API
+
+| Requête | Réponse |
+|---|---|
+| `POST /v1/sessions` | `identity`, `token`, serveurs STUN/TURN avec identifiants temporaires (12 h) |
+| `POST /v1/servers` `{name, port, version, protocol, players, maxplayers, mode, visibility, identity}` | `id`, `token`, `refresh_seconds` |
+| `PUT /v1/servers/{id}` (même corps, `Authorization: Bearer <token>`) | 204 : partie renouvelée |
+| `DELETE /v1/servers/{id}` (`Authorization: Bearer <token>`) | 204 |
+| `GET /v1/servers?protocol=N` | `{"servers": [...]}` : parties publiques, les plus peuplées d'abord |
+| `GET /v1/servers/{id}` | une partie, même privée (partagée par son id) |
+| `GET /healthz` | `ok` |
+
+L'adresse d'une partie est **l'IP vue par le serveur**, jamais celle déclarée par l'hôte. `visibility` vaut `public` (listée), `friends` ou `private` (non listées, joignables par leur id). Limites : 4 parties par IP, requêtes d'écriture limitées par IP, corps de 4 Ko maximum, textes réduits à l'ASCII imprimable.
+
+## Signalisation
+
+TCP, une ligne par message, le protocole de l'exemple de Valve (`examples/trivial_signaling_server.py` de GameNetworkingSockets), avec authentification :
+
+1. première ligne : `IDENTITÉ JETON` (d'une session `POST /v1/sessions`), sinon `ERROR unauthorized` et déconnexion ;
+2. ensuite : `DESTINATAIRE CHARGE` → relayé au destinataire sous la forme `EXPÉDITEUR CHARGE`.
+
+Lignes de 4 Ko maximum, 50 messages par seconde et par connexion (au-delà, ignorés : la signalisation ne garantit pas la livraison), déconnexion après 5 minutes d'inactivité.
+
+## Tests
+
+```bash
+go test -race ./...
+```
+
+Sur macOS récent avec un Go antérieur à 1.22, ajouter `-ldflags=-linkmode=external`.
