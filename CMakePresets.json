@@ -14,16 +14,16 @@
     { "name": "linux-release", "inherits": "unix-base", "displayName": "Linux Release", "binaryDir": "${sourceDir}/build/linux-release", "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }, "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" } },
     {
       "name": "windows-vs",
-      "displayName": "Windows (Visual Studio, Win32)",
+      "displayName": "Windows (Visual Studio, x64)",
       "generator": "Visual Studio 17 2022",
-      "architecture": "Win32",
+      "architecture": "x64",
       "binaryDir": "${sourceDir}/build/windows-vs",
       "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
     },
     {
       "name": "windows-vs2019",
       "inherits": "windows-vs",
-      "displayName": "Windows (Visual Studio 2019, Win32)",
+      "displayName": "Windows (Visual Studio 2019, x64)",
       "generator": "Visual Studio 16 2019",
       "binaryDir": "${sourceDir}/build/windows-vs2019"
     }

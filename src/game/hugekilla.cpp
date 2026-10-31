@@ -28,7 +28,7 @@ void Save(char *filename);
 void Load(char *filename);
 
 LandDefs ldfs;
-#ifdef _WIN32  // Win32 window, GL context and message loop; see platform_sdl.cpp otherwise
+#ifdef HK_WIN32_NATIVE  // Win32 window, GL context and message loop; see platform_sdl.cpp otherwise
 POINT centermouse;
 HBRUSH backbrush;
 int originalscreenwidth;
@@ -667,7 +667,7 @@ LRESULT CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
     return FALSE;
 }
 
-#endif // _WIN32
+#endif // HK_WIN32_NATIVE
 
 //wrappers
 
@@ -675,7 +675,7 @@ LandDefs *GetDefs()
 {
 	return &ldfs;
 }
-#ifdef _WIN32
+#ifdef HK_WIN32_NATIVE
 HDC GetGlHDC()
 {
 	return hdc;

@@ -2,7 +2,7 @@
 // context, input and main loop. Input is translated to Windows virtual-key
 // codes so the rest of the game sees the same events as before.
 
-#ifndef _WIN32
+#ifndef HK_WIN32_NATIVE
 
 #include "StdAfx.h"
 #include "land.h"
@@ -192,7 +192,7 @@ static int KeyToVK(const SDL_Keysym &ks)
 static void KeyDown(int vk, int repeat)
 {
 	DWORD flags = repeat ? (1u << 30) : 0;
-	if (OptionsHandleKey(vk))
+	if (OptionsHandleKey(vk) || ServerSetupHandleKey(vk))
 		return;
 	if (vk == VK_ESCAPE && CloseCredits())
 		return;
@@ -222,7 +222,7 @@ static void HandleEvent(const SDL_Event &ev)
 	case SDL_WINDOWEVENT:
 		if (ev.window.event == SDL_WINDOWEVENT_SIZE_CHANGED)
 			UpdateViewport();
-		if (ev.window.event == SDL_WINDOWEVENT_FOCUS_LOST && lockedcursor == 1)
+		if (ev.window.event == SDL_WINDOWEVENT_FOCUS_LOST && lockedcursor == 1 && !getenv("HK_SHOT"))
 			LockCursor(0);
 		break;
 	case SDL_KEYDOWN:
@@ -244,6 +244,8 @@ static void HandleEvent(const SDL_Event &ev)
 	}
 	case SDL_TEXTINPUT:
 		HandleJoinScreenText(ev.text.text);
+		OptionsHandleText(ev.text.text);
+		ServerSetupHandleText(ev.text.text);
 		break;
 	case SDL_MOUSEMOTION:
 	{
@@ -374,8 +376,8 @@ int main(int argc, char **argv)
 	}
 	SDL_GL_MakeCurrent(window, glcontext);
 	SDL_GL_SetSwapInterval(vsync);
-	hWnd = window;
-	hdc = window;
+	hWnd = (HWND)window;
+	hdc = (HDC)window;
 	UpdateViewport();
 	SDL_StartTextInput();
 
@@ -414,6 +416,9 @@ int main(int argc, char **argv)
 		if (!strcmp(m, "options2")) { OpenOptions(); mousepos = Vector(-.2f, .72f, 0); OptionsClick(); }
 		if (!strcmp(m, "credits")) { mousepos = Vector(0, -.92f, 0); MenuMouseDown(); }
 		if (!strcmp(m, "join")) OpenJoinScreen();
+		if (!strcmp(m, "server")) OpenServerSetup();
+		if (!strcmp(m, "serverstart")) { OpenServerSetup(); ServerSetupHandleKey(VK_RETURN); }
+		if (!strcmp(m, "player")) { OpenOptions(); mousepos = Vector(.4f, .72f, 0); OptionsClick(); }
 	}
 
 	DWORD nexttimertick = 0;
@@ -482,4 +487,4 @@ int main(int argc, char **argv)
 	return 0;
 }
 
-#endif // !_WIN32
+#endif // !HK_WIN32_NATIVE

@@ -4,7 +4,48 @@
 #ifndef WIN32COMPAT_H
 #define WIN32COMPAT_H
 
-#ifndef _WIN32
+#ifdef _WIN32
+
+// Windows: the real Win32 API is available. Only the calls that must go
+// through SDL (the window is an SDL_Window, not an HWND) are redirected.
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
+#include <io.h>
+#include <direct.h>
+#include <stdint.h>
+#include <GL/gl.h>
+#include <GL/glu.h>
+
+#undef MessageBox
+#define SwapBuffers HK_SwapBuffers
+#define DestroyWindow HK_DestroyWindow
+#define GetClientRect HK_GetClientRect
+#define GetKeyState HK_GetKeyState
+#define GetAsyncKeyState HK_GetAsyncKeyState
+#define MessageBox HK_MessageBox
+#define BeginPaint HK_BeginPaint
+#define EndPaint HK_EndPaint
+
+char *HKPath(const char *in, char *out, size_t outsize);
+BOOL SwapBuffers(HDC dc);
+BOOL DestroyWindow(HWND wnd);
+BOOL GetClientRect(HWND wnd, RECT *rect);
+int MessageBox(HWND wnd, LPCTSTR text, LPCTSTR caption, UINT type);
+short GetKeyState(int vk);
+short GetAsyncKeyState(int vk);
+void HKSetKeyDown(int vk, int down);
+static inline HDC BeginPaint(HWND, PAINTSTRUCT *ps) { ps->hdc = 0; return 0; }
+static inline BOOL EndPaint(HWND, const PAINTSTRUCT *) { return TRUE; }
+
+typedef ULONG in_addr_t;
+#ifndef R_OK
+#define R_OK 4
+#endif
+#define access _access
+#define chdir _chdir
+
+#else // POSIX
 
 #define GL_SILENCE_DEPRECATION
 
@@ -221,6 +262,6 @@ static inline int WSACleanup() { return 0; }
 SOCKET WSASocket(int af, int type, int protocol, void *info, int group, DWORD flags);
 static inline int closesocket(SOCKET s) { return close(s); }
 
-#endif // !_WIN32
+#endif // _WIN32
 
 #endif

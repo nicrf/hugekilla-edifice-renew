@@ -4,7 +4,7 @@
 #include "winsock2.h"
 
 LRESULT CALLBACK Multiplay(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
-#ifndef _WIN32
+#ifndef HK_WIN32_NATIVE
 void OpenJoinScreen();
 int IsJoinScreenOpen();
 void JoinScreenAddGame(const char *name);

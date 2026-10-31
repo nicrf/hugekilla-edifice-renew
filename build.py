@@ -10,6 +10,7 @@ import argparse
 import os
 import platform
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -34,10 +35,15 @@ def host_os():
 OS = host_os()
 
 HINTS = {
+    # SDL2 itself is downloaded and built by CMake; these are only the toolchain
+    # and the system headers SDL needs (X11/Wayland, audio, GL).
     "macos": "  Install Xcode command line tools (xcode-select --install), then:\n"
-             "    brew install cmake sdl2 ninja",
-    "linux": "  Debian/Ubuntu: sudo apt install build-essential cmake ninja-build libsdl2-dev libglu1-mesa-dev\n"
-             "  Fedora:        sudo dnf install gcc-c++ cmake ninja-build SDL2-devel mesa-libGLU-devel",
+             "    brew install cmake ninja",
+    "linux": "  Debian/Ubuntu: sudo apt install build-essential cmake ninja-build libglu1-mesa-dev \\\n"
+             "                 libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev \\\n"
+             "                 libwayland-dev libxkbcommon-dev libasound2-dev libpulse-dev\n"
+             "  Fedora:        sudo dnf install gcc-c++ cmake ninja-build mesa-libGLU-devel libX11-devel \\\n"
+             "                 libXext-devel libXrandr-devel libXcursor-devel libXi-devel alsa-lib-devel pulseaudio-libs-devel",
     "windows": "  Install Visual Studio (Desktop development with C++ workload) and CMake\n"
                "  (CMake ships with Visual Studio; or: winget install Kitware.CMake).",
 }
@@ -120,15 +126,11 @@ def main():
         if gen:
             cfg += ["-G", gen]
         if OS == "windows" and (not gen or gen.startswith("Visual Studio")):
-            # 32-bit like the original release; EDIFICE_ARCH=x64 for a 64-bit build.
-            cfg += ["-A", os.environ.get("EDIFICE_ARCH", "Win32")]
+            # 64-bit by default; EDIFICE_ARCH=Win32 for a 32-bit build.
+            cfg += ["-A", os.environ.get("EDIFICE_ARCH", "x64")]
         cfg += ["-DCMAKE_BUILD_TYPE=" + args.config]
-        if OS == "macos" and shutil.which("brew"):
-            try:
-                prefix = subprocess.check_output(["brew", "--prefix"], universal_newlines=True).strip()
-                cfg += ["-DCMAKE_PREFIX_PATH=" + prefix]
-            except (OSError, subprocess.CalledProcessError):
-                pass
+        # Extra CMake arguments, e.g. EDIFICE_CMAKE_ARGS="-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"
+        cfg += shlex.split(os.environ.get("EDIFICE_CMAKE_ARGS", ""))
         print("+ " + " ".join(cfg), flush=True)
         if subprocess.call(cfg) != 0:
             shutil.rmtree(bdir, ignore_errors=True)  # don't keep a half-configured tree
@@ -164,7 +166,7 @@ def launch(exe_dir, exe, game_args):
     else:
         cmd = [exe] + game_args
     print("+ " + " ".join(cmd), flush=True)
-    # Win32 build reads its data from the working directory (data is copied next to the exe).
+    # The game finds data/ next to the executable (or inside the .app).
     sys.exit(subprocess.call(cmd, cwd=exe_dir))
 
 
@@ -181,7 +183,7 @@ def package(exe_dir, exe):
         if os.path.exists(out):
             os.remove(out)
         # Stage Edifice.app + docs in dist/<base>/, then zip that folder. The bundle
-        # is signed (and SDL2 copied into it) by the CMake post-build step; sign
+        # is signed by the CMake post-build step (SDL2 is linked statically); sign
         # again in case only resources changed since the last link.
         stage = os.path.join(dist, base)
         shutil.rmtree(stage, ignore_errors=True)
@@ -199,7 +201,7 @@ def package(exe_dir, exe):
         out = os.path.join(dist, base + ".zip")
         with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
             z.write(exe, base + "/Edifice.exe")
-            add_tree_zip(z, DATA, base)            # data sits next to the exe on Windows
+            add_tree_zip(z, DATA, base + "/data")  # data/ next to the exe, as on Linux
             for d in docs:
                 z.write(d, base + "/" + os.path.basename(d))
     else:

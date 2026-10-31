@@ -275,6 +275,11 @@ void LoadLandSettings(LandSettings *ls)
 	ls->numblotch=settings.GetValuei("numblotch");
 }
 
+//server setup overrides (see serversetup.cpp); the defaults keep the original random behaviour
+int hkforcedsky=-1;         //sky index from skies.ini, -1 = random
+float hkreliefscale=1;      //multiplies the hill heights of land.ini
+int hksceneryoverride=-1;   //number of scenery objects, -1 = land.ini
+
 //loads a sky texture
 
 void LoadSky()
@@ -283,6 +288,7 @@ void LoadSky()
 	skysets.Load("skies.ini");
 	int numskies=skysets.GetValuei("numskies");
 	int sky=RND*numskies;
+	if(hkforcedsky>=0&&hkforcedsky<numskies) sky=hkforcedsky;
 	char title[300];
 	strcpy(title,"sky");
 	itoa(sky,&title[strlen(title)],10);
@@ -371,6 +377,9 @@ void RandomLand(LandDefs &ldfs)
 	srand( (unsigned)time( NULL ) );
 	LandSettings ls;
 	LoadLandSettings(&ls);
+	ls.hrmin*=hkreliefscale;
+	ls.hrnum*=hkreliefscale;
+	if(hksceneryoverride>=0) ls.numscenery=hksceneryoverride;
 	ldfs.numdefs=ls.defsmin+ls.defsnum*RND;
 	if(ldfs.numdefs>=NUMDEF) ldfs.numdefs=NUMDEF-1;
 	for(int i=0;i<ldfs.numdefs;i++)

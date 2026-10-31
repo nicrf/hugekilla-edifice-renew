@@ -1,7 +1,7 @@
 //options screen opened from the main menu: key bindings, video and audio settings.
 //everything is applied immediately and written back to control.ini when closed.
 
-#ifndef _WIN32
+#ifndef HK_WIN32_NATIVE
 
 #include "StdAfx.h"
 #include "redrawing.h"
@@ -19,9 +19,11 @@ void HKSetVSync(int on);
 int HKGetVSync();
 
 int showoptions;
-static int optionstab;     //0 controls, 1 video/audio
+static int optionstab;     //0 controls, 1 video/audio, 2 player
 static int capturing=-1;   //binding row waiting for a key
 static float volume=1;
+static char playername[32];
+static int editingname;
 
 struct Binding
 {
@@ -114,11 +116,11 @@ static const char *KeyName(int vk)
 	return 0;
 }
 
-//replaces "key=value" in control.ini, or appends it
+//replaces "key=value" lines in an ini file of the data folder, or appends them
 
-static void SetIniValues(const char *keys[],const char *values[],int count)
+void SetIniValues(const char *filename,const char *keys[],const char *values[],int count)
 {
-	HANDLE file=CreateFile("control.ini",GENERIC_READ,0,0,OPEN_EXISTING,0,0);
+	HANDLE file=CreateFile(filename,GENERIC_READ,0,0,OPEN_EXISTING,0,0);
 	char *data=0;
 	DWORD len=0;
 	if(file!=INVALID_HANDLE_VALUE)
@@ -171,7 +173,7 @@ static void SetIniValues(const char *keys[],const char *values[],int count)
 			outlen+=sprintf(&out[outlen],"\r\n");
 		outlen+=sprintf(&out[outlen],"%s=%s\r\n",keys[k],values[k]);
 	}
-	file=CreateFile("control.ini",GENERIC_WRITE,0,0,CREATE_ALWAYS,0,0);
+	file=CreateFile(filename,GENERIC_WRITE,0,0,CREATE_ALWAYS,0,0);
 	if(file!=INVALID_HANDLE_VALUE)
 	{
 		DWORD written;
@@ -211,9 +213,13 @@ static void SaveOptions()
 		values[n]=numbers[i];
 		n++;
 	}
-	SetIniValues(keys,values,n);
+	SetIniValues("control.ini",keys,values,n);
 	for(int i=0;i<firstnumber;i++)
 		free((void *)values[i]);
+
+	const char *netkeys[1]={"name"};
+	const char *netvalues[1]={playername};
+	SetIniValues("net.ini",netkeys,netvalues,1);
 }
 
 //reads the settings LoadControls doesn't know about (called at startup)
@@ -233,13 +239,50 @@ void OpenOptions()
 {
 	showoptions=1;
 	capturing=-1;
+	editingname=0;
+	CfgFile net;
+	playername[0]=0;
+	if(net.Load("net.ini")&&net.GetValues("name"))
+		CopyIniString(playername,net.GetValues("name"),sizeof(playername));
+	if(!playername[0]) strcpy(playername,"Player");
 }
 
 static void CloseOptions()
 {
 	showoptions=0;
 	capturing=-1;
+	editingname=0;
+	if(!playername[0]) strcpy(playername,"Player");
 	SaveOptions();
+}
+
+//copies an ini value (ends at the line end) and keeps printable ASCII only
+
+void CopyIniString(char *dst,const char *src,int size)
+{
+	int n=0;
+	for(;*src&&*src!='\r'&&*src!='\n'&&n<size-1;src++)
+		if(*src>=32&&*src<127) dst[n++]=*src;
+	dst[n]=0;
+}
+
+//appends typed text to a field: printable ASCII only, never '=' (ini separator)
+
+void AppendText(char *field,int size,const char *text)
+{
+	int len=strlen(field);
+	for(;*text&&len<size-1;text++)
+	{
+		if(*text<32||*text>=127||*text=='=') continue;
+		field[len++]=*text;
+	}
+	field[len]=0;
+}
+
+void OptionsHandleText(const char *text)
+{
+	if(showoptions&&editingname)
+		AppendText(playername,sizeof(playername),text);
 }
 
 int IsOptionsOpen()
@@ -310,6 +353,13 @@ int OptionsHandleKey(int vk)
 		}
 		return 1;
 	}
+	if(editingname)
+	{
+		int len=strlen(playername);
+		if(vk==VK_BACK&&len) playername[len-1]=0;
+		if(vk==VK_RETURN||vk==VK_ESCAPE||vk==VK_TAB) editingname=0;
+		return 1;
+	}
 	if(vk==VK_ESCAPE) CloseOptions();
 	return 1;
 }
@@ -321,10 +371,17 @@ void OptionsClick()
 		OptionsHandleKey(VK_LBUTTON);
 		return;
 	}
+	editingname=0;
 	if(Inside(-.85f,.68f,-.4f,.78f)) { optionstab=0; return; }
-	if(Inside(-.3f,.68f,.3f,.78f)) { optionstab=1; return; }
+	if(Inside(-.3f,.68f,.2f,.78f)) { optionstab=1; return; }
+	if(Inside(.3f,.68f,.6f,.78f)) { optionstab=2; return; }
 	if(Inside(.55f,-.88f,.9f,-.78f)) { CloseOptions(); return; }
 	if(mousepos.x<LABELX||mousepos.x>PANELX2) return;
+	if(optionstab==2)
+	{
+		if(RowAt(mousepos.y,1)==0) editingname=1;
+		return;
+	}
 	if(optionstab==0)
 	{
 		int row=RowAt(mousepos.y,NUMBINDINGS);
@@ -368,9 +425,22 @@ void DrawOptions()
 
 	TabText(-.85f,"Controls",optionstab==0);
 	TabText(-.3f,"Video/Audio",optionstab==1);
+	TabText(.3f,"Player",optionstab==2);
 
 	char text[100];
-	if(optionstab==0)
+	if(optionstab==2)
+	{
+		int hover=Inside(LABELX,RowY(0)-.01f,PANELX2,RowY(0)+ROWHEIGHT-.01f);
+		glColor3f(hover?1:.8f,hover?1:.8f,hover?1:.8f);
+		DrawText(LABELX,RowY(0),"Name");
+		sprintf(text,"%s%s",playername,editingname?"_":"");
+		if(editingname) glColor3f(1,1,.5f);
+		else glColor3f(1,1,1);
+		DrawText(VALUEX,RowY(0),text);
+		glColor3f(.6f,.6f,.6f);
+		DrawText(LABELX,-.84f,"Click the name to edit it");
+	}
+	else if(optionstab==0)
 	{
 		for(int i=0;i<NUMBINDINGS;i++)
 		{
@@ -410,4 +480,4 @@ void DrawOptions()
 	glColor3f(1,1,1);
 }
 
-#endif // !_WIN32
+#endif // !HK_WIN32_NATIVE

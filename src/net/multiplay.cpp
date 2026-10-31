@@ -19,8 +19,10 @@
 #include "gameplay.h"
 #include "sock.h"
 #define MAXLOCALLIST 128
+#ifndef HK_WIN32_NATIVE
 #ifndef _WIN32
 #include <netdb.h>
+#endif
 #include <SDL.h>
 #endif
 
@@ -730,7 +732,7 @@ void ClientLoop()
 					Info *info=(Info *)&msg;
 					locallistaddr[numlocallistaddr]=source;
 					numlocallistaddr++;
-#ifdef _WIN32
+#ifdef HK_WIN32_NATIVE
 					SendDlgItemMessage(dlghwnd,IDC_LOCALGAMES,LB_ADDSTRING,0,(long)info->name);
 #else
 					JoinScreenAddGame(info->name);
@@ -912,7 +914,7 @@ void SockLoop()
 
 //window message handler for the connect dialog
 
-#ifdef _WIN32
+#ifdef HK_WIN32_NATIVE
 LRESULT CALLBACK Multiplay(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
 	
@@ -1232,7 +1234,7 @@ void DrawJoinScreen()
 	glColor3f(1,1,1);
 }
 
-#endif // _WIN32
+#endif // HK_WIN32_NATIVE
 
 int GetNumPlayers()
 {

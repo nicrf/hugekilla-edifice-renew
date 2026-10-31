@@ -2,7 +2,7 @@
 //are numbered slots, each slot is one buffer that can be playing once at a time.
 //3d slots are attenuated and panned against the listener like DirectSound3D.
 
-#ifndef _WIN32
+#ifndef HK_WIN32_NATIVE
 
 #include "StdAfx.h"
 #include "vector.h"
@@ -311,4 +311,4 @@ void LoadSounds()
 	LoadSound("sound\\blueteamwins.wav",BLUETEAMWINS,0);
 }
 
-#endif // !_WIN32
+#endif // !HK_WIN32_NATIVE

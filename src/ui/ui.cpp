@@ -165,7 +165,7 @@ void DrawMenu()
 		glColor3f(.7,.7,.7);
 	DrawText(CREDITSX1+.06f,CREDITSY1+.015f,"Credits");
 	glColor3f(1,1,1);
-#ifndef _WIN32
+#ifndef HK_WIN32_NATIVE
 	if(OverOptionsButton()&&!showcredits&&!IsOptionsOpen())
 		glColor3f(1,1,1);
 	else
@@ -173,10 +173,11 @@ void DrawMenu()
 	DrawText(OPTIONSX1+.06f,CREDITSY1+.015f,"Options");
 	glColor3f(1,1,1);
 	DrawOptions();
+	DrawServerSetup();
 #endif
 	if(showcredits)
 		DrawCredits();
-#ifndef _WIN32
+#ifndef HK_WIN32_NATIVE
 	DrawJoinScreen();
 #endif
 
@@ -187,10 +188,15 @@ void DrawMenu()
 void MenuMouseDown()
 {
 	if(CloseCredits()) return;
-#ifndef _WIN32
+#ifndef HK_WIN32_NATIVE
 	if(IsOptionsOpen())
 	{
 		OptionsClick();
+		return;
+	}
+	if(IsServerSetupOpen())
+	{
+		ServerSetupClick();
 		return;
 	}
 	if(OverOptionsButton())
@@ -204,7 +210,7 @@ void MenuMouseDown()
 		showcredits=1;
 		return;
 	}
-#ifndef _WIN32
+#ifndef HK_WIN32_NATIVE
 	if(IsJoinScreenOpen()) return;
 #endif
 	int over=ButtonOver();
@@ -221,11 +227,15 @@ void HandleButton(int handler)
 	case 0:  //error
 		break;
 	case 1:  //start server
+#ifndef HK_WIN32_NATIVE
+		OpenServerSetup();
+#else
 		StartServer();
+#endif
 		break;
 	case 2:  //play
 		if(GetLocalPlayer()->playstate==0)
-#ifdef _WIN32
+#ifdef HK_WIN32_NATIVE
 			DialogBox(hInst, (LPCTSTR)IDD_MULTIPLAY, hWnd, (DLGPROC)Multiplay);
 #else
 			OpenJoinScreen();

@@ -22,6 +22,7 @@
 #include <memory.h>
 #include <tchar.h>
 #include <stdint.h>
+#include "win32compat.h"	// SDL redirects (Windows) / Win32 emulation (POSIX)
 #ifdef _WIN32
 #include <GL/gl.h>
 #include <GL/glu.h>

@@ -1,13 +1,16 @@
-// POSIX/SDL2 implementations of the Win32 calls declared in win32compat.h.
-
-#ifndef _WIN32
+// SDL2 implementations of the Win32 calls declared in win32compat.h. On
+// POSIX they replace the Win32 API; on Windows only the few calls that must
+// go through SDL (presenting, quitting, message boxes, keyboard state).
 
 #include "win32compat.h"
 #include <SDL.h>
+#ifndef _WIN32
 #include <dirent.h>
 #include <fnmatch.h>
 #include <sys/stat.h>
+#endif
 
+#ifndef _WIN32
 char *itoa(int value, char *str, int radix)
 {
 	char tmp[40];
@@ -283,6 +286,20 @@ BOOL DeleteObject(void *obj)
 	return TRUE;
 }
 
+#else
+
+char *HKPath(const char *in, char *out, size_t outsize)
+{
+	// Windows accepts both separators and ignores case: copy as is.
+	size_t i = 0;
+	for (; in[i] && i + 1 < outsize; i++)
+		out[i] = in[i];
+	out[i] = 0;
+	return out;
+}
+
+#endif // !_WIN32
+
 // Misc --------------------------------------------------------------------
 
 int MessageBox(HWND, LPCTSTR text, LPCTSTR caption, UINT type)
@@ -293,6 +310,7 @@ int MessageBox(HWND, LPCTSTR text, LPCTSTR caption, UINT type)
 	return 1;
 }
 
+#ifndef _WIN32
 BOOL QueryPerformanceFrequency(LARGE_INTEGER *freq)
 {
 	freq->QuadPart = (int64_t)SDL_GetPerformanceFrequency();
@@ -314,6 +332,8 @@ void Sleep(DWORD ms)
 {
 	SDL_Delay(ms);
 }
+
+#endif // !_WIN32
 
 // Debug aid: HK_SHOT=file.ppm saves the HK_SHOT_FRAME-th frame (default 120).
 static void DebugScreenshot()
@@ -370,6 +390,7 @@ short GetAsyncKeyState(int vk)
 	return GetKeyState(vk);
 }
 
+#ifndef _WIN32
 // Sockets -----------------------------------------------------------------
 
 SOCKET WSASocket(int af, int type, int protocol, void *, int, DWORD)
