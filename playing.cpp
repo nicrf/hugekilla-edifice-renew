@@ -498,7 +498,8 @@ void Playloop()
 	if(sf>80) sf=0;
 	numsteps=((float)sf)*(float)2+1;
 	sf/=(float)numsteps;
-	for(int i=0;i<numsteps;i++)
+	int i;
+	for(i=0;i<numsteps;i++)
 	{
 		curtime=((float)i/numsteps)*targtime+((float)1-(float)i/numsteps)*targlasttime;
 		lasttime=curtime;
@@ -543,6 +544,7 @@ void Play()
 			mychange=0;
 			mxchange=0; 
 		}
+		mspeed*=controls.mousesensitivity;
 		mspeed/=powf(1.05,cur->fzoom);
 		cur->fwd-=CrossProduct(Vector(0,1,0),cur->fwd)*mxchange*mspeed;
 		cur->tilt-=CrossProduct(Vector(0,0,1),cur->tilt)*mychange*mspeed;
@@ -587,7 +589,8 @@ void Play()
 			cur->pos=Vector(LANDGRIDSIZE+RND*LANDGRIDSIZE,100,LANDGRIDSIZE+RND*LANDGRIDSIZE);
 			cur->vel=Vector(0,0,0);
 			cur->life=100;
-			for(int i=0;i<20;i++)
+			int i;
+			for(i=0;i<20;i++)
 			{
 				cur->ammoingun[i]=GetAmmoHold(i);
 				cur->ammoreserves[i]=500;
@@ -1264,6 +1267,10 @@ int TextToKey(char *text)
 		{
 			return text[0];
 		}
+		if(text[0]>='0'&&text[0]<='9')
+		{
+			return text[0];
+		}
 	}
 	
 	if(stricmp(text,"alt")==0)
@@ -1322,6 +1329,8 @@ void LoadControls()
 	CfgFile controlini;
 	controlini.Load("control.ini");
 	controls.mousereverse=controlini.GetValuei("mousereverse");
+	controls.mousesensitivity=controlini.GetValuef("mousesensitivity");
+	if(controls.mousesensitivity<=0) controls.mousesensitivity=1;
 	controls.forward=TextToKey(controlini.GetValues("forward"));
 	controls.back=TextToKey(controlini.GetValues("back"));
 	controls.lstrafe=TextToKey(controlini.GetValues("lstrafe"));

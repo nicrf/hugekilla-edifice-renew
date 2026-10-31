@@ -10,7 +10,7 @@ public:
 	Vector(const float &xn,const float &yn,const float &zn);
 };
 
-inline Vector& operator+=(Vector &a,Vector &b)
+inline Vector& operator+=(Vector &a,const Vector &b)
 {
 	a.x+=b.x;
 	a.y+=b.y;
@@ -18,14 +18,14 @@ inline Vector& operator+=(Vector &a,Vector &b)
 	return a;
 }
 
-inline Vector& operator-=(Vector &a,Vector &b)
+inline Vector& operator-=(Vector &a,const Vector &b)
 {
 	a.x-=b.x;
 	a.y-=b.y;
 	a.z-=b.z;
 	return a;
 }
-inline Vector& operator*=(Vector &a,Vector &b)
+inline Vector& operator*=(Vector &a,const Vector &b)
 {
 	a.x*=b.x;
 	a.y*=b.y;
@@ -48,7 +48,7 @@ inline Vector& operator/=(Vector &a,float b)
 	return a;
 }
 
-inline Vector operator+(Vector &a,Vector &b)
+inline Vector operator+(const Vector &a,const Vector &b)
 {
 	Vector ret;
 	ret.x=a.x+b.x;
@@ -56,7 +56,7 @@ inline Vector operator+(Vector &a,Vector &b)
 	ret.z=a.z+b.z;
 	return ret;
 }
-inline Vector operator-(Vector &a,Vector &b)
+inline Vector operator-(const Vector &a,const Vector &b)
 {
 	Vector ret;
 	ret.x=a.x-b.x;
@@ -64,7 +64,7 @@ inline Vector operator-(Vector &a,Vector &b)
 	ret.z=a.z-b.z;
 	return ret;
 }
-inline Vector operator*(Vector &a,Vector &b)
+inline Vector operator*(const Vector &a,const Vector &b)
 {
 	Vector ret;
 	ret.x=a.x*b.x;
@@ -73,7 +73,7 @@ inline Vector operator*(Vector &a,Vector &b)
 	return ret;
 }
 
-inline Vector operator*(Vector &a,float b)
+inline Vector operator*(const Vector &a,float b)
 {
 	Vector ret;
 	ret.x=a.x*b;
@@ -82,7 +82,7 @@ inline Vector operator*(Vector &a,float b)
 	return ret;
 }
 
-inline Vector operator/(Vector &a,float b)
+inline Vector operator/(const Vector &a,float b)
 {
 	Vector ret;
 	ret.x=a.x/b;
@@ -91,7 +91,7 @@ inline Vector operator/(Vector &a,float b)
 	return ret;
 }
 
-inline Vector operator*(float b,Vector &a)
+inline Vector operator*(float b,const Vector &a)
 {
 	Vector ret;
 	ret.x=a.x*b;
@@ -100,7 +100,7 @@ inline Vector operator*(float b,Vector &a)
 	return ret;
 }
 
-inline Vector operator/(float b,Vector &a)
+inline Vector operator/(float b,const Vector &a)
 {
 	Vector ret;
 	ret.x=b/a.x;
@@ -109,17 +109,17 @@ inline Vector operator/(float b,Vector &a)
 	return ret;
 }
 
-inline float DotProduct(Vector &a,Vector &b)
+inline float DotProduct(const Vector &a,const Vector &b)
 {
 	return a.x*b.x+a.y*b.y+a.z*b.z;
 }
 
-inline float Magnitude(Vector &a)
+inline float Magnitude(const Vector &a)
 {
 	return (float)sqrt(a.x*a.x+a.y*a.y+a.z*a.z);
 }
 
-inline Vector VectMult(Vector &a,Vector &x,Vector &y,Vector &z)
+inline Vector VectMult(const Vector &a,const Vector &x,const Vector &y,const Vector &z)
 {
 	Vector ret;
 	ret=a.x*x;
@@ -128,7 +128,7 @@ inline Vector VectMult(Vector &a,Vector &x,Vector &y,Vector &z)
 	return ret;
 }
 
-inline Vector Normalize(Vector &a)
+inline Vector Normalize(const Vector &a)
 {
 	Vector ret;
 	float mag=Magnitude(a);
@@ -143,7 +143,7 @@ inline Vector Normalize(Vector &a)
 	return ret;
 }
 
-inline Vector CrossProduct(Vector &a,Vector &b)
+inline Vector CrossProduct(const Vector &a,const Vector &b)
 {
 	Vector ret;
 	ret.x=a.y*b.z-a.z*b.y;
@@ -153,7 +153,7 @@ inline Vector CrossProduct(Vector &a,Vector &b)
 }
 
 // get a vector perpendicular to a in the direction of b
-inline Vector GetRight(Vector &a,Vector &b)
+inline Vector GetRight(const Vector &a,const Vector &b)
 {
 	Vector ret;
 	ret=Normalize(CrossProduct(CrossProduct(a,b),a));

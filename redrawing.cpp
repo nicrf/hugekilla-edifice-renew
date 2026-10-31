@@ -397,7 +397,8 @@ void DrawCloudBox(Vector pos)
 	float fx;
 	float of=(float)1/repeats;
 	
-	for(int x=-repeats;x<repeats;x++)
+	int x;
+	for(x=-repeats;x<repeats;x++)
 	{
 		glBegin(GL_TRIANGLE_STRIP);
 		fx=(float)x/repeats;
@@ -716,7 +717,8 @@ void DrawBlocks(int px,int py,int pz,int size)
 	if(color<.3)color=.3;
 	TC5=color;
 	
-	for(int i=0;i<32;i++)
+	int i;
+	for(i=0;i<32;i++)
 	{
 		numblockbuf[i]=0;
 	}
@@ -1340,7 +1342,8 @@ void Redraw()
 		glColor3f(1,1,1);
 	}
 	itoa(curtime&999,tmptext,10);
-	for(int i=0;i<consolepartvisible;i++)
+	int i;
+	for(i=0;i<consolepartvisible;i++)
 	{
 		DrawText(- 1,1-(consolepartvisible-i)*.1,consoletext[i]);
 	}
@@ -1730,7 +1733,8 @@ void Draw(float offset)
 	
 	Vector pos,front,top,right;
 	Vector gunup,partup,partright,partfront;
-	for(int i=0;i<GetNumPlayers();i++)  //draws all the players
+	int i;
+	for(i=0;i<GetNumPlayers();i++)  //draws all the players
 	{
 		Player *cur=GetPlayer(i);
 		if(cur->playstate==10)

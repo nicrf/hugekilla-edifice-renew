@@ -19,6 +19,10 @@
 #include "gameplay.h"
 #include "sock.h"
 #define MAXLOCALLIST 128
+#ifndef _WIN32
+#include <netdb.h>
+#include <SDL.h>
+#endif
 
 extern int consolevisible;
 extern DWORD curtime;
@@ -79,10 +83,11 @@ SOCKADDR_IN MakeSockAddr(char a1,char a2,char a3,char a4,WORD port)
 	//ZeroMemory(&addr,sizeof(addr));
 	addr.sin_family=AF_INET;
 	addr.sin_port=port;
-	addr.sin_addr.S_un.S_un_b.s_b1=a1;
-	addr.sin_addr.S_un.S_un_b.s_b2=a2;
-	addr.sin_addr.S_un.S_un_b.s_b3=a3;
-	addr.sin_addr.S_un.S_un_b.s_b4=a4;
+	unsigned char *b=(unsigned char *)&addr.sin_addr;
+	b[0]=a1;
+	b[1]=a2;
+	b[2]=a3;
+	b[3]=a4;
 	return addr;
 }
 
@@ -307,7 +312,8 @@ void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pn
 		case RECEIVEDBLOCKINFO:
 			{
 				SimpleMessage joingame=MakeSimple(JOINGAME,pnum,0);
-				for(int i=1;i<numplayers;i++)
+				int i;
+				for(i=1;i<numplayers;i++)
 				{
 					clientsock[i].SendReliable(&joingame,sizeof(joingame),0);
 				}
@@ -416,7 +422,8 @@ void ServerLoop()
 				{
 					curport=netsettings.datasendport;
 				}
-				for(int i=0;i<numplayers;i++)
+				int i;
+				for(i=0;i<numplayers;i++)
 				{
 					if(clientsock[i].dest.sin_port==curport)
 					{
@@ -495,7 +502,8 @@ void ServerLoop()
 		}
 	}
 	
-	for(int i=1;i<numplayers;i++)
+	int i;
+	for(i=1;i<numplayers;i++)
 	{
 		clientsock[i].CheckReliableResend();
 		while(clientsock[i].Receive(&msg,&source))
@@ -712,7 +720,8 @@ void ClientLoop()
 			case INFO:
 				{
 					if(numlocallistaddr==MAXLOCALLIST) break;
-					for(int i=0;i<numlocallistaddr;i++)
+					int i;
+					for(i=0;i<numlocallistaddr;i++)
 					{
 						if(locallistaddr[i].sin_addr.s_addr==source.sin_addr.s_addr&&
 							locallistaddr[i].sin_port==source.sin_port) break;
@@ -721,7 +730,11 @@ void ClientLoop()
 					Info *info=(Info *)&msg;
 					locallistaddr[numlocallistaddr]=source;
 					numlocallistaddr++;
+#ifdef _WIN32
 					SendDlgItemMessage(dlghwnd,IDC_LOCALGAMES,LB_ADDSTRING,0,(long)info->name);
+#else
+					JoinScreenAddGame(info->name);
+#endif
 					ConsoleDisplayText("received info");
 					break;
 				}
@@ -899,6 +912,7 @@ void SockLoop()
 
 //window message handler for the connect dialog
 
+#ifdef _WIN32
 LRESULT CALLBACK Multiplay(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
 	
@@ -997,6 +1011,228 @@ LRESULT CALLBACK Multiplay(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
 	}
     return FALSE;
 }
+#else
+
+//in-game replacement for the connect dialog (drawn by DrawMenu)
+
+int joinscreen;
+char joinip[64];
+int joinselected;
+int joinipedited;
+char localgamenames[MAXLOCALLIST][100];
+
+static void JoinScreenRefresh()
+{
+	infosock.dest=MakeSockAddr(255,255,255,255,netsettings.infosendport);
+	SimpleMessage simple;
+	simple.type=SIMPLE;
+	simple.type2=REQUESTINFO;
+	infosock.Send(&simple,sizeof(simple));
+	infosock.Flush();
+	numlocallistaddr=0;
+	joinselected=0;
+	ConsoleDisplayText("Sent info request");
+}
+
+//asks a server for its info; it shows up in the list when it answers
+
+static void JoinScreenQueryIP()
+{
+	datasock.ResetReliable();
+	infosock.dest=MakeSockAddr(255,255,255,255,netsettings.infosendport);
+	in_addr_t addr=inet_addr(joinip);
+	if(addr==INADDR_NONE)
+	{
+		addrinfo hints,*res=0;
+		memset(&hints,0,sizeof(hints));
+		hints.ai_family=AF_INET;
+		hints.ai_socktype=SOCK_DGRAM;
+		if(getaddrinfo(joinip,0,&hints,&res)!=0||!res)
+		{
+			ConsoleDisplayText("Unknown host");
+			return;
+		}
+		addr=((sockaddr_in *)res->ai_addr)->sin_addr.s_addr;
+		freeaddrinfo(res);
+	}
+	infosock.dest.sin_addr.s_addr=addr;
+	SimpleMessage simple;
+	simple.type=SIMPLE;
+	simple.type2=REQUESTINFO;
+	infosock.Send(&simple,sizeof(simple));
+	infosock.Flush();
+	numlocallistaddr=0;
+	joinselected=0;
+	ConsoleDisplayText("Sent info request");
+}
+
+static void JoinScreenJoin()
+{
+	if(joinselected<0||joinselected>=numlocallistaddr) return;
+	datasock.ResetReliable();
+	infosock.dest=locallistaddr[joinselected];
+	RequestEnter req;
+	req.type=REQUESTENTER;
+	req.namelen=strlen(netsettings.playername);
+	strcpy(req.name,netsettings.playername);
+	infosock.Send(&req,2+req.namelen+1);
+	infosock.Flush();
+	connected=0;
+	GetLocalPlayer()->playstate=1;
+	GetLocalPlayer()->timeout=curtime+2000;
+	joinscreen=0;
+	ConsoleDisplayText("Sent connection request");
+}
+
+void OpenJoinScreen()
+{
+	LoadNetSettings();
+	if(!infosock.sock)
+	{
+		infosock.sock=WSASocket(AF_INET,SOCK_DGRAM,0,0,0,WSA_FLAG_OVERLAPPED);
+		SOCKADDR_IN self=MakeSockAddr(0,0,0,0,netsettings.infosendport);
+		bind(infosock.sock,(SOCKADDR *)&self,sizeof(self));
+		BOOL broadcast=TRUE;
+		setsockopt(infosock.sock,SOL_SOCKET,SO_BROADCAST,(char *)&broadcast,sizeof(broadcast));
+	}
+	joinscreen=1;
+	JoinScreenRefresh();
+}
+
+static void CloseJoinScreen()
+{
+	joinscreen=0;
+	GetLocalPlayer()->playstate=0;
+	if(infosock.sock)
+	{
+		closesocket(infosock.sock);
+		infosock.sock=0;
+	}
+}
+
+int IsJoinScreenOpen()
+{
+	return joinscreen;
+}
+
+void JoinScreenAddGame(const char *name)
+{
+	if(numlocallistaddr<1||numlocallistaddr>MAXLOCALLIST) return;
+	strncpy(localgamenames[numlocallistaddr-1],name,99);
+	localgamenames[numlocallistaddr-1][99]=0;
+}
+
+//returns 1 when the key was used by the join screen
+
+int HandleJoinScreenKey(int sdlkey)
+{
+	if(!joinscreen) return 0;
+	switch(sdlkey)
+	{
+	case 27:  //escape
+		CloseJoinScreen();
+		break;
+	case '\r':
+	case 0x40000058:  //keypad enter
+		if(joinipedited&&joinip[0])
+		{
+			joinipedited=0;
+			JoinScreenQueryIP();
+		}
+		else
+			JoinScreenJoin();
+		break;
+	case '\b':
+		{
+			int len=strlen(joinip);
+			if(len) joinip[len-1]=0;
+			joinipedited=1;
+		}
+		break;
+	case 0x4000003E:  //F5
+		JoinScreenRefresh();
+		break;
+	case 0x40000052:  //up
+		if(joinselected>0) joinselected--;
+		break;
+	case 0x40000051:  //down
+		if(joinselected<numlocallistaddr-1) joinselected++;
+		break;
+	case 'v':
+		if(SDL_GetModState()&(KMOD_GUI|KMOD_CTRL))
+		{
+			char *clip=SDL_GetClipboardText();
+			if(clip)
+			{
+				strncpy(joinip,clip,sizeof(joinip)-1);
+				joinip[sizeof(joinip)-1]=0;
+				joinipedited=1;
+				SDL_free(clip);
+			}
+		}
+		break;
+	}
+	return 1;
+}
+
+void HandleJoinScreenText(const char *text)
+{
+	if(!joinscreen) return;
+	if(SDL_GetModState()&(KMOD_GUI|KMOD_CTRL)) return;
+	for(;*text;text++)
+	{
+		char c=*text;
+		int len=strlen(joinip);
+		if(len>=(int)sizeof(joinip)-1) break;
+		if((c>='0'&&c<='9')||(c>='a'&&c<='z')||(c>='A'&&c<='Z')||c=='.'||c=='-')
+		{
+			joinip[len]=c;
+			joinip[len+1]=0;
+			joinipedited=1;
+		}
+	}
+}
+
+void DrawJoinScreen()
+{
+	if(!joinscreen) return;
+	glDisable(GL_TEXTURE_2D);
+	glColor4f(0,0,0,.75f);
+	glBegin(GL_QUADS);
+	glVertex2f(-.1f,-.8f);
+	glVertex2f(.99f,-.8f);
+	glVertex2f(.99f,.6f);
+	glVertex2f(-.1f,.6f);
+	glEnd();
+	glEnable(GL_TEXTURE_2D);
+	glColor3f(1,1,1);
+	DrawText(-.05f,.5f,"Multiplayer Game");
+	DrawText(-.05f,.35f,"Internet game IP:");
+	char line[200];
+	snprintf(line,sizeof(line),"%s_",joinip);
+	glColor3f(1,1,.5f);
+	DrawText(-.05f,.27f,line);
+	glColor3f(1,1,1);
+	DrawText(-.05f,.12f,"Games found:");
+	if(numlocallistaddr==0)
+	{
+		glColor3f(.6f,.6f,.6f);
+		DrawText(-.05f,.04f,"(searching...)");
+	}
+	for(int i=0;i<numlocallistaddr&&i<8;i++)
+	{
+		if(i==joinselected) glColor3f(1,1,.5f);
+		else glColor3f(.8f,.8f,.8f);
+		snprintf(line,sizeof(line),"%s %s",i==joinselected?">":" ",localgamenames[i]);
+		DrawText(-.05f,.04f-i*.08f,line);
+	}
+	glColor3f(.6f,.6f,.6f);
+	DrawText(-.05f,-.6f,"Enter: look up / join");
+	DrawText(-.05f,-.68f,"F5: LAN    Esc: back");
+	glColor3f(1,1,1);
+}
+
+#endif // _WIN32
 
 int GetNumPlayers()
 {
@@ -1240,7 +1476,8 @@ void ReceiveBlockBuffer(char *buf,int pnum)
 	int pos=0;
 	DWORD numblocks=*(DWORD *)&buf[1];
 	pos=5;
-	for(int i=0;i<numblocks;i++)
+	int i;
+	for(i=0;i<numblocks;i++)
 	{
 		char x,y,z,type,team,top,side,bottom,del;
 		x=buf[pos];
@@ -1660,7 +1897,8 @@ void CreateInstallation(Vector pos,char team)
 {
 	if(!server) return;
 	ServerObject *cur=0;
-	for(int i=0;i<MAXSERVEROBJS;i++)
+	int i;
+	for(i=0;i<MAXSERVEROBJS;i++)
 	if(!sobject[i].type)
 	{
 		cur=&sobject[i];

@@ -145,7 +145,8 @@ void LoadSpriteTextures()
 			strcat(fullfilename,fd.cFileName);
 			char rawfullfilename[300];
 			strcpy(rawfullfilename,fullfilename);
-			for(int i=strlen(rawfullfilename);i>=0;i--)
+			int i;
+			for(i=strlen(rawfullfilename);i>=0;i--)
 			{
 				if(rawfullfilename[i]=='.')
 					break;

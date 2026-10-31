@@ -10,6 +10,69 @@
 Button button[50];
 int numbuttons;
 int uicurmenu;
+int showcredits;
+extern Vector mousepos;
+
+//text button that opens the credits screen
+#define CREDITSX1 -.1f
+#define CREDITSY1 -.97f
+#define CREDITSX2 .3f
+#define OPTIONSX1 -.6f
+#define OPTIONSX2 -.2f
+#define CREDITSY2 -.87f
+
+static int OverOptionsButton()
+{
+	return mousepos.x>OPTIONSX1&&mousepos.x<OPTIONSX2&&mousepos.y>CREDITSY1&&mousepos.y<CREDITSY2;
+}
+
+static int OverCreditsButton()
+{
+	return mousepos.x>CREDITSX1&&mousepos.x<CREDITSX2&&mousepos.y>CREDITSY1&&mousepos.y<CREDITSY2;
+}
+
+//returns 1 if the credits screen was open
+
+int CloseCredits()
+{
+	int was=showcredits;
+	showcredits=0;
+	return was;
+}
+
+static void DrawCredits()
+{
+	glDisable(GL_TEXTURE_2D);
+	glColor4f(0,0,0,.85f);
+	glBegin(GL_QUADS);
+	glVertex2f(-.9f,-.85f);
+	glVertex2f(.9f,-.85f);
+	glVertex2f(.9f,.75f);
+	glVertex2f(-.9f,.75f);
+	glEnd();
+	glEnable(GL_TEXTURE_2D);
+	float y=.62f;
+	glColor3f(1,1,.5f);
+	DrawText(-.8f,y,"Edifice (HugeKilla) - Credits"); y-=.16f;
+	glColor3f(.7f,.7f,.7f);
+	DrawText(-.8f,y,"Original authors"); y-=.1f;
+	glColor3f(1,1,1);
+	DrawText(-.8f,y,"Programming: Nelson Planting"); y-=.08f;
+	DrawText(-.8f,y,"Models/Graphics: John Thomas"); y-=.16f;
+	glColor3f(.7f,.7f,.7f);
+	DrawText(-.8f,y,"License"); y-=.1f;
+	glColor3f(1,1,1);
+	DrawText(-.8f,y,"GNU LGPL v3 (see license.txt)"); y-=.08f;
+	DrawText(-.8f,y,"sourceforge.net/p/hugekilla"); y-=.16f;
+	glColor3f(.7f,.7f,.7f);
+	DrawText(-.8f,y,"Ports"); y-=.1f;
+	glColor3f(1,1,1);
+	DrawText(-.8f,y,"macOS/SDL2 port based on the"); y-=.08f;
+	DrawText(-.8f,y,"original source code"); y-=.16f;
+	glColor3f(.6f,.6f,.6f);
+	DrawText(-.8f,-.78f,"Click or press Esc to close");
+	glColor3f(1,1,1);
+}
 
 extern Vector mousepos;
 
@@ -96,6 +159,26 @@ void DrawMenu()
 	glColor3f(1,1,1);
 	if(GetLocalPlayer()->playstate!=0)
 		DrawText(-.8,.8,"Press escape to resume game");
+	if(OverCreditsButton()&&!showcredits)
+		glColor3f(1,1,1);
+	else
+		glColor3f(.7,.7,.7);
+	DrawText(CREDITSX1+.06f,CREDITSY1+.015f,"Credits");
+	glColor3f(1,1,1);
+#ifndef _WIN32
+	if(OverOptionsButton()&&!showcredits&&!IsOptionsOpen())
+		glColor3f(1,1,1);
+	else
+		glColor3f(.7,.7,.7);
+	DrawText(OPTIONSX1+.06f,CREDITSY1+.015f,"Options");
+	glColor3f(1,1,1);
+	DrawOptions();
+#endif
+	if(showcredits)
+		DrawCredits();
+#ifndef _WIN32
+	DrawJoinScreen();
+#endif
 
 	SwapBuffers(hdc);	
 }
@@ -103,6 +186,27 @@ void DrawMenu()
 
 void MenuMouseDown()
 {
+	if(CloseCredits()) return;
+#ifndef _WIN32
+	if(IsOptionsOpen())
+	{
+		OptionsClick();
+		return;
+	}
+	if(OverOptionsButton())
+	{
+		OpenOptions();
+		return;
+	}
+#endif
+	if(OverCreditsButton())
+	{
+		showcredits=1;
+		return;
+	}
+#ifndef _WIN32
+	if(IsJoinScreenOpen()) return;
+#endif
 	int over=ButtonOver();
 	if(over>=0)
 		HandleButton(button[over].handler);
@@ -121,7 +225,11 @@ void HandleButton(int handler)
 		break;
 	case 2:  //play
 		if(GetLocalPlayer()->playstate==0)
+#ifdef _WIN32
 			DialogBox(hInst, (LPCTSTR)IDD_MULTIPLAY, hWnd, (DLGPROC)Multiplay);
+#else
+			OpenJoinScreen();
+#endif
 		break;
 	case 3:  //disconnect
 

@@ -143,6 +143,7 @@ struct Controls
 	int forward,back,lstrafe,rstrafe,fire,zoom,build,buy,showscores,
 		jump,talk,talkteam,reload,secondfire,jetpack,screenshot,claim,
 		duck,hangglide,seemoney;
+	float mousesensitivity;
 	
 };
 

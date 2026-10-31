@@ -26,7 +26,7 @@ char drawwater[WATERGRIDSIZE][WATERGRIDSIZE];
 float waterlight[WATERGRIDSIZE][WATERGRIDSIZE];
 //float landblocklighting[LANDGRIDSIZE][LANDGRIDSIZE];
 int numsceneries;
-Scenery scenery[5000];
+static Scenery scenery[5000];  // distinct from redrawing.cpp's AseObj scenery (MSVC kept them apart by type)
 
 extern int numlillypad;
 extern LillyPad lillypad[200];
@@ -35,7 +35,7 @@ extern ServerObject sobject[MAXSERVEROBJS];
 UINT cloudsize;
 
 
-int cloudposx,cloudposy;
+static int cloudposx,cloudposy;
 Block blocks[BLOCKGRIDSIZE][BLOCKGRIDHEIGHT][BLOCKGRIDSIZE];
 char nextblock[BLOCKGRIDSIZE][BLOCKGRIDHEIGHT][BLOCKGRIDSIZE];
 SkySettings skysettings;
@@ -176,7 +176,8 @@ void LightLand(float ang)
 	lightdir=Normalize(lightdir);
 	
 	
-	for(int x=0;x<LANDGRIDSIZE;x++)
+	int x;
+	for(x=0;x<LANDGRIDSIZE;x++)
 	{
 		for(int y=0;y<LANDGRIDSIZE;y++)
 		{
@@ -236,7 +237,8 @@ void LightLand(float ang)
 		}
 	}
 	
-	for(int i=0;i<1;i++)
+	int i;
+	for(i=0;i<1;i++)
 	{
 		SmoothWaterLight();
 	}
@@ -505,7 +507,8 @@ void CreateLand(LandDefs &ldfs)
 	FlattenLand(0);
 	
 	if(GetLocalPlayer()->playstate==1)LoadTexture("textures\\startup.bmp",1);
-	for(int x=0;x<BLOCKGRIDSIZE;x++)
+	int x;
+	for(x=0;x<BLOCKGRIDSIZE;x++)
 	for(int y=0;y<BLOCKGRIDHEIGHT;y++)
 	for(int z=0;z<BLOCKGRIDSIZE;z++)
 	{
@@ -513,7 +516,8 @@ void CreateLand(LandDefs &ldfs)
 		blocks[x][y][z].nextblock=BLOCKGRIDHEIGHT-y;
 	}
 	char tmptext[500];
-	for(int i=0;i<ldfs.numdefs;i++)
+	int i;
+	for(i=0;i<ldfs.numdefs;i++)
 	{
 		AddRidge(&ldfs.df[i],&ls);
 		strcpy(tmptext,"Creating land: ");

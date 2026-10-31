@@ -28,6 +28,7 @@ void Save(char *filename);
 void Load(char *filename);
 
 LandDefs ldfs;
+#ifdef _WIN32  // Win32 window, GL context and message loop; see platform_sdl.cpp otherwise
 POINT centermouse;
 HBRUSH backbrush;
 int originalscreenwidth;
@@ -666,16 +667,20 @@ LRESULT CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
     return FALSE;
 }
 
+#endif // _WIN32
+
 //wrappers
 
 LandDefs *GetDefs()
 {
 	return &ldfs;
 }
+#ifdef _WIN32
 HDC GetGlHDC()
 {
 	return hdc;
 }
+#endif
 
 //general function used to make and object as close as possible to the player
 //(since the world is repeating), and returns 1 if it is close enough to draw

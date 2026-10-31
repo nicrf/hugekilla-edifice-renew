@@ -71,15 +71,20 @@ int Sock::Receive(void *data,SOCKADDR_IN *source)
 	{
 beginning:
 		fd_set recv;
-		recv.fd_count=1;
-		recv.fd_array[0]=sock;
+		FD_ZERO(&recv);
+		FD_SET(sock,&recv);
 		timeval tm;
 		tm.tv_sec=0;
 		tm.tv_usec=0;
 		int readit;
-		readit=select(0,&recv,0,0,&tm);
+		readit=select(sock+1,&recv,0,0,&tm);
+		if(readit<0) return 0;
 		if(!readit) return 0;
+#ifdef _WIN32
 		int addrsize=sizeof(SOCKADDR_IN);
+#else
+		socklen_t addrsize=sizeof(SOCKADDR_IN);
+#endif
 		recvbufsize=recvfrom(sock,(char *)&recvbuf,sizeof(recvbuf),0,(SOCKADDR*)source,&addrsize)-1;
 		packetsreceived++;
 		if(recvbufsize<=0) return 0;

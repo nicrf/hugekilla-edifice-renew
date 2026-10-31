@@ -8,3 +8,4 @@ void SetSoundVolume(int num,int volume);
 int UnInitSound();
 int InitSound(HWND hwnd);
 void SetRolloff(float rolloff);
+void SetMasterVolume(float volume);

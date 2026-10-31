@@ -71,7 +71,8 @@ void ConsoleCommand()
 {
 	if(strlen(consolecommand)==0) return;
 	ConsoleDisplayText(consolecommand);
-	for(int i=38;i>=0;i--)
+	int i;
+	for(i=38;i>=0;i--)
 	{
 		strcpy(prevconsolecommand[i+1],prevconsolecommand[i]);
 	}
@@ -314,7 +315,8 @@ int HandleConsoleKey(DWORD key,DWORD flags)
 
 void AddConsoleVar(void *var,char *name,int type,char servervar)
 {
-	for(int i=0;i<numconsolevar;i++)
+	int i;
+	for(i=0;i<numconsolevar;i++)
 	{
 		if(strcmp(consolevar[i],name)==0)
 		{

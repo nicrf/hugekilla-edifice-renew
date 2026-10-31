@@ -34,9 +34,9 @@ struct chunkhdr
 	char type[4];
 	short majver;
 	short minver;
-	long id;
-	long parent;
-	long len;
+	int32_t id;
+	int32_t parent;
+	int32_t len;
 };
 
 chunkhdr ReadChunkHeader(char *buf,int bufpos,int buflen)
@@ -226,7 +226,8 @@ int ReadFaces(char *buf,sobject *obj)
 void ComputeNormals(sobject *obj)
 {
 
-	for(int i=0;i<obj->numfaces;i++)
+	int i;
+	for(i=0;i<obj->numfaces;i++)
 	{
 		obj->faces[i].normal=Normalize(CrossProduct(obj->faces[i].pnt[1]->vctr-obj->faces[i].pnt[0]->vctr,obj->faces[i].pnt[2]->vctr-obj->faces[i].pnt[0]->vctr));
 	}
@@ -402,7 +403,8 @@ int AseObj::LoadCob(char *buf,int buflen)
 		}
 		if(strncmp("Mat1",hdr.type,4)==0) 
 		{
-			for(int i=0;i<object.numobjs;i++)
+			int i;
+			for(i=0;i<object.numobjs;i++)
 			{
 				if(object.objs[i].id==hdr.parent)
 					break;

@@ -4,6 +4,14 @@
 #include "winsock2.h"
 
 LRESULT CALLBACK Multiplay(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
+#ifndef _WIN32
+void OpenJoinScreen();
+int IsJoinScreenOpen();
+void JoinScreenAddGame(const char *name);
+int HandleJoinScreenKey(int sdlkey);
+void HandleJoinScreenText(const char *text);
+void DrawJoinScreen();
+#endif
 #define MAXPLAYERS 32
 void SockLoop();
 void CloseSocks();
