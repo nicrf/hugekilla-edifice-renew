@@ -222,10 +222,35 @@ static void RefuseClient(SOCKADDR_IN dest,char why,const char *text)
 	infosock.Flush();
 }
 
+//---- validation of what comes from the network (roadmap M2) ----
+
+static int ValidPlayer(int n)
+{
+	return n>=0&&n<MAXPLAYERS;
+}
+
+static int ValidSObj(int n)
+{
+	return n>=0&&n<MAXSERVEROBJS;
+}
+
+static int ValidWeapon(int n)
+{
+	return n>=0&&n<10;
+}
+
+//keeps a file name received from the network inside the textures folder
+static void SanitizeNetFileName(char *name,int size)
+{
+	name[size-1]=0;
+	if(strstr(name,"..")||strchr(name,'/')||strchr(name,'\\')||strchr(name,':'))
+		name[0]=0;
+}
+
 void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pnum);
-void ReceivePosition(Message *msg);
+void ReceivePosition(Message *msg,int sender);
 void DeletePlayer(int num,int reason);
-void ReceiveChatMessage(Message *msg);
+void ReceiveChatMessage(Message *msg,int msglen=-1);
 
 
 //reads a configuration file
@@ -485,6 +510,7 @@ void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pn
 			break;
 		case KILLED:
 			{
+				if(!ValidPlayer(msg2)) break;
 				ReceiveKillMessage(pnum,msg2);
 				SimpleMessage killed=MakeSimple(KILLED,pnum,msg2);
 				if(server)
@@ -638,7 +664,9 @@ void ServerLoop()
 		case SIMPLE:
 			{
 				SimpleMessage *simple=(SimpleMessage*)&msg;
-				HandleSimpleServer(simple->type2,simple->msg,simple->msg2,source,0);
+				//anyone can reach the info port: only info requests are answered there
+				if(simple->type2==REQUESTINFO)
+					HandleSimpleServer(simple->type2,simple->msg,simple->msg2,source,0);
 				break;
 			}
 		}
@@ -648,32 +676,38 @@ void ServerLoop()
 	for(i=1;i<numplayers;i++)
 	{
 		clientsock[i].CheckReliableResend();
-		while(clientsock[i].Receive(&msg,&source))
+		int clen;
+		while((clen=clientsock[i].Receive(&msg,&source)))
 		{
 			GetPlayer(i)->timeout=curtime+70000;
 			switch(msg.type)
 			{
 				case PLAYERPOSITION:
 					{
-						ReceivePosition(&msg);
+						ReceivePosition(&msg,i);   //a client only moves itself
 						break;
 					}
 				case SIMPLE:
 				{
 					SimpleMessage *simple=(SimpleMessage*)&msg;
+					int ackcallback=simple->type2==0||simple->type2==RECEIVEDLANDINFO||
+						simple->type2==RECEIVEDPLAYERNAMES||simple->type2==RECEIVEDJOINGAME||
+						simple->type2==RECEIVEDBLOCKINFO;
+					//"received" steps come from our own reliable acks, never from the client
+					if(ackcallback&&!clientsock[i].fromack) break;
 					HandleSimpleServer(simple->type2,simple->msg,simple->msg2,source,i);
 					break;
 				}
 				case BLOCKS:
 					{
-						ReceiveBlockBuffer((char *)&msg,i);
+						ReceiveBlockBuffer((char *)&msg,i,clen);
 						
 						break;
 					}
 				case CHATMESSAGE:
 					{
 						msg.buf[1]=i;
-						ReceiveChatMessage(&msg);
+						ReceiveChatMessage(&msg,clen);
 						break;
 					}
 				case FIREGUN:
@@ -685,12 +719,14 @@ void ServerLoop()
 				case KILLEDPOSITION:
 				{
 					KilledPosition *kp=(KilledPosition*)&msg;
+					if(!ValidPlayer(kp->killer)) break;
+					kp->killed=i;
 					GetPlayer(i)->pos=kp->pos;
 					ReceiveKillMessage(i,kp->killer);
 					if(server)
 					{
 						for(int i3=1;i3<numplayers;i3++)
-							if(i3!=i)clientsock[i3].SendReliable(&kp,sizeof(kp),0);
+							if(i3!=i)clientsock[i3].SendReliable(kp,sizeof(*kp),0);   //was &kp,sizeof(kp): sent the pointer
 					}
 					break;
 				}
@@ -773,7 +809,7 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 			}
 		case ENTER:
 			{
-				if(GetLocalPlayer()->playstate==1&&connected==0)
+				if(GetLocalPlayer()->playstate==1&&connected==0&&msg2<MAXPLAYERS)
 				{
 					connected=1;
 					SetLocalNum(msg2);
@@ -803,6 +839,7 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 			}
 		case JOINGAME:
 			{
+				if(!ValidPlayer(msg)) break;
 				GetPlayer(msg)->playstate=10;
 				consolevisible=0;
 				if(msg==GetLocalNum()) ConsoleDisplayText("entering game");
@@ -811,6 +848,7 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 			}
 		case DELETEPLAYER:
 			{
+				if(!ValidPlayer(msg)) break;
 				DeletePlayer(msg,msg2);
 				break;
 			}
@@ -821,12 +859,14 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 			}
 		case PINGINFO:
 			{
+				if(!ValidPlayer(msg)) break;
 				GetPlayer(msg)->ping=LOWORD(msg2);
 				GetPlayer(msg)->packetloss=HIWORD(msg2);
 				break;
 			}
 		case PAIN:
 			{
+				if(!ValidPlayer(msg)) break;
 				SetSoundPosition(msg2+1,GetPlayer(msg)->pos);
 				if(msg2<500) PlaySound(msg2+1,0);
 				else PlaySound(msg2,0);
@@ -834,11 +874,13 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 			}
 		case KILLED:
 			{
+				if(!ValidPlayer(msg)||!ValidPlayer(msg2)) break;
 				ReceiveKillMessage(msg,msg2);
 				break;
 			}
 		case CHANGETEAM:
 			{
+				if(!ValidPlayer(msg)||msg2>2) break;
 				ReceiveChangeTeam(msg,msg2);
 				break;
 			}
@@ -851,8 +893,8 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 			{
 				int credit=msg;
 				int number=msg2;
-				if(credit>=0) GetLocalPlayer()->credits[credit]=number;
-				else
+				if(credit>=0&&credit<(int)sizeof(GetLocalPlayer()->credits)) GetLocalPlayer()->credits[credit]=number;
+				else if(credit<0)
 					ZeroMemory(&GetLocalPlayer()->credits,sizeof(GetLocalPlayer()->credits));
 				break;
 			}
@@ -907,6 +949,19 @@ void ClientLoop()
 				{
 					
 					LandInfo *linfo=(LandInfo*)&msg;
+					//bound everything the land builder uses as a count or a file name
+					LandDefs *ld=&linfo->ldfs;
+					if(ld->numdefs<0) ld->numdefs=0;
+					if(ld->numdefs>NUMDEF-1) ld->numdefs=NUMDEF-1;
+					if(ld->numgroundtex<0) ld->numgroundtex=0;
+					if(ld->numgroundtex>9) ld->numgroundtex=9;
+					for(int t=0;t<9;t++) SanitizeNetFileName(ld->groundtex[t],sizeof(ld->groundtex[t]));
+					if(ld->numscenery>1000) ld->numscenery=1000;
+					if(ld->numblotch>2000) ld->numblotch=2000;
+					SkySettings *ss=&linfo->skysets;
+					SanitizeNetFileName(ss->cloudtex,sizeof(ss->cloudtex));
+					SanitizeNetFileName(ss->misttex,sizeof(ss->misttex));
+					SanitizeNetFileName(ss->sound,sizeof(ss->sound));
 					CopyMemory(GetDefs(),&linfo->ldfs,sizeof(linfo->ldfs));
 					RedrawSplash(1,"Loading Textures");
 					LoadTextures();
@@ -944,7 +999,7 @@ void ClientLoop()
 				{
 					if(connected)
 					{
-						ReceivePosition(&msg);
+						ReceivePosition(&msg,-1);
 					}
 					break;
 				}
@@ -957,19 +1012,24 @@ void ClientLoop()
 				{
 					int bufpos=0;
 					char *buf=msg.buf;
-					int numnames=buf[bufpos];
+					int bufsize=msglen-1;   //bytes after the message type
+					if(bufsize<1) break;
+					int numnames=(unsigned char)buf[bufpos];
 					bufpos++;
+					if(numnames>MAXPLAYERS) numnames=MAXPLAYERS;
 					for(int i=0;i<numnames;i++)
 					{
-						int playernum=buf[bufpos];
+						if(bufpos+11>bufsize) break;   //number, kills, deaths, team, name length
+						int playernum=(unsigned char)buf[bufpos];
 						bufpos++;
-						GetPlayer(playernum)->kills=*(int *)&buf[bufpos];
+						int namelen=(unsigned char)buf[bufpos+9];
+						if(!ValidPlayer(playernum)||namelen>31||bufpos+10+namelen>bufsize) break;
+						CopyMemory(&GetPlayer(playernum)->kills,&buf[bufpos],4);
 						bufpos+=4;
-						GetPlayer(playernum)->deaths=*(int *)&buf[bufpos];
+						CopyMemory(&GetPlayer(playernum)->deaths,&buf[bufpos],4);
 						bufpos+=4;
 						GetPlayer(playernum)->team=buf[bufpos];
 						bufpos+=1;
-						int namelen=buf[bufpos];
 						bufpos++;
 						CopyMemory(GetPlayer(playernum)->name,&buf[bufpos],namelen);
 						GetPlayer(playernum)->name[namelen]=0;
@@ -993,13 +1053,13 @@ void ClientLoop()
 				}
 			case BLOCKS:
 				{
-					ReceiveBlockBuffer((char *)&msg,0);
+					ReceiveBlockBuffer((char *)&msg,0,msglen);
 					break;
 				}
 			case CHATMESSAGE:
 				{
 					//ConsoleDisplayText("chat message");
-					ReceiveChatMessage(&msg);
+					ReceiveChatMessage(&msg,msglen);
 					break;		
 				}
 			case FIREGUN:
@@ -1014,12 +1074,14 @@ void ClientLoop()
 				}
 			case UPDATESERVEROBJECT:
 				{
-					ReceiveUpdateServerObject((UpdateServerObject *)&msg);
+					UpdateServerObject *update=(UpdateServerObject *)&msg;
+					if(ValidSObj(update->num)) ReceiveUpdateServerObject(update);
 					break;
 				}
 			case KILLEDPOSITION:
 				{
 					KilledPosition *kp=(KilledPosition*)&msg;
+					if(!ValidPlayer(kp->killed)||!ValidPlayer(kp->killer)) break;
 					GetPlayer(kp->killed)->pos=kp->pos;
 					ReceiveKillMessage(kp->killed,kp->killer);
 					break;
@@ -1544,10 +1606,13 @@ unsigned char GetAng(float x,float y)
 
 //called to receive a player position
 
-void ReceivePosition(Message *msg)
+//sender: the client that sent it (server side), or -1 for positions relayed by the server
+void ReceivePosition(Message *msg,int sender)
 {
 	PlayerPosition *pos=(PlayerPosition*)msg;
-	Player *src=GetPlayer(pos->pnum);
+	int pnum=sender>=0?sender:pos->pnum;
+	if(!ValidPlayer(pnum)) return;
+	Player *src=GetPlayer(pnum);
 	src->up=!!((1<<0)&pos->keys);
 	src->down=!!((1<<1)&pos->keys);
 	src->lstrafe=!!((1<<2)&pos->keys);
@@ -1564,7 +1629,7 @@ void ReceivePosition(Message *msg)
 	src->vel.x=(float)pos->velx/64;
 	src->vel.y=(float)pos->vely/64;
 	src->vel.z=(float)pos->velz/64;
-	src->weapon=pos->weapon;
+	src->weapon=ValidWeapon(pos->weapon)?pos->weapon:0;
 	if(pos->state!=1) 
 		src->playstate=pos->state;
 	MakeClose(&src->pos);
@@ -1654,7 +1719,7 @@ void SendBlockBuffer()
 	*(DWORD *)&blockbuffer[1]=numblocks;
 	if(server)
 	{
-		ReceiveBlockBuffer(blockbuffer,0);
+		ReceiveBlockBuffer(blockbuffer,0,blockbufferpos);
 	}
 	else
 	{
@@ -1664,8 +1729,10 @@ void SendBlockBuffer()
 
 //creates a structure
 
-void ReceiveBlockBuffer(char *buf,int pnum)
+//len: size of the message, type included
+void ReceiveBlockBuffer(char *buf,int pnum,int len)
 {
+	if(len<5) return;
 	if(server&&!GetPlayer(pnum)->credits[0])
 	{
 		return;
@@ -1673,7 +1740,9 @@ void ReceiveBlockBuffer(char *buf,int pnum)
 	GiveCredit(pnum,0,-1);
 						
 	int pos=0;
-	DWORD numblocks=*(DWORD *)&buf[1];
+	DWORD numblocks;
+	CopyMemory(&numblocks,&buf[1],4);
+	if(numblocks>(DWORD)(len-5)/9) numblocks=(len-5)/9;   //9 bytes per block
 	pos=5;
 	int i;
 	for(i=0;i<numblocks;i++)
@@ -1734,9 +1803,11 @@ int SendMultMessage(Message *msg,int len,int player=-1)
 
 
 //sends a message reliably
-void ReceiveChatMessage(Message *msg)
+//msglen: size of the message as received, -1 when it was built locally
+void ReceiveChatMessage(Message *msg,int msglen)
 {
 	char dest=msg->buf[0];
+	if(msglen!=-1&&msglen<5) return;
 	//if(server==1&&(dest!=CMSG_BROADCAST&&dest!=CMSG_TEAM)) return;
 	
 
@@ -1744,15 +1815,17 @@ void ReceiveChatMessage(Message *msg)
 	char chatmessage[1000];
 	char message[1000];
 	
-	WORD len=*(WORD *)&msg->buf[2];
+	WORD len;
+	CopyMemory(&len,&msg->buf[2],2);
+	if(len>255) len=255;
+	if(msglen!=-1&&len>msglen-5) len=msglen-5;
 	CopyMemory(chatmessage,&msg->buf[4],len);
 	chatmessage[len]=0;
 		
 	if(dest==CMSG_BROADCAST||dest==CMSG_TEAM)
 	{
-		strcpy(message,GetPlayer(msg->buf[1])->name);
-		strcat(message,": ");
-		strcat(message,chatmessage);
+		int sender=(unsigned char)msg->buf[1];
+		snprintf(message,sizeof(message),"%.31s: %s",ValidPlayer(sender)?GetPlayer(sender)->name:"?",chatmessage);
 		ConsoleDisplayText(message);
 	}
 	if(dest==CMSG_SCORE)
@@ -1848,6 +1921,7 @@ void CreateObject(int num,int obj,Vector pos,Vector dir,Vector vel)
 void HandleFireGun(int num,Message *msg)
 {
 	FireGunDirection *firegun=(FireGunDirection *)msg;
+	if(!ValidPlayer(firegun->pnum)) return;
 	float speed=0;
 	if(GetPlayer(firegun->pnum)->weapon==0)
 		speed=sv.gatspeed;
@@ -1946,6 +2020,7 @@ void HavePain(int sound,int targ)
 
 void ReceiveKillMessage(int killed,int killer)
 {
+	if(!ValidPlayer(killed)||!ValidPlayer(killer)) return;
 	GetPlayer(killed)->deaths++;
 	if(killed!=killer) GetPlayer(killer)->kills++;
 	char cmsg[300];
@@ -1956,7 +2031,7 @@ void ReceiveKillMessage(int killed,int killer)
 		skilled="himself";
 	}
 		
-	sprintf(cmsg,"%s killed %s",GetPlayer(killer)->name,skilled);
+	snprintf(cmsg,sizeof(cmsg),"%.31s killed %.31s",GetPlayer(killer)->name,skilled);
 	ConsoleDisplayText(cmsg);
 	if(server)
 	for(int i=0;i<MAXSERVEROBJS;i++)
@@ -2032,12 +2107,13 @@ void SendRGD(int player)
 
 void ReceiveChangeTeam(int player,int team)
 {
+	if(!ValidPlayer(player)||team<0||team>2) return;
 	char message[500];
-	char *teamname;
+	char *teamname="White";
 	if(team==0) teamname="White";
 	if(team==1) teamname="Red";
 	if(team==2) teamname="Blue";
-	sprintf(message,"%s has joined team %s",GetPlayer(player)->name,teamname);
+	snprintf(message,sizeof(message),"%.31s has joined team %s",GetPlayer(player)->name,teamname);
 	ConsoleDisplayText(message);
 	GetPlayer(player)->team=team;
 }
@@ -2084,6 +2160,7 @@ void SendUpdateServerObject(int num)
 
 void ReceiveUpdateServerObject(UpdateServerObject *update)
 {
+	if(!ValidSObj(update->num)) return;
 	int size=(char *)&sobject->timeout-(char *)sobject;
 	CopyMemory(&sobject[update->num],&update->updated,size);
 
