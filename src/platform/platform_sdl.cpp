@@ -524,9 +524,6 @@ int main(int argc, char **argv)
 		{
 			char reason[200];
 			autojoin = 0;
-			// starts curtime first: the first Playloop leaves it at 0, and a local
-			// server answers fast enough for ENTER to get a timeout based on that
-			Playloop();
 			if (!JoinNetConnect(0, reason, sizeof(reason)))
 				fprintf(stderr, "HK_JOIN: %s\n", reason);
 		}
