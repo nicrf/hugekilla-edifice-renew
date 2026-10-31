@@ -56,11 +56,11 @@ for _ in range(40):
     infos = [m for m in recv(probe, 1.0) if m and m[0] == INFO]
     if infos:
         t = infos[0][2 + infos[0][1] + 1:]
-        layout = struct.unpack_from("<I", t, 6)[0]
+        proto, layout = struct.unpack_from("<HI", t, 4)
         break
 if layout is None:
     print("FAIL: server not answering"); sys.exit(1)
-trailer = struct.pack("<IHIB", MAGIC, 2, layout, 5) + b"0.2.0"
+trailer = struct.pack("<IHIB", MAGIC, proto, layout, 5) + b"0.2.0"
 
 
 def join(sock, name):

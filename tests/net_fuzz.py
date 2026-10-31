@@ -83,8 +83,8 @@ if not server_alive(40):
 s.sendto(packet(simple(REQUESTINFO)), SERVER)
 info = [m for a, d in drain(1.0) for m in messages(d) if m and m[0] == INFO][0]
 t = info[2 + info[1] + 1:]
-layout = struct.unpack_from("<I", t, 6)[0]
-trailer = struct.pack("<IHIB", MAGIC, 2, layout, 5) + b"0.2.0"
+proto, layout = struct.unpack_from("<HI", t, 4)
+trailer = struct.pack("<IHIB", MAGIC, proto, layout, 5) + b"0.2.0"
 
 # join to get a per-client port (clientsock), where game messages go
 s.sendto(packet(bytes([REQUESTENTER, 4]) + b"Fuzz\x00" + trailer), SERVER)

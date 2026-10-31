@@ -16,7 +16,8 @@
 #ifndef EDIFICE_VERSION_STRING
 #define EDIFICE_VERSION_STRING "dev"
 #endif
-#define EDIFICE_PROTOCOL_VERSION 2   // 1 = original game, no version sent
+#define EDIFICE_PROTOCOL_VERSION 3   // 1 = original game, no version sent
+                                     // 2 = version handshake; 3 = PCG32 world (worldrandom.h)
 #define EDIFICE_NET_MAGIC 0x31564445u // "EDV1", start of the version trailer
 
 // Version trailer appended after the name of REQUESTENTER and INFO messages:
