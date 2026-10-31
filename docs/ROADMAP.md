@@ -105,6 +105,7 @@ Détail complet en section 5.
   - Incrémenter la version de protocole à chaque lot.
   - Sauvegardes : signature `edifice` réellement vérifiée (hugekilla.cpp:731), champ `formatVersion`, `CREATE_ALWAYS`, lecture legacy des anciens fichiers.
   - Fuzzing libFuzzer sur `Sock::Receive` et sur chaque parseur.
+  - *Fait (protocole 4, en un seul lot) :* `net/wire.h` ; tous les messages migrés (`Sync*` dans multiplay.cpp, `WriteSimple`/`ReadSimple` dans sock.cpp, SimpleMessage garde ses 12 octets) ; plus de casts dans multiplay.cpp et sock.cpp ; `timeout` non envoyé ; champ layout du trailer figé (`EDIFICE_NET_LAYOUT`) et ignoré ; signature `edifice` vérifiée au Load. Tests : `tests/wire_test.cpp`, `tests/net_join.py` (aller-retour réel), messages tronqués. *Reste :* `formatVersion`, `CREATE_ALWAYS` et lecture legacy des sauvegardes, libFuzzer.
 - **Fait quand :** plus aucun memcpy de struct sur le réseau. `EDIFICE_LAYOUT_HASH` n'a alors plus de raison d'être.
 
 ### M7 - Abstraction du transport (L)

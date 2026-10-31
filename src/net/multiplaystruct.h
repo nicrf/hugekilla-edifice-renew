@@ -8,7 +8,7 @@
 #define CONSOLEMESSAGE 6
 #define BLOCKS 7
 #define CHATMESSAGE 8
-#define CREATEOBJ 9
+#define CREATEOBJ 9          //never sent
 #define FIREGUN 10
 #define SERVERVARS 11
 #define UPDATESERVEROBJECT 12
@@ -45,18 +45,10 @@
 #define GAMEOVER 25
 #define VERSIONMISMATCH 26   //server refused REQUESTENTER: msg = server protocol (version.h)
 
-struct RequestEnter
-{
-	char type;
-	char namelen;
-	char name[32];
-};
-struct Info
-{
-	char type;
-	char namelen;
-	char name[100];
-};
+//Decoded messages. None of these structs goes onto the wire as it is: each
+//message has explicit Write/Read functions (multiplay.cpp, src/net/wire.h).
+//REQUESTENTER and INFO are built byte by byte: type, uint8 n, name[n] (<=31,
+//<=99), NUL, version trailer (version.h).
 struct LandInfo
 {
 	char type;
@@ -86,15 +78,6 @@ struct FireGunDirection
 	Vector pos;
 };
 
-struct CreateObject
-{
-	char type;
-	char objecttype;
-	Vector dir;
-	Vector vel;
-	Vector pos;
-};
-
 struct UpdateServerObject
 {
 	char type;
@@ -111,7 +94,7 @@ struct KilledPosition
 };
 
 
-void HandleFireGun(int num,Message *msg);
+void HandleFireGun(FireGunDirection *firegun);
 void ReceiveKillMessage(int killed,int killer);
 void ReceiveChangeTeam(int player,int team);
 void ReceiveUpdateServerObject(UpdateServerObject *update);

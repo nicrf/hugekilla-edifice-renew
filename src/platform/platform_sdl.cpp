@@ -470,6 +470,14 @@ int main(int argc, char **argv)
 
 	// Debug aid: HK_AUTOSTART=1 starts a local server right away.
 	if (getenv("HK_AUTOSTART")) StartServer();
+	// Debug aid: HK_JOIN=<host> joins that server as soon as it answers (a game
+	// client against a local HK_AUTOSTART server).
+	int autojoin = 0;
+	if (const char *host = getenv("HK_JOIN"))
+	{
+		JoinNetOpen();
+		autojoin = JoinNetQuery(host);
+	}
 	// Debug aid: HK_MENU=options|credits|join opens that screen at startup.
 	if (const char *m = getenv("HK_MENU"))
 	{
@@ -511,6 +519,14 @@ int main(int argc, char **argv)
 		while (SDL_PollEvent(&ev))
 			HandleEvent(ev);
 		if (quitrequested) break;
+		// HK_JOIN: joins the first server that answered, like a click on the join screen
+		if (autojoin && GetLocalPlayer()->playstate == 0 && JoinGameCount() > 0)
+		{
+			char reason[200];
+			autojoin = 0;
+			if (!JoinNetConnect(0, reason, sizeof(reason)))
+				fprintf(stderr, "HK_JOIN: %s\n", reason);
+		}
 
 		LARGE_INTEGER time;
 		LARGE_INTEGER freq;

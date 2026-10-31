@@ -13,6 +13,8 @@ struct Message
 	char buf[BIGBUFSIZE];
 };
 
+//decoded SIMPLE message; on the wire (WriteSimple/ReadSimple, sock.cpp) it is
+//SIMPLESIZE bytes: type, type2, 2 zero bytes, uint32 msg, uint32 msg2, little-endian
 struct SimpleMessage
 {
 	char type;
@@ -20,6 +22,16 @@ struct SimpleMessage
 	DWORD msg;
 	DWORD msg2;
 };
+#define SIMPLESIZE 12
+
+//a SIMPLE message serialized, ready to send: b, sizeof(b)
+struct SimpleBuf
+{
+	char b[SIMPLESIZE];
+};
+
+int WriteSimple(void *out,char type2,DWORD msg,DWORD msg2);   //returns SIMPLESIZE
+int ReadSimple(const void *in,int len,SimpleMessage *out);    //0 if too short
 
 
 #define MAXRELIABLEQUEUE 256            //messages waiting to be sent reliably
@@ -82,8 +94,8 @@ public:
 	SOCKET sock;
 	SOCKADDR_IN dest;
 	void CheckReliableResend();
-	int Send(void *data,int size);
-	int SendReliable(void *data,int size,int callback);
+	int Send(const void *data,int size);
+	int SendReliable(const void *data,int size,int callback);
 	int Receive(void *data,SOCKADDR_IN *source,int maxsize=sizeof(Message));
 	int fromack;   //last Receive returned a local reliable-ack callback (not peer data)
 	void ResetReliable();

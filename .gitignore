@@ -5,3 +5,5 @@ dist/
 CMakeUserPresets.json
 .claude/
 vcpkg_installed/
+
+server/.env

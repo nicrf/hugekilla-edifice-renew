@@ -9,6 +9,7 @@
 #include "multiplay.h"
 #include "sock.h"
 #include "redrawing.h"
+#include "wire.h"
 
 #define RELIABLE -1
 #define LASTRELIABLE -2
@@ -20,6 +21,28 @@ int datasendthissec;
 int datarecvthissec;
 int datasendthisframe;
 int datarecvthisframe;
+
+int WriteSimple(void *out,char type2,DWORD msg,DWORD msg2)
+{
+	ByteWriter w(out,SIMPLESIZE);
+	w.U8(SIMPLE);
+	w.U8((unsigned char)type2);
+	w.U16(0);
+	w.U32(msg);
+	w.U32(msg2);
+	return SIMPLESIZE;
+}
+
+int ReadSimple(const void *in,int len,SimpleMessage *out)
+{
+	ByteReader r(in,len);
+	out->type=(char)r.U8();
+	out->type2=(char)r.U8();
+	r.Skip(2);
+	out->msg=r.U32();
+	out->msg2=r.U32();
+	return r.Ok();
+}
 
 
 Sock::Sock()
@@ -42,12 +65,11 @@ void Sock::Flush()
 	sendbufpos=0;
 }
 
-int Sock::Send(void *data,int size)
+int Sock::Send(const void *data,int size)
 {
 	if(size+sendbufpos>MAXPACKETSIZE) Flush();
-	WORD wsize=size;
-	CopyMemory(&sendbuf.data[sendbufpos],&wsize,sizeof(wsize));
-	sendbufpos+=sizeof(wsize);
+	WirePutU16(&sendbuf.data[sendbufpos],size);
+	sendbufpos+=2;
 	CopyMemory(&sendbuf.data[sendbufpos],data,size);
 	sendbufpos+=size;
 	return 1;
@@ -70,7 +92,7 @@ int Sock::Receive(void *data,SOCKADDR_IN *source,int maxsize)
 		{
 			DWORD left=reliablerecvbufsize-reliablerecvbufpos;
 			DWORD dwsize=0;
-			if(left>=4) CopyMemory(&dwsize,&reliablerecvdata[reliablerecvbufpos],4);
+			if(left>=4) dwsize=WireGetU32(&reliablerecvdata[reliablerecvbufpos]);
 			if(left>=4&&dwsize<=left-4&&dwsize<=(DWORD)maxsize)
 			{
 				reliablerecvbufpos+=4;
@@ -85,10 +107,10 @@ int Sock::Receive(void *data,SOCKADDR_IN *source,int maxsize)
 		{
 			WORD wsize=0;
 			int ok=recvbufpos+2<=recvbufsize;
-			if(ok) CopyMemory(&wsize,&recvbuf.data[recvbufpos],sizeof(wsize));
+			if(ok) wsize=WireGetU16(&recvbuf.data[recvbufpos]);
 			if(ok&&recvbufpos+2+wsize<=recvbufsize&&wsize<=maxsize)
 			{
-				recvbufpos+=sizeof(wsize);
+				recvbufpos+=2;
 				CopyMemory(data,&recvbuf.data[recvbufpos],wsize);
 				recvbufpos+=wsize;
 				return wsize;
@@ -126,14 +148,11 @@ int Sock::Receive(void *data,SOCKADDR_IN *source,int maxsize)
 			if(recvbufsize<4) continue;
 			for(int i=0;i<MAXSIMULRELIABLE;i++)
 			{
-				if(reliablebuf[i].size&&reliablebuf[i].id==*(WORD*)&recvbuf.data[0]&&reliablebuf[i].num==*(WORD*)&recvbuf.data[2]&&reliablesenddata)
+				if(reliablebuf[i].size&&reliablebuf[i].id==WireGetU16(&recvbuf.data[0])&&reliablebuf[i].num==WireGetU16(&recvbuf.data[2])&&reliablesenddata)
 				{
 					reliablebuf[i].size=0;
 					reliableintransmit--;
-					SimpleMessage callback;
-					callback.type=SIMPLE;
-					callback.msg=0;
-					callback.msg2=0;
+					char callback=0;
 					fromack=1;
 					if(reliablesenddata->size)
 					{
@@ -150,11 +169,11 @@ int Sock::Receive(void *data,SOCKADDR_IN *source,int maxsize)
 							reliablebufnum++;
 							PackReliable();
 						}
-						callback.type2=0;
+						callback=0;
 					}
 					else
 					{
-						callback.type2=reliablesenddata->callback;
+						callback=reliablesenddata->callback;
 						reliabledata *next=reliablesenddata->next;
 						delete []reliablesenddata->data;
 						delete reliablesenddata;
@@ -166,8 +185,8 @@ int Sock::Receive(void *data,SOCKADDR_IN *source,int maxsize)
 							PackReliable();
 						}
 					}
-					CopyMemory(data,&callback,sizeof(callback));
-					return sizeof(callback);
+					if(maxsize<SIMPLESIZE) return 0;
+					return WriteSimple(data,callback,0,0);
 				}
 			}
 			continue;
@@ -175,7 +194,7 @@ int Sock::Receive(void *data,SOCKADDR_IN *source,int maxsize)
 		if(recvbuf.type==RELIABLE||recvbuf.type==LASTRELIABLE)
 		{
 			if(recvbufsize<8) continue;   //checksum, id, part number
-			if(GetCheckSum(&recvbuf.data[4],recvbufsize-4)!=*(DWORD *)recvbuf.data)
+			if(GetCheckSum(&recvbuf.data[4],recvbufsize-4)!=WireGetU32(recvbuf.data))
 			{
 				*(char *)data=0;
 				return 1;
@@ -186,11 +205,10 @@ int Sock::Receive(void *data,SOCKADDR_IN *source,int maxsize)
 				CopyMemory(&dest,source,sizeof(dest));
 			buf ack;
 			ack.type=ACK;
-			*(WORD*)&ack.data[0]=*(WORD*)&recvbuf.data[4];
-			*(WORD*)&ack.data[2]=*(WORD*)&recvbuf.data[6];
+			memcpy(&ack.data[0],&recvbuf.data[4],4);   //id, part number
 			sendto(sock,(char *)&ack,1+4,0,(SOCKADDR *)&dest,sizeof(SOCKADDR));
 			packetssent++;
-			WORD id=*(WORD *)&recvbuf.data[4];
+			WORD id=WireGetU16(&recvbuf.data[4]);
 			if(id!=(WORD)(lastreliableid+1))   //WORD: keeps working after 65535 transfers
 			{
 				*(char *)data=0;
@@ -198,7 +216,7 @@ int Sock::Receive(void *data,SOCKADDR_IN *source,int maxsize)
 			}
 			if(recvbuf.type==LASTRELIABLE)
 				lastreliableid=id;
-			int rbufpos=*(WORD*)&recvbuf.data[6]*RELIABLEPACKETSIZE;
+			int rbufpos=WireGetU16(&recvbuf.data[6])*RELIABLEPACKETSIZE;
 			int chunk=recvbufsize-8;
 			if(rbufpos+chunk>BIGBUFSIZE)
 			{
@@ -249,14 +267,14 @@ sendmore:
 	reliableintransmit++;
 	int bufpos=0;
 	bufpos+=4; //checksum
-	*(WORD *)&curbuf->data.data[bufpos]=reliablebufid;
+	WirePutU16(&curbuf->data.data[bufpos],reliablebufid);
 	bufpos+=2;
-	*(WORD *)&curbuf->data.data[bufpos]=reliablebufnum;
+	WirePutU16(&curbuf->data.data[bufpos],reliablebufnum);
 	bufpos+=2;
 	int thispacketsize=RELIABLEPACKETSIZE;
 	if(reliablebufnum==0)
 	{
-		*(DWORD *)&curbuf->data.data[bufpos]=reliablesenddata->size;
+		WirePutU32(&curbuf->data.data[bufpos],reliablesenddata->size);
 		bufpos+=4;
 		thispacketsize-=4;
 	}
@@ -271,7 +289,7 @@ sendmore:
 	}
 	CopyMemory(&curbuf->data.data[bufpos],reliablesenddata->data,thispacketsize);
 	bufpos+=thispacketsize;
-	*(DWORD *)&curbuf->data.data[0]=GetCheckSum(&curbuf->data.data[4],bufpos-4);
+	WirePutU32(&curbuf->data.data[0],GetCheckSum(&curbuf->data.data[4],bufpos-4));
 	MoveMemory(reliablesenddata->data,&reliablesenddata->data[thispacketsize],reliablesenddata->size-thispacketsize);
 	reliablesenddata->size-=thispacketsize;
 	curbuf->size=1+bufpos;
@@ -298,7 +316,7 @@ sendmore:
 	}
 
 }
-int Sock::SendReliable(void *data,int size,int callback)
+int Sock::SendReliable(const void *data,int size,int callback)
 {
 	
 	if(data==0)
@@ -395,5 +413,5 @@ DWORD Sock::GetCheckSum(char *buf,int size)
 	{
 		checksum[i&3]^=buf[i];
 	}
-	return *(DWORD *)checksum;
+	return WireGetU32(checksum);
 }

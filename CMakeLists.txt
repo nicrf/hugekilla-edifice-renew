@@ -181,6 +181,9 @@ enable_testing()
 add_executable(worldrandom_test tests/worldrandom_test.cpp)
 target_include_directories(worldrandom_test PRIVATE ${SRC}/game)
 add_test(NAME worldrandom COMMAND worldrandom_test)
+add_executable(wire_test tests/wire_test.cpp)
+target_include_directories(wire_test PRIVATE ${SRC}/net)
+add_test(NAME wire COMMAND wire_test)
 
 # ---- GameNetworkingSockets (experimental, roadmap M7) --------------------------
 # Encrypted connections and P2P. Off by default: configure with the vcpkg
