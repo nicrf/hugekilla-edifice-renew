@@ -1,0 +1,3 @@
+All files are under the LGPL (see lgpl-3.0.txt).  You must include this license and that license in unmodified form if you redistribute the source code.
+
+I (Nelson Planting) reserve the right to grant additional rights to others concerning the accompanying code as long as this license exists.

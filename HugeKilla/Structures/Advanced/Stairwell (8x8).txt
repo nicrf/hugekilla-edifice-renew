@@ -1,0 +1,44 @@
+xxxxxxxx
+x      x
+x      x
+x      x
+x      x
+x      x
+x x    x
+xxxxxxxx
+
+xxxxxxxx
+x      x
+x      x
+x      x
+x      x
+x      x
+xr>x   x
+xxxxxxxx
+
+xxxxxxxx
+x      x
+x      x
+x      x
+x      x
+x      x
+x  >xxxx
+xxxxxxxx
+
+xxxxxxxx
+x      x
+x      x
+x      x
+x      x
+x      x
+x   >xxx
+xxxxxxxx
+
+xxxxxxxx
+x      x
+x      x
+x      x
+x      x
+x      x
+x    >xx
+xxxxxxxx

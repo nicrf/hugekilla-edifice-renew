@@ -1,0 +1,10 @@
+void LoadSounds();
+void StopSound(int num);
+void PlaySound(int num,int loop);
+void SetPlayerSoundPosition(Vector pos,Vector dir,Vector vel);
+void SetSoundPosition(int num,Vector pos);
+int LoadSound(char *filename,int num,int is3d);
+void SetSoundVolume(int num,int volume);
+int UnInitSound();
+int InitSound(HWND hwnd);
+void SetRolloff(float rolloff);
