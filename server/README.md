@@ -23,15 +23,23 @@ cd server && cp .env.example .env
 Éditer `.env` (nom public, IP publique du relais, secret : `openssl rand -hex 32`), puis :
 
 ```bash
-docker compose up -d --build
+docker compose pull && docker compose up -d
 ```
+
+L'image est construite par GitHub Actions et publiée sur `ghcr.io/nicrf/edifice-lobby` (amd64 et arm64) : `latest` suit `main`, chaque release a son tag (`0.4.0`, `0.4`). Pour l'utiliser sans le compose :
+
+```bash
+docker pull ghcr.io/nicrf/edifice-lobby:latest
+```
+
+Pour construire l'image soi-même à la place : `docker compose build`.
 
 Le compose publie l'API (8080/tcp), la signalisation (10000/tcp), STUN/TURN (3478/udp) et la plage de ports du trafic relayé (49160-49200/udp, à ouvrir aussi dans le pare-feu). Mettre un reverse proxy HTTPS devant le port 8080 et passer `EDIFICE_TRUST_PROXY=1`.
 
 Ou avec Docker seul :
 
 ```bash
-docker build -t edifice-lobby . && docker run -p 8080:8080 -p 10000:10000 -p 3478:3478/udp -e EDIFICE_PUBLIC_HOST=lobby.example.org -e EDIFICE_TURN_RELAY_IP=203.0.113.10 -e EDIFICE_TURN_SECRET=change-me edifice-lobby
+docker run -p 8080:8080 -p 10000:10000 -p 3478:3478/udp -e EDIFICE_PUBLIC_HOST=lobby.example.org -e EDIFICE_TURN_RELAY_IP=203.0.113.10 -e EDIFICE_TURN_SECRET=change-me ghcr.io/nicrf/edifice-lobby:latest
 ```
 
 | Option | Variable | Défaut | Rôle |
