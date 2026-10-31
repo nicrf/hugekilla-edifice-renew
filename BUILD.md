@@ -48,6 +48,7 @@ Avec les presets CMake : `cmake --preset macos-release && cmake --build --preset
   - `python3 tests/net_handshake.py` : version dans INFO, refus des versions incompatibles ;
   - `python3 tests/net_identity.py` : une nouvelle demande garde son slot, un autre client a le sien ;
   - `python3 tests/net_fuzz.py` : paquets malformés, à lancer de préférence contre un build AddressSanitizer (voir l'en-tête du script).
+  - `tests/run_netplay_tests.sh <binaire>` lance les trois, un serveur neuf par test (sous Linux avec Xvfb si aucun écran) ; la CI le fait à chaque push contre un build AddressSanitizer, et une release n'est publiée que s'ils passent.
 
 ## Releases automatiques
 
