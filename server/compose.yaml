@@ -1,10 +1,11 @@
 # edifice-lobby with Docker Compose:
 #   cp .env.example .env   (then edit it)
-#   docker compose up -d --build
+#   docker compose pull && docker compose up -d
 services:
   lobby:
+    # prebuilt by GitHub Actions (amd64 and arm64); "docker compose build" rebuilds it locally
+    image: ghcr.io/nicrf/edifice-lobby:latest
     build: .
-    image: edifice-lobby
     restart: unless-stopped
     environment:
       EDIFICE_PUBLIC_HOST: ${EDIFICE_PUBLIC_HOST:?set EDIFICE_PUBLIC_HOST in .env}
