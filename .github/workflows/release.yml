@@ -72,9 +72,37 @@ jobs:
           path: dist/Edifice-*
           if-no-files-found: error
 
+  netplay-tests:
+    # Network tests against a headless server built with AddressSanitizer:
+    # version handshake, join bookkeeping, malformed packets (tests/net_*.py).
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools, virtual display and software OpenGL
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build xvfb libgl1-mesa-dri libglu1-mesa-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev \
+            libxkbcommon-dev libwayland-dev libasound2-dev libpulse-dev
+
+      - name: Build with AddressSanitizer
+        env:
+          EDIFICE_CMAKE_ARGS: -DCMAKE_CXX_FLAGS=-fsanitize=address -DCMAKE_C_FLAGS=-fsanitize=address -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address
+        run: python3 build.py --config Debug
+
+      - name: Network tests
+        run: tests/run_netplay_tests.sh build/linux-debug/Edifice netplay-logs
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: netplay-logs
+          path: netplay-logs
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [build, netplay-tests]
     runs-on: ubuntu-latest
     permissions:
       contents: write
