@@ -10,7 +10,7 @@ import socket, struct, sys, time
 
 SERVER = ("127.0.0.1", 27020)
 SIMPLE, INFO, REQUESTENTER, CHATMESSAGE, BLOCKS = 5, 2, 1, 8, 7
-PLAYERPOSITION, KILLEDPOSITION, UPDATESERVEROBJECT = 3, 14, 12
+PLAYERPOSITION, KILLEDPOSITION, UPDATESERVEROBJECT, VOICE = 3, 14, 12, 16
 REQUESTINFO, ENTER, CREDITS, RECEIVEDLANDINFO = 1, 2, 24, 5
 RELIABLE, LASTRELIABLE, ACK = 0xFF, 0xFE, 0xFD
 MAGIC = 0x31564445
@@ -112,6 +112,12 @@ attacks = [
     ("fake RECEIVEDLANDINFO", packet(simple(RECEIVEDLANDINFO))),
     ("kill credited to player 4000", packet(simple(19, 0, 4000))),
     ("team 77", packet(simple(20, 0, 77))),
+    ("voice spoofing player 200", packet(struct.pack("<BBHH", VOICE, 200, 1, 10) + b"E" * 10)),
+    ("voice frame of 60000 bytes", packet(struct.pack("<BBHH", VOICE, 0, 2, 60000) + b"F" * 900)),
+    ("voice frame longer than its message", packet(struct.pack("<BBHH", VOICE, 0, 3, 400) + b"G" * 50)),
+    ("voice with no frame", packet(struct.pack("<BBHH", VOICE, 0, 4, 0))),
+    ("truncated voice header", packet(bytes([VOICE, 1, 2]))),
+    ("voice frame of 401 bytes", packet(struct.pack("<BBHH", VOICE, 0, 5, 401) + b"H" * 401)),
 ]
 for name, data in attacks:
     s.sendto(data, client_port)

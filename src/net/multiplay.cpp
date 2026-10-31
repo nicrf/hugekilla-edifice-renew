@@ -21,6 +21,7 @@
 #include "version.h"
 #include "wire.h"
 #include "ui.h"
+#include "voice.h"
 #define MAXLOCALLIST 128
 #ifndef HK_WIN32_NATIVE
 #ifndef _WIN32
@@ -480,6 +481,7 @@ static int ReadHelloName(const char *msg,int msglen,char *name,int namesize)
 
 void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pnum);
 void ReceivePosition(const char *msg,int msglen,int sender);
+static void RelayVoice(VoiceMessage *voice);
 #ifndef HK_WIN32_NATIVE
 static void JoinNetAddGame(const char *msg,int msglen,SOCKADDR_IN source);
 #endif
@@ -584,6 +586,7 @@ void Disconnect()
 	server=0;
 	connected=0;
 	numplayers=0;
+	VoiceReset();
 }
 
 void CloseSocks()
@@ -902,6 +905,15 @@ void ServerLoop()
 				case PLAYERPOSITION:
 					{
 						ReceivePosition((char *)&msg,clen,i);   //a client only moves itself
+						break;
+					}
+				case VOICE:
+					{
+						VoiceMessage voice;
+						if(!ReadVoice(&msg,clen,&voice)) break;
+						voice.player=i;   //a client only speaks for itself
+						if(GetPlayer(i)->playstate<10) break;
+						RelayVoice(&voice);
 						break;
 					}
 				case SIMPLE:
@@ -1245,6 +1257,16 @@ void ClientLoop()
 					}
 					break;
 				}
+			case VOICE:
+				{
+					//the server only relays the voices of players near us
+					VoiceMessage voice;
+					if(!connected||!ReadVoice(&msg,msglen,&voice)) break;
+					if(!ValidPlayer(voice.player)||voice.player==GetLocalNum()) break;
+					if(GetPlayer(voice.player)->playstate<10) break;
+					VoiceReceive(voice.player,voice.seq,voice.data,voice.len);
+					break;
+				}
 			case SERVERVARS:
 				{
 					ServerVarsMessage vars;
@@ -1375,6 +1397,9 @@ void ClientLoop()
 
 void SockLoop()
 {
+#ifndef HK_WIN32_NATIVE
+	VoiceUpdate();   //before the loops, which flush what it sends
+#endif
 	if(server) 
 		ServerLoop();
 	else
@@ -1701,6 +1726,7 @@ void DeletePlayer(int num,int reason)
 		break;
 	}
 	ConsoleDisplayText(message);
+	VoiceReset();   //players are renumbered
 	numplayers--;
 	for(int i=num;i<numplayers;i++)
 	{
@@ -1830,6 +1856,53 @@ void SendPosition(char srcnum,char destnum)
 	{
 		clientsock[destnum].Send(buf,size);
 	}
+}
+
+//---- voice chat (src/audio/voice.cpp): VOICE goes only to players in range ----
+
+static_assert((int)VOICE_WORLDSIZE==LANDGRIDSIZE,"voice.h: VOICE_WORLDSIZE must be LANDGRIDSIZE");
+
+static int VoiceNear(int a,int b)
+{
+	Vector pa=GetPlayer(a)->pos,pb=GetPlayer(b)->pos;
+	return VoiceDistance(pa.x,pa.y,pa.z,pb.x,pb.y,pb.z)<VOICE_RANGE;
+}
+
+//server: sends a voice frame of voice->player to the players near it, and plays
+//it here if the host is one of them
+static void RelayVoice(VoiceMessage *voice)
+{
+	int speaker=voice->player;
+	if(!ValidPlayer(speaker)||speaker>=numplayers) return;
+	char buf[VOICEMSGSIZE];
+	int size=WriteVoice(buf,sizeof(buf),voice);
+	if(!size) return;
+	for(int i=1;i<numplayers;i++)
+		if(i!=speaker&&GetPlayer(i)->playstate>=10&&VoiceNear(speaker,i))
+			clientsock[i].Send(buf,size);
+	if(speaker!=0&&GetPlayer(0)->playstate>=10&&VoiceNear(speaker,0))
+		VoiceReceive(speaker,voice->seq,voice->data,voice->len);
+}
+
+//sends one encoded frame of the local player (voice.cpp)
+void SendVoiceFrame(int seq,const unsigned char *data,int len)
+{
+	if(len<1||len>VOICEMAXFRAME) return;
+	if(GetLocalPlayer()->playstate<10) return;
+	VoiceMessage voice;
+	voice.player=GetLocalNum();
+	voice.seq=(uint16_t)seq;
+	voice.len=(uint16_t)len;
+	memcpy(voice.data,data,len);
+	if(server)
+	{
+		RelayVoice(&voice);
+		return;
+	}
+	if(!connected) return;
+	char buf[VOICEMSGSIZE];
+	int size=WriteVoice(buf,sizeof(buf),&voice);
+	if(size) datasock.Send(buf,size);
 }
 
 //called in structure.cpp when a building is going to be sent

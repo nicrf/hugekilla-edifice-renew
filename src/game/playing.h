@@ -142,7 +142,7 @@ struct Controls
 	char mousereverse;
 	int forward,back,lstrafe,rstrafe,fire,zoom,build,buy,showscores,
 		jump,talk,talkteam,reload,secondfire,jetpack,screenshot,claim,
-		duck,hangglide,seemoney;
+		duck,hangglide,seemoney,pushtotalk;
 	float mousesensitivity;
 	
 };

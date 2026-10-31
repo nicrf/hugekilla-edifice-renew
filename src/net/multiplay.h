@@ -68,6 +68,7 @@ void ScoreReset();
 void DeletePlayer(int num,int reason);
 void GiveCredit(int player, int credit, int number);
 void SendRGD(int player);
+void SendVoiceFrame(int seq,const unsigned char *data,int len);
 
 #define CMSG_BROADCAST 0
 #define CMSG_TEAM 1
