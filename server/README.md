@@ -14,7 +14,21 @@ Licence MIT (programme séparé du jeu, qui reste sous LGPL).
 go run . -public-host lobby.example.org -turn-relay-ip 203.0.113.10
 ```
 
-Ou avec Docker :
+Avec Docker Compose (recommandé) :
+
+```bash
+cd server && cp .env.example .env
+```
+
+Éditer `.env` (nom public, IP publique du relais, secret : `openssl rand -hex 32`), puis :
+
+```bash
+docker compose up -d --build
+```
+
+Le compose publie l'API (8080/tcp), la signalisation (10000/tcp), STUN/TURN (3478/udp) et la plage de ports du trafic relayé (49160-49200/udp, à ouvrir aussi dans le pare-feu). Mettre un reverse proxy HTTPS devant le port 8080 et passer `EDIFICE_TRUST_PROXY=1`.
+
+Ou avec Docker seul :
 
 ```bash
 docker build -t edifice-lobby . && docker run -p 8080:8080 -p 10000:10000 -p 3478:3478/udp -e EDIFICE_PUBLIC_HOST=lobby.example.org -e EDIFICE_TURN_RELAY_IP=203.0.113.10 -e EDIFICE_TURN_SECRET=change-me edifice-lobby
@@ -28,10 +42,11 @@ docker build -t edifice-lobby . && docker run -p 8080:8080 -p 10000:10000 -p 347
 | `-public-host` | `EDIFICE_PUBLIC_HOST` | — | nom ou IP que les joueurs utilisent pour joindre ce serveur (URLs STUN/TURN) |
 | `-turn-relay-ip` | `EDIFICE_TURN_RELAY_IP` | — | IPv4 publique du relais ; vide = TURN désactivé (STUN public de Google à la place) |
 | `-turn-secret` | `EDIFICE_TURN_SECRET` | aléatoire | secret des identifiants TURN (à fixer si plusieurs instances) |
+| `-turn-relay-ports` | `EDIFICE_TURN_RELAY_PORTS` | — | plage UDP du trafic relayé (ex. `49160-49200`), indispensable derrière les redirections de ports de Docker |
 | `-trust-proxy` | `EDIFICE_TRUST_PROXY=1` | non | IP du client lue dans `X-Forwarded-For` (derrière un reverse proxy) |
 | `-ttl` | — | `60s` | une partie disparaît si son hôte ne l'a pas renouvelée depuis ce délai |
 
-Pour le relais TURN, les ports UDP des allocations (choisis par le système) doivent aussi être joignables.
+Pour le relais TURN, les ports UDP des allocations doivent aussi être joignables : fixer leur plage avec `-turn-relay-ports` et l'ouvrir (le compose le fait).
 
 ## API
 

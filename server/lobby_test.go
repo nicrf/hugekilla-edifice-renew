@@ -222,7 +222,7 @@ func TestRateLimiter(t *testing.T) {
 
 func TestTURNAllocationWithSessionCredentials(t *testing.T) {
 	secret := "relay-secret"
-	server, err := StartTURN("127.0.0.1:34780", "127.0.0.1", "edifice", secret)
+	server, err := StartTURN("127.0.0.1:34780", "127.0.0.1", "edifice", secret, "49160-49200")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,6 +257,9 @@ func TestTURNAllocationWithSessionCredentials(t *testing.T) {
 	}
 	defer relay.Close()
 	t.Logf("relayed address: %s", relay.LocalAddr())
+	if port := relay.LocalAddr().(*net.UDPAddr).Port; port < 49160 || port > 49200 {
+		t.Fatalf("relay port %d outside the configured range", port)
+	}
 
 	// wrong password is refused
 	bad, _ := turn.NewClient(&turn.ClientConfig{
