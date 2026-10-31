@@ -159,6 +159,13 @@ void DrawMenu()
 	glColor3f(1,1,1);
 	if(GetLocalPlayer()->playstate!=0)
 		DrawText(-.8,.8,"Press escape to resume game");
+	{
+		char version[64];
+		sprintf(version,"v%s (protocol %d)",EDIFICE_VERSION_STRING,EDIFICE_PROTOCOL_VERSION);
+		glColor3f(.5,.5,.5);
+		DrawText(.97f-strlen(version)*.04f,.9f,version);
+		glColor3f(1,1,1);
+	}
 	if(OverCreditsButton()&&!showcredits)
 		glColor3f(1,1,1);
 	else

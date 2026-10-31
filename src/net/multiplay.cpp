@@ -18,6 +18,7 @@
 #include "stdio.h"
 #include "gameplay.h"
 #include "sock.h"
+#include "version.h"
 #define MAXLOCALLIST 128
 #ifndef HK_WIN32_NATIVE
 #ifndef _WIN32
@@ -91,6 +92,134 @@ SOCKADDR_IN MakeSockAddr(char a1,char a2,char a3,char a4,WORD port)
 	b[2]=a3;
 	b[3]=a4;
 	return addr;
+}
+
+//---- game/protocol version (src/net/version.h) ----
+
+//hash of the sizes of everything sent over the network as raw structs: two builds
+//that lay them out differently (struct packing, field added) can't play together
+static unsigned int LayoutHash()
+{
+	const unsigned int sizes[]=
+	{
+		sizeof(SimpleMessage),sizeof(PlayerPosition),sizeof(FireGunDirection),
+		sizeof(CreateObject),sizeof(LandInfo),sizeof(UpdateServerObject),
+		sizeof(KilledPosition),sizeof(ServerVars),sizeof(RequestEnter),sizeof(Info),
+		sizeof(ServerObject),sizeof(RemoteGameData)
+	};
+	unsigned int h=2166136261u;   //FNV-1a
+	for(unsigned int i=0;i<sizeof(sizes)/sizeof(sizes[0]);i++)
+		for(int b=0;b<4;b++)
+		{
+			h^=(sizes[i]>>(b*8))&0xff;
+			h*=16777619u;
+		}
+	return h;
+}
+
+int WriteVersionTrailer(char *buf)
+{
+	unsigned char *p=(unsigned char *)buf;
+	unsigned int magic=EDIFICE_NET_MAGIC,layout=LayoutHash();
+	int pos=0;
+	for(int b=0;b<4;b++) p[pos++]=(magic>>(b*8))&0xff;
+	p[pos++]=EDIFICE_PROTOCOL_VERSION&0xff;
+	p[pos++]=(EDIFICE_PROTOCOL_VERSION>>8)&0xff;
+	for(int b=0;b<4;b++) p[pos++]=(layout>>(b*8))&0xff;
+	int n=strlen(EDIFICE_VERSION_STRING);
+	if(n>15) n=15;
+	p[pos++]=n;
+	memcpy(&p[pos],EDIFICE_VERSION_STRING,n);
+	return pos+n;
+}
+
+void ReadVersionTrailer(const char *buf,int len,PeerVersion *out)
+{
+	const unsigned char *p=(const unsigned char *)buf;
+	memset(out,0,sizeof(*out));
+	out->protocol=1;
+	strcpy(out->version,"old");
+	if(len<11) return;
+	unsigned int magic=p[0]|(p[1]<<8)|(p[2]<<16)|((unsigned int)p[3]<<24);
+	if(magic!=EDIFICE_NET_MAGIC) return;
+	out->present=1;
+	out->protocol=p[4]|(p[5]<<8);
+	out->layout=p[6]|(p[7]<<8)|(p[8]<<16)|((unsigned int)p[9]<<24);
+	int n=p[10];
+	if(n>15) n=15;
+	if(n>len-11) n=len-11;
+	for(int i=0;i<n;i++)
+		out->version[i]=(p[11+i]>=32&&p[11+i]<127)?p[11+i]:'?';
+	out->version[n]=0;
+}
+
+int VersionCompatible(const PeerVersion *peer,char *reason,int reasonsize)
+{
+	if(peer->present&&peer->protocol==EDIFICE_PROTOCOL_VERSION&&peer->layout==LayoutHash())
+	{
+		if(reasonsize) reason[0]=0;
+		return 1;
+	}
+	if(!peer->present)
+		snprintf(reason,reasonsize,"original game (p1), you %s p%d",EDIFICE_VERSION_STRING,EDIFICE_PROTOCOL_VERSION);
+	else if(peer->protocol!=EDIFICE_PROTOCOL_VERSION)
+		snprintf(reason,reasonsize,"other %s p%d, you %s p%d",peer->version,peer->protocol,EDIFICE_VERSION_STRING,EDIFICE_PROTOCOL_VERSION);
+	else
+		snprintf(reason,reasonsize,"same protocol, other build (%s)",peer->version);
+	return 0;
+}
+
+//client asks infosock.dest to join, with its version
+static void SendRequestEnter()
+{
+	char buf[2+32+VERSIONTRAILER_MAX];
+	int nl=strlen(netsettings.playername);
+	if(nl>31) nl=31;
+	buf[0]=REQUESTENTER;
+	buf[1]=nl;
+	memcpy(&buf[2],netsettings.playername,nl);
+	buf[2+nl]=0;
+	int len=2+nl+1;
+	len+=WriteVersionTrailer(&buf[len]);
+	infosock.Send(buf,len);
+	infosock.Flush();
+}
+
+//server answers an info request, with its version
+static void SendInfo(SOCKADDR_IN dest)
+{
+	char buf[2+100+VERSIONTRAILER_MAX];
+	int nl=strlen(netsettings.servername);
+	if(nl>99) nl=99;
+	buf[0]=INFO;
+	buf[1]=nl;
+	memcpy(&buf[2],netsettings.servername,nl);
+	buf[2+nl]=0;
+	int len=2+nl+1;
+	len+=WriteVersionTrailer(&buf[len]);
+	infosock.dest=dest;
+	infosock.Send(buf,len);
+	infosock.Flush();
+}
+
+//server turns a client down: a SIMPLE message new clients understand, plus a
+//console text (CMSG_INFO chat) that original clients display
+static void RefuseClient(SOCKADDR_IN dest,char why,const char *text)
+{
+	infosock.dest=dest;
+	SimpleMessage refuse=MakeSimple(why,EDIFICE_PROTOCOL_VERSION,0);
+	infosock.Send(&refuse,sizeof(refuse));
+	char chat[300];
+	int len=strlen(text);
+	if(len>250) len=250;
+	chat[0]=CHATMESSAGE;
+	chat[1]=CMSG_INFO;
+	chat[2]=0;
+	chat[3]=len&0xff;
+	chat[4]=(len>>8)&0xff;
+	memcpy(&chat[5],text,len);
+	infosock.Send(chat,len+5);
+	infosock.Flush();
 }
 
 void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pnum);
@@ -230,13 +359,7 @@ void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pn
 	{
 		case REQUESTINFO:
 		{
-			Info info;
-			info.type=INFO;
-			info.namelen=strlen(netsettings.servername);
-			strcpy(info.name,netsettings.servername);
-			infosock.dest=source;
-			infosock.Send(&info,2+info.namelen+1);
-			infosock.Flush();
+			SendInfo(source);
 			ConsoleDisplayText("received info request");
 			break;
 		}
@@ -394,13 +517,19 @@ void ServerLoop()
 	SOCKADDR_IN source;
 	infosock.CheckReliableResend();
 		
-	while(infosock.Receive(&msg,&source))
+	int msglen;
+	while((msglen=infosock.Receive(&msg,&source)))
 	{
 		switch (msg.type)
 		{
 		case REQUESTENTER:
 			{
 				RequestEnter *req=(RequestEnter *)&msg;
+				req->name[sizeof(req->name)-1]=0;
+				int reqnamelen=(unsigned char)req->namelen;
+				if(reqnamelen>31) reqnamelen=31;
+				PeerVersion peer;
+				ReadVersionTrailer((char *)&msg+2+reqnamelen+1,msglen-(2+reqnamelen+1),&peer);
 				int addplayer=numplayers;
 				
 				char message[1000];
@@ -410,10 +539,21 @@ void ServerLoop()
 				strcat(message," requests to connect");
 				ConsoleDisplayText(message);
 				
+				char reason[200];
+				if(!VersionCompatible(&peer,reason,sizeof(reason)))
+				{
+					strcpy(message,"refused, ");
+					strcat(message,reason);
+					ConsoleDisplayText(message);
+					sprintf(message,"This server runs Edifice %s (protocol %d): update your game to join.",
+						EDIFICE_VERSION_STRING,EDIFICE_PROTOCOL_VERSION);
+					RefuseClient(source,VERSIONMISMATCH,message);
+					break;
+				}
 				if(numplayers>=MAXPLAYERS) 
 				{
 					ConsoleDisplayText("server was full");
-					SimpleMessage serverfull=MakeSimple(SERVERFULL,numplayers,0);
+					RefuseClient(source,SERVERFULL,"The server is full.");
 					break;
 				}
 				
@@ -613,6 +753,24 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 {
 	switch(type)
 	{
+		case VERSIONMISMATCH:
+		case SERVERFULL:
+			{
+				//only while waiting for an answer to REQUESTENTER
+				if(GetLocalPlayer()->playstate!=1||connected) break;
+				char text[200];
+				if(type==SERVERFULL)
+					strcpy(text,"Can't join:\rthe server is full");
+				else
+					snprintf(text,sizeof(text),"Can't join: server is\rprotocol %d, you %d.\rUpdate the game.",(int)msg,EDIFICE_PROTOCOL_VERSION);
+				ConsoleDisplayText(text);
+				Disconnect();
+				GetLocalPlayer()->playstate=0;
+#ifndef HK_WIN32_NATIVE
+				JoinScreenShowError(text);
+#endif
+				break;
+			}
 		case ENTER:
 			{
 				if(GetLocalPlayer()->playstate==1&&connected==0)
@@ -712,9 +870,9 @@ void ClientLoop()
 		
 	while(1)
 	{	
-		if(!datasock.Receive(&msg,&source))
-			if(!infosock.Receive(&msg,&source))
-				break;
+		int msglen=datasock.Receive(&msg,&source);
+		if(!msglen) msglen=infosock.Receive(&msg,&source);
+		if(!msglen) break;
 		GetPlayer(0)->timeout=curtime+70000;
 		//if(!(source.sin_addr.s_addr==infosock.dest.sin_addr.s_addr)) continue;
 		switch(msg.type)
@@ -730,12 +888,17 @@ void ClientLoop()
 					}
 					if(i!=numlocallistaddr) break;
 					Info *info=(Info *)&msg;
+					info->name[sizeof(info->name)-1]=0;
+					int namelen=(unsigned char)info->namelen;
+					if(namelen>99) namelen=99;
+					PeerVersion peer;
+					ReadVersionTrailer((char *)&msg+2+namelen+1,msglen-(2+namelen+1),&peer);
 					locallistaddr[numlocallistaddr]=source;
 					numlocallistaddr++;
 #ifdef HK_WIN32_NATIVE
 					SendDlgItemMessage(dlghwnd,IDC_LOCALGAMES,LB_ADDSTRING,0,(long)info->name);
 #else
-					JoinScreenAddGame(info->name);
+					JoinScreenAddGame(info->name,&peer);
 #endif
 					ConsoleDisplayText("received info");
 					break;
@@ -874,12 +1037,7 @@ void ClientLoop()
 	{
 		if(connected==0)
 		{
-			RequestEnter req;
-			req.type=REQUESTENTER;
-			req.namelen=strlen(netsettings.playername);
-			strcpy(req.name,netsettings.playername);
-			infosock.Send(&req,2+req.namelen+1);
-			infosock.Flush();
+			SendRequestEnter();
 			GetPlayer(0)->timeout=curtime+2000;
 			ConsoleDisplayText("retrying");
 		}
@@ -997,12 +1155,7 @@ LRESULT CALLBACK Multiplay(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
 				int lbsel=SendMessage(listhwnd,LB_GETCURSEL,0,0);
 				if(lbsel==LB_ERR) return 1;
 				infosock.dest=locallistaddr[lbsel];
-				RequestEnter req;
-				req.type=REQUESTENTER;
-				req.namelen=strlen(netsettings.playername);
-				strcpy(req.name,netsettings.playername);
-				infosock.Send(&req,2+req.namelen+1);
-				infosock.Flush();
+				SendRequestEnter();
 				connected=0;
 				GetLocalPlayer()->playstate=1;
 				GetLocalPlayer()->timeout=curtime+2000;
@@ -1021,10 +1174,19 @@ int joinscreen;
 char joinip[64];
 int joinselected;
 int joinipedited;
-char localgamenames[MAXLOCALLIST][100];
+struct JoinGame
+{
+	char name[100];
+	char version[16];
+	int compatible;
+	char reason[120];
+};
+JoinGame joingames[MAXLOCALLIST];
+char joinstatus[200];   //last refusal or error, shown on the screen
 
 static void JoinScreenRefresh()
 {
+	joinstatus[0]=0;
 	infosock.dest=MakeSockAddr(255,255,255,255,netsettings.infosendport);
 	SimpleMessage simple;
 	simple.type=SIMPLE;
@@ -1071,14 +1233,15 @@ static void JoinScreenQueryIP()
 static void JoinScreenJoin()
 {
 	if(joinselected<0||joinselected>=numlocallistaddr) return;
+	if(!joingames[joinselected].compatible)
+	{
+		snprintf(joinstatus,sizeof(joinstatus),"Can't join:\r%s",joingames[joinselected].reason);
+		return;
+	}
+	joinstatus[0]=0;
 	datasock.ResetReliable();
 	infosock.dest=locallistaddr[joinselected];
-	RequestEnter req;
-	req.type=REQUESTENTER;
-	req.namelen=strlen(netsettings.playername);
-	strcpy(req.name,netsettings.playername);
-	infosock.Send(&req,2+req.namelen+1);
-	infosock.Flush();
+	SendRequestEnter();
 	connected=0;
 	GetLocalPlayer()->playstate=1;
 	GetLocalPlayer()->timeout=curtime+2000;
@@ -1117,11 +1280,22 @@ int IsJoinScreenOpen()
 	return joinscreen;
 }
 
-void JoinScreenAddGame(const char *name)
+void JoinScreenAddGame(const char *name,const PeerVersion *peer)
 {
 	if(numlocallistaddr<1||numlocallistaddr>MAXLOCALLIST) return;
-	strncpy(localgamenames[numlocallistaddr-1],name,99);
-	localgamenames[numlocallistaddr-1][99]=0;
+	JoinGame &game=joingames[numlocallistaddr-1];
+	strncpy(game.name,name,99);
+	game.name[99]=0;
+	strcpy(game.version,peer->version);
+	game.compatible=VersionCompatible(peer,game.reason,sizeof(game.reason));
+}
+
+//back to the join screen after a refused connection, with the reason
+void JoinScreenShowError(const char *text)
+{
+	OpenJoinScreen();
+	strncpy(joinstatus,text,sizeof(joinstatus)-1);
+	joinstatus[sizeof(joinstatus)-1]=0;
 }
 
 //returns 1 when the key was used by the join screen
@@ -1223,11 +1397,34 @@ void DrawJoinScreen()
 	}
 	for(int i=0;i<numlocallistaddr&&i<8;i++)
 	{
-		if(i==joinselected) glColor3f(1,1,.5f);
-		else glColor3f(.8f,.8f,.8f);
-		snprintf(line,sizeof(line),"%s %s",i==joinselected?">":" ",localgamenames[i]);
+		const JoinGame &game=joingames[i];
+		float dim=game.compatible?1:.5f;
+		if(i==joinselected) glColor3f(dim,dim,.5f*dim);
+		else glColor3f(.8f*dim,.8f*dim,.8f*dim);
+		char name[17];
+		strncpy(name,game.name,16);
+		name[16]=0;
+		snprintf(line,sizeof(line),"%s %s v%s",i==joinselected?">":" ",name,game.version);
 		DrawText(-.05f,.04f-i*.08f,line);
 	}
+	if(joinstatus[0])
+	{
+		//one line per '\r'
+		glColor3f(1,.55f,.45f);
+		char status[200];
+		strcpy(status,joinstatus);
+		float y=-.4f;
+		for(char *part=status;part;y-=.07f)
+		{
+			char *next=strchr(part,'\r');
+			if(next) *next++=0;
+			DrawText(-.05f,y,part);
+			part=next;
+		}
+	}
+	glColor3f(.5f,.5f,.5f);
+	snprintf(line,sizeof(line),"You: v%s (protocol %d)",EDIFICE_VERSION_STRING,EDIFICE_PROTOCOL_VERSION);
+	DrawText(-.05f,-.76f,line);
 	glColor3f(.6f,.6f,.6f);
 	DrawText(-.05f,-.6f,"Enter: look up / join");
 	DrawText(-.05f,-.68f,"F5: LAN    Esc: back");

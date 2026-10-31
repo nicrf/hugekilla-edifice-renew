@@ -133,6 +133,7 @@ target_include_directories(Edifice PRIVATE ${INCLUDE_DIRS})
 # Last-resort data lookup in the source tree: Debug builds only, so a moved
 # Release binary never writes into the git-tracked data/control.ini.
 target_compile_definitions(Edifice PRIVATE GL_SILENCE_DEPRECATION
+  EDIFICE_VERSION_STRING="${PROJECT_VERSION}"
   "$<$<CONFIG:Debug>:HK_SOURCE_DATA_DIR=\"${DATA_DIR}\">")
 
 # 2000-era code: keep the noise down, and keep its signed char / wrapping assumptions.
