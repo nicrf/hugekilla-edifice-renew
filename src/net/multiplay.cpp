@@ -576,6 +576,21 @@ void ServerLoop()
 					RefuseClient(source,VERSIONMISMATCH,message);
 					break;
 				}
+				//a retried request (its ENTER got lost) gets the same slot again
+				int known;
+				for(known=1;known<numplayers;known++)
+					if(GetPlayer(known)->playstate==1&&
+						clientsock[known].requestaddr.sin_addr.s_addr==source.sin_addr.s_addr&&
+						clientsock[known].requestaddr.sin_port==source.sin_port)
+						break;
+				if(known<numplayers)
+				{
+					SimpleMessage enter=MakeSimple(ENTER,htons(clientsock[known].localport),known);
+					infosock.dest=source;
+					infosock.Send(&enter,sizeof(enter));
+					infosock.Flush();
+					break;
+				}
 				if(numplayers>=MAXPLAYERS) 
 				{
 					ConsoleDisplayText("server was full");
@@ -583,35 +598,36 @@ void ServerLoop()
 					break;
 				}
 				
+				//each client gets its own server port: the first free one after datasendport
+				int baseport=ntohs(netsettings.datasendport);
+				SOCKET newsock=WSASocket(AF_INET,SOCK_DGRAM,0,0,0,WSA_FLAG_OVERLAPPED);
+				int port=0;
+				for(int p=baseport+1;p<=baseport+2*MAXPLAYERS&&!port&&newsock;p++)
+				{
+					int used=0;
+					for(int c=1;c<numplayers;c++)
+						if(clientsock[c].sock&&clientsock[c].localport==p) used=1;
+					if(used) continue;
+					SOCKADDR_IN self=MakeSockAddr(0,0,0,0,htons(p));
+					if(bind(newsock,(SOCKADDR *)&self,sizeof(self))==0) port=p;
+				}
+				if(!port)
+				{
+					if(newsock) closesocket(newsock);
+					ConsoleDisplayText("no free port for a new client");
+					RefuseClient(source,SERVERFULL,"The server has no free port.");
+					break;
+				}
+
 				strcpy(GetPlayer(addplayer)->name,req->name);
+				clientsock[addplayer].sock=newsock;
 				clientsock[addplayer].dest=source;
-				curport=htons(curport)+1;  //now in normal form
-				if(curport>netsettings.datasendport+25)
-				{
-					curport=netsettings.datasendport;
-				}
-				int i;
-				for(i=0;i<numplayers;i++)
-				{
-					if(clientsock[i].dest.sin_port==curport)
-					{
-						curport++;
-					}
-				}
-				curport=htons(curport);
-				int port=curport;
-				
-				
-				SOCKADDR_IN self;
-				clientsock[addplayer].sock=WSASocket(AF_INET,SOCK_DGRAM,0,0,0,WSA_FLAG_OVERLAPPED);
-				clientsock[addplayer].dest.sin_port=port;
+				clientsock[addplayer].dest.sin_port=htons(port);   //the client binds the same port
+				clientsock[addplayer].localport=port;
+				clientsock[addplayer].requestaddr=source;
+				clientsock[addplayer].filterip=1;
 				clientsock[addplayer].ResetReliable();
-
-				ZeroMemory(&self,sizeof(self));
-				self=MakeSockAddr(0,0,0,0,port);
-
-				bind(clientsock[addplayer].sock,(SOCKADDR *)&self,sizeof(self));
-				SimpleMessage enter=MakeSimple(ENTER,clientsock[addplayer].dest.sin_port,addplayer);
+				SimpleMessage enter=MakeSimple(ENTER,htons(port),addplayer);
 				infosock.dest=source;
 				infosock.Send(&enter,sizeof(enter));
 				infosock.Flush();
@@ -648,7 +664,7 @@ void ServerLoop()
 				CopyMemory(&buf[bufpos],GetPlayer(addplayer)->name,namelen);
 				bufpos+=namelen;
 				
-				for(i=1;i<numplayers;i++)
+				for(int i=1;i<numplayers;i++)
 				{
 					clientsock[i].SendReliable(&names,bufpos+1,0);
 				}
@@ -732,7 +748,7 @@ void ServerLoop()
 				}
 			}
 		};
-		if(curtime>GetPlayer(i)->timeout)
+		if(curtime>GetPlayer(i)->timeout||clientsock[i].reliablefailed)
 		{
 			DeletePlayer(i,0);
 		}
@@ -823,6 +839,7 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 					int g=bind(datasock.sock,(SOCKADDR *)&self,sizeof(self));
 					datasock.dest=source;
 					datasock.dest.sin_port=msg;
+					datasock.filterip=1;   //from now on, only the server's IP
 					SimpleMessage portack;
 					portack.type=SIMPLE;
 					portack.type2=PORTACK;
@@ -912,9 +929,21 @@ void ClientLoop()
 		
 	while(1)
 	{	
+		int frominfo=0;
 		int msglen=datasock.Receive(&msg,&source);
-		if(!msglen) msglen=infosock.Receive(&msg,&source);
+		if(!msglen)
+		{
+			msglen=infosock.Receive(&msg,&source);
+			frominfo=1;
+		}
 		if(!msglen) break;
+		//before joining, game messages only come from the server we asked; anyone may
+		//answer a LAN search (INFO)
+		if(frominfo&&msg.type!=INFO)
+		{
+			if(source.sin_addr.s_addr!=infosock.dest.sin_addr.s_addr) continue;
+			if(msg.type!=SIMPLE&&msg.type!=CHATMESSAGE) continue;
+		}
 		GetPlayer(0)->timeout=curtime+70000;
 		//if(!(source.sin_addr.s_addr==infosock.dest.sin_addr.s_addr)) continue;
 		switch(msg.type)
@@ -1110,6 +1139,12 @@ void ClientLoop()
 			Disconnect();
 			GetLocalPlayer()->playstate=0;
 		}
+	}
+	if(connected&&GetLocalPlayer()->playstate>=10&&(curtime>GetPlayer(0)->timeout||datasock.reliablefailed))
+	{
+		ConsoleDisplayText("server timed out");
+		Disconnect();
+		GetLocalPlayer()->playstate=0;
 	}
 	if(curtime>nextresend)
 	{
@@ -1630,7 +1665,13 @@ void ReceivePosition(Message *msg,int sender)
 	src->vel.y=(float)pos->vely/64;
 	src->vel.z=(float)pos->velz/64;
 	src->weapon=ValidWeapon(pos->weapon)?pos->weapon:0;
-	if(pos->state!=1) 
+	if(sender>=0)
+	{
+		//a client only reports being alive or dead
+		if(pos->state==10||pos->state==11)
+			src->playstate=pos->state;
+	}
+	else if(pos->state!=1) 
 		src->playstate=pos->state;
 	MakeClose(&src->pos);
 }
@@ -1808,6 +1849,8 @@ void ReceiveChatMessage(Message *msg,int msglen)
 {
 	char dest=msg->buf[0];
 	if(msglen!=-1&&msglen<5) return;
+	//score, objective and info lines come from the server only
+	if(server&&msg->buf[1]&&dest!=CMSG_BROADCAST&&dest!=CMSG_TEAM) return;
 	//if(server==1&&(dest!=CMSG_BROADCAST&&dest!=CMSG_TEAM)) return;
 	
 

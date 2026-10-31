@@ -22,10 +22,20 @@ struct SimpleMessage
 };
 
 
+#define MAXRELIABLEQUEUE 256            //messages waiting to be sent reliably
+#define MAXRELIABLEQUEUEBYTES (1<<20)
+#define RELIABLEFIRSTRESEND 150         //ms, doubled at each resend up to RELIABLEMAXRESEND
+#define RELIABLEMAXRESEND 2000
+#define RELIABLEGIVEUP 30               //resends of one packet before the link is declared dead
+
 class Sock
 {
 public:
 	DWORD packetsreceived,packetssent;
+	int filterip;           //drop datagrams that don't come from dest's IP (set once connected)
+	int reliablefailed;     //a reliable packet was never acknowledged: the link is dead
+	WORD localport;         //server side: port this socket listens on (host order)
+	SOCKADDR_IN requestaddr;//server side: address the join request came from
 private:
 	struct buf
 	{
@@ -37,7 +47,8 @@ private:
 		buf data;
 		int size;
 		WORD id,num;
-		int timetillresend;
+		DWORD resendat;   //GetTickCount() time of the next resend
+		int resends;
 	};
 		
 	struct reliabledata

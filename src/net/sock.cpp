@@ -114,6 +114,9 @@ int Sock::Receive(void *data,SOCKADDR_IN *source,int maxsize)
 		int received=recvfrom(sock,(char *)&recvbuf,sizeof(recvbuf),0,(SOCKADDR*)source,&addrsize);
 		packetsreceived++;
 		if(received<=0) return 0;
+		//once connected, only the peer's IP is listened to (any port: NATs may change it)
+		if(filterip&&dest.sin_addr.s_addr&&source->sin_addr.s_addr!=dest.sin_addr.s_addr)
+			continue;
 		recvbufsize=received-1;   //bytes after the type
 		recvbufpos=recvbufsize;   //consumed unless it turns out to hold grouped messages
 		datarecvthissec+=recvbufsize+16;
@@ -178,8 +181,9 @@ int Sock::Receive(void *data,SOCKADDR_IN *source,int maxsize)
 				return 1;
 			}
 			//answer where the data came from (lets clients behind a NAT through),
-			//only once the packet passed the checksum
-			CopyMemory(&dest,source,sizeof(dest));
+			//only once the packet passed the checksum, and never to another IP
+			if(!dest.sin_addr.s_addr||dest.sin_addr.s_addr==source->sin_addr.s_addr)
+				CopyMemory(&dest,source,sizeof(dest));
 			buf ack;
 			ack.type=ACK;
 			*(WORD*)&ack.data[0]=*(WORD*)&recvbuf.data[4];
@@ -274,7 +278,8 @@ sendmore:
 	curbuf->id=reliablebufid;
 	curbuf->num=reliablebufnum;
 	ResendReliable(curbuf);
-	curbuf->timetillresend=10;
+	curbuf->resendat=GetTickCount()+RELIABLEFIRSTRESEND;
+	curbuf->resends=0;
 	if(reliablesenddata->size>RELIABLEPACKETSIZE)
 	{
 		curbuf=0;
@@ -300,10 +305,20 @@ int Sock::SendReliable(void *data,int size,int callback)
 	{
 		return !!reliablesenddata;
 	}
+	if(size<=0||size>BIGBUFSIZE-4) return 0;
 	reliabledata **last=&reliablesenddata;
+	int queued=0,queuedbytes=0;
 	while(*last)
 	{
+		queued++;
+		queuedbytes+=(*last)->size;
 		last=&((*last)->next);
+	}
+	//bounded queue: a peer that stops acknowledging can't make us use unbounded memory
+	if(queued>=MAXRELIABLEQUEUE||queuedbytes+size>MAXRELIABLEQUEUEBYTES)
+	{
+		reliablefailed=1;
+		return 0;
 	}
 	*last=new reliabledata;
 	(*last)->data=new char[size];
@@ -329,12 +344,20 @@ void Sock::CheckReliableResend()
 	if(reliablebuf[i].size)
 	{
 
-		reliablebuf[i].timetillresend--;
-		if(reliablebuf[i].timetillresend<0)
+		//real time, not frames; backs off, and gives up on a peer that never answers
+		//(it would otherwise be flooded forever, which spoofed requests could aim at anyone)
+		DWORD now=GetTickCount();
+		if((int)(now-reliablebuf[i].resendat)<0) continue;
+		if(reliablebuf[i].resends>=RELIABLEGIVEUP)
 		{
-			ResendReliable(&reliablebuf[i]);
-			reliablebuf[i].timetillresend=40;
+			reliablefailed=1;
+			continue;
 		}
+		ResendReliable(&reliablebuf[i]);
+		reliablebuf[i].resends++;
+		int delay=RELIABLEFIRSTRESEND<<(reliablebuf[i].resends<4?reliablebuf[i].resends:4);
+		if(delay>RELIABLEMAXRESEND) delay=RELIABLEMAXRESEND;
+		reliablebuf[i].resendat=now+delay;
 	}
 }
 void Sock::ResetRecvReliable()
@@ -348,6 +371,7 @@ void Sock::ResetReliable()
 
 	reliablebufid=0;
 	reliableintransmit=0;
+	reliablefailed=0;
 	for(int i=0;i<MAXSIMULRELIABLE;i++)
 	{
 		reliablebuf[i].size=0;
