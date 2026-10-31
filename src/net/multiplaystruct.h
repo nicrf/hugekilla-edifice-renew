@@ -43,6 +43,7 @@
 #define PORTOPENER 23
 #define CREDITS 24
 #define GAMEOVER 25
+#define VERSIONMISMATCH 26   //server refused REQUESTENTER: msg = server protocol (version.h)
 
 struct RequestEnter
 {

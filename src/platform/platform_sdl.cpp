@@ -432,6 +432,11 @@ int main(int argc, char **argv)
 	SDL_StartTextInput();
 
 	InitConsole();
+	{
+		char version[100];
+		snprintf(version, sizeof(version), "Edifice %s (protocol %d)", EDIFICE_VERSION_STRING, EDIFICE_PROTOCOL_VERSION);
+		ConsoleDisplayText(version);
+	}
 
 	LoadTexture("textures\\fonts\\courier.pxr", 300);
 	LoadTexture("textures\\startup.bmp", 800);

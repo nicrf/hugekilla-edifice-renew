@@ -2,12 +2,14 @@
 #include "vector.h"
 #include "playing.h"
 #include "winsock2.h"
+#include "version.h"
 
 LRESULT CALLBACK Multiplay(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
 #ifndef HK_WIN32_NATIVE
 void OpenJoinScreen();
 int IsJoinScreenOpen();
-void JoinScreenAddGame(const char *name);
+void JoinScreenAddGame(const char *name,const PeerVersion *peer);
+void JoinScreenShowError(const char *text);
 int HandleJoinScreenKey(int sdlkey);
 void HandleJoinScreenText(const char *text);
 void DrawJoinScreen();
