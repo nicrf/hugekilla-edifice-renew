@@ -69,6 +69,7 @@ set(SOURCES
   src/ui/scoreboard.cpp
   src/ui/buildmenu.cpp
   src/ui/chat.cpp
+  src/ui/joinscreen.cpp
   src/audio/sound_sdl.cpp
   src/platform/platform_sdl.cpp
   src/compat/win32compat.cpp

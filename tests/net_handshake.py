@@ -69,6 +69,11 @@ t = m[2 + namelen + 1:]
 magic, proto, layout, vlen = struct.unpack_from("<IHIB", t, 0)
 ver = t[11:11 + vlen].decode()
 print("INFO: name=%r magic_ok=%s protocol=%d layout=%08x version=%s" % (name, magic == MAGIC, proto, layout, ver))
+details = t[11 + vlen:11 + vlen + 4]
+if len(details) == 4:
+    players, maxplayers, mode, captures = details
+    print("INFO details: players=%d/%d mode=%d captures=%d" % (players, maxplayers, mode, captures))
+    ok &= 1 <= players <= maxplayers
 ok &= magic == MAGIC and proto >= 2
 
 # 2. original client (no trailer) is refused with VERSIONMISMATCH + readable text

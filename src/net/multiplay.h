@@ -6,12 +6,36 @@
 
 LRESULT CALLBACK Multiplay(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
 #ifndef HK_WIN32_NATIVE
+//a server found by the join screen (LAN search, address, recent servers)
+struct JoinGame
+{
+	char name[100];
+	char address[24];
+	char version[16];
+	int compatible;
+	char reason[120];
+	int ping;          //ms
+	int players;       //-1: unknown (server older than 0.3.0)
+	int maxplayers;
+	int gamemode;      //sv.gamemode: 0 capture the flag, 1 sandbox
+	int capturelimit;
+};
+void JoinNetOpen();
+void JoinNetClose();
+void JoinNetClearList();
+void JoinNetSearchLAN();
+int JoinNetQuery(const char *host);
+int JoinNetConnect(int index,char *reason,int reasonsize);
+int JoinGameCount();
+JoinGame *JoinGameAt(int i);
+void JoinNetDebugAdd(const char *name,const char *addr,const char *version,int protocol,int ping,int players,int mode);
+//join screen (src/ui/joinscreen.cpp)
 void OpenJoinScreen();
 int IsJoinScreenOpen();
-void JoinScreenAddGame(const char *name,const PeerVersion *peer);
 void JoinScreenShowError(const char *text);
 int HandleJoinScreenKey(int sdlkey);
 void HandleJoinScreenText(const char *text);
+void JoinScreenClick(int clicks);
 void DrawJoinScreen();
 #endif
 #define MAXPLAYERS 32
