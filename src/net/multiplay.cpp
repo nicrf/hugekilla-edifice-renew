@@ -19,6 +19,7 @@
 #include "gameplay.h"
 #include "sock.h"
 #include "version.h"
+#include "wire.h"
 #include "ui.h"
 #define MAXLOCALLIST 128
 #ifndef HK_WIN32_NATIVE
@@ -62,20 +63,17 @@ DWORD nextresend;
 
 char curobjective[1000];
 char curscore[1000];
-int SendMultMessage(Message *msg,int len,int player);
+int SendMultMessage(const void *msg,int len,int player);
 
 
 
 
-//used to make a SimpleMessage structure
+//used to make a SIMPLE message, serialized: send simple.b,sizeof(simple.b)
 
-SimpleMessage MakeSimple(char type,DWORD msg,DWORD msg2)
+SimpleBuf MakeSimple(char type,DWORD msg,DWORD msg2)
 {
-	SimpleMessage simple;
-	simple.type=SIMPLE;
-	simple.type2=type;
-	simple.msg=msg;
-	simple.msg2=msg2;
+	SimpleBuf simple;
+	WriteSimple(simple.b,type,msg,msg2);
 	return simple;
 }
 
@@ -97,41 +95,17 @@ SOCKADDR_IN MakeSockAddr(char a1,char a2,char a3,char a4,WORD port)
 
 //---- game/protocol version (src/net/version.h) ----
 
-//hash of the sizes of everything sent over the network as raw structs: two builds
-//that lay them out differently (struct packing, field added) can't play together
-static unsigned int LayoutHash()
-{
-	const unsigned int sizes[]=
-	{
-		sizeof(SimpleMessage),sizeof(PlayerPosition),sizeof(FireGunDirection),
-		sizeof(CreateObject),sizeof(LandInfo),sizeof(UpdateServerObject),
-		sizeof(KilledPosition),sizeof(ServerVars),sizeof(RequestEnter),sizeof(Info),
-		sizeof(ServerObject),sizeof(RemoteGameData)
-	};
-	unsigned int h=2166136261u;   //FNV-1a
-	for(unsigned int i=0;i<sizeof(sizes)/sizeof(sizes[0]);i++)
-		for(int b=0;b<4;b++)
-		{
-			h^=(sizes[i]>>(b*8))&0xff;
-			h*=16777619u;
-		}
-	return h;
-}
-
 int WriteVersionTrailer(char *buf)
 {
-	unsigned char *p=(unsigned char *)buf;
-	unsigned int magic=EDIFICE_NET_MAGIC,layout=LayoutHash();
-	int pos=0;
-	for(int b=0;b<4;b++) p[pos++]=(magic>>(b*8))&0xff;
-	p[pos++]=EDIFICE_PROTOCOL_VERSION&0xff;
-	p[pos++]=(EDIFICE_PROTOCOL_VERSION>>8)&0xff;
-	for(int b=0;b<4;b++) p[pos++]=(layout>>(b*8))&0xff;
+	ByteWriter w(buf,VERSIONTRAILER_MAX);
+	w.U32(EDIFICE_NET_MAGIC);
+	w.U16(EDIFICE_PROTOCOL_VERSION);
+	w.U32(EDIFICE_NET_LAYOUT);   //fixed since protocol 4 (explicit serialization)
 	int n=strlen(EDIFICE_VERSION_STRING);
 	if(n>15) n=15;
-	p[pos++]=n;
-	memcpy(&p[pos],EDIFICE_VERSION_STRING,n);
-	return pos+n;
+	w.U8(n);
+	w.Bytes(EDIFICE_VERSION_STRING,n);
+	return w.Size();
 }
 
 void ReadVersionTrailer(const char *buf,int len,PeerVersion *out)
@@ -156,17 +130,17 @@ void ReadVersionTrailer(const char *buf,int len,PeerVersion *out)
 
 int VersionCompatible(const PeerVersion *peer,char *reason,int reasonsize)
 {
-	if(peer->present&&peer->protocol==EDIFICE_PROTOCOL_VERSION&&peer->layout==LayoutHash())
+	//the protocol alone decides: messages no longer depend on the struct layout,
+	//so peer->layout is informative (older protocols still differ by protocol)
+	if(peer->present&&peer->protocol==EDIFICE_PROTOCOL_VERSION)
 	{
 		if(reasonsize) reason[0]=0;
 		return 1;
 	}
 	if(!peer->present)
 		snprintf(reason,reasonsize,"original game (p1), you %s p%d",EDIFICE_VERSION_STRING,EDIFICE_PROTOCOL_VERSION);
-	else if(peer->protocol!=EDIFICE_PROTOCOL_VERSION)
-		snprintf(reason,reasonsize,"other %s p%d, you %s p%d",peer->version,peer->protocol,EDIFICE_VERSION_STRING,EDIFICE_PROTOCOL_VERSION);
 	else
-		snprintf(reason,reasonsize,"same protocol, other build (%s)",peer->version);
+		snprintf(reason,reasonsize,"other %s p%d, you %s p%d",peer->version,peer->protocol,EDIFICE_VERSION_STRING,EDIFICE_PROTOCOL_VERSION);
 	return 0;
 }
 
@@ -213,18 +187,18 @@ static void SendInfo(SOCKADDR_IN dest)
 static void RefuseClient(SOCKADDR_IN dest,char why,const char *text)
 {
 	infosock.dest=dest;
-	SimpleMessage refuse=MakeSimple(why,EDIFICE_PROTOCOL_VERSION,0);
-	infosock.Send(&refuse,sizeof(refuse));
+	SimpleBuf refuse=MakeSimple(why,EDIFICE_PROTOCOL_VERSION,0);
+	infosock.Send(refuse.b,sizeof(refuse.b));
 	char chat[300];
 	int len=strlen(text);
 	if(len>250) len=250;
-	chat[0]=CHATMESSAGE;
-	chat[1]=CMSG_INFO;
-	chat[2]=0;
-	chat[3]=len&0xff;
-	chat[4]=(len>>8)&0xff;
-	memcpy(&chat[5],text,len);
-	infosock.Send(chat,len+5);
+	ByteWriter w(chat,sizeof(chat));
+	w.U8(CHATMESSAGE);
+	w.U8(CMSG_INFO);
+	w.U8(0);
+	w.U16(len);
+	w.Bytes(text,len);
+	infosock.Send(chat,w.Size());
 	infosock.Flush();
 }
 
@@ -253,13 +227,264 @@ static void SanitizeNetFileName(char *name,int size)
 		name[0]=0;
 }
 
+//---- wire format of each message (roadmap M6, src/net/wire.h) ----
+//No struct is copied onto or off the wire: Sync<msg> lists the fields once, in
+//order, and WIREPAIR makes Write<msg> (returns the size, 0 if it doesn't fit)
+//and Read<msg> (returns 0 for a short, malformed message) from it.
+//Little-endian, floats as IEEE 754 bits, no padding; the type byte comes first.
+
+template<class IO> static void SyncVec(IO &io,Vector &v)
+{
+	io.f32(v.x);
+	io.f32(v.y);
+	io.f32(v.z);
+}
+
+#define WIREPAIR(name,T) \
+static int Write##name(void *buf,int size,T *s) { ByteWriter w(buf,size); Sync##name(w,*s); return w.Ok()?w.Size():0; } \
+static int Read##name(const void *buf,int len,T *s) { ByteReader r(buf,len); Sync##name(r,*s); return r.Ok(); }
+
+//PLAYERPOSITION, 16 bytes
+template<class IO> static void SyncPosition(IO &io,PlayerPosition &p)
+{
+	io.i8(p.type);
+	io.i8(p.pnum);
+	io.i8(p.weapon);
+	io.i8(p.keys);
+	io.i8(p.state);
+	io.u8(p.fwd);
+	io.u8(p.tilt);
+	io.u16(p.posx);
+	io.u16(p.posy);
+	io.u16(p.posz);
+	io.i8(p.velx);
+	io.i8(p.vely);
+	io.i8(p.velz);
+}
+WIREPAIR(Position,PlayerPosition)
+#define POSITIONSIZE 16
+
+//FIREGUN, 27 bytes
+template<class IO> static void SyncFireGun(IO &io,FireGunDirection &f)
+{
+	io.i8(f.type);
+	io.i8(f.pnum);
+	io.i8(f.reload);
+	SyncVec(io,f.dir);
+	SyncVec(io,f.pos);
+}
+WIREPAIR(FireGun,FireGunDirection)
+#define FIREGUNSIZE 27
+
+//KILLEDPOSITION, 15 bytes
+template<class IO> static void SyncKilledPosition(IO &io,KilledPosition &k)
+{
+	io.i8(k.type);
+	io.i8(k.killed);
+	io.i8(k.killer);
+	SyncVec(io,k.pos);
+}
+WIREPAIR(KilledPosition,KilledPosition)
+#define KILLEDPOSITIONSIZE 15
+
+//a server object, 43 bytes; timeout stays on the server
+template<class IO> static void SyncServerObject(IO &io,ServerObject &o)
+{
+	io.i8(o.type);
+	SyncVec(io,o.pos);
+	SyncVec(io,o.dir);
+	SyncVec(io,o.vel);
+	io.i8(o.team);
+	io.i8(o.attached);
+	io.f32(o.speedpenalty);
+}
+#define SERVEROBJECTSIZE 43
+
+//UPDATESERVEROBJECT: type, int32 num, object
+template<class IO> static void SyncUpdateServerObject(IO &io,UpdateServerObject &u)
+{
+	io.i8(u.type);
+	io.i32(u.num);
+	SyncServerObject(io,u.updated);
+}
+WIREPAIR(UpdateServerObject,UpdateServerObject)
+#define UPDATESERVEROBJECTSIZE (5+SERVEROBJECTSIZE)
+
+//SERVEROBJECTSNAPSHOT: type, then every server object
+struct ServerObjectSnapshot
+{
+	char type;
+	ServerObject obj[MAXSERVEROBJS];
+};
+template<class IO> static void SyncSnapshot(IO &io,ServerObjectSnapshot &s)
+{
+	io.i8(s.type);
+	for(int i=0;i<MAXSERVEROBJS;i++) SyncServerObject(io,s.obj[i]);
+}
+WIREPAIR(Snapshot,ServerObjectSnapshot)
+#define SNAPSHOTSIZE (1+MAXSERVEROBJS*SERVEROBJECTSIZE)
+
+//SERVERVARS: type, then the fields of ServerVars in declaration order
+struct ServerVarsMessage
+{
+	char type;
+	ServerVars v;
+};
+template<class IO> static void SyncServerVars(IO &io,ServerVarsMessage &m)
+{
+	ServerVars &v=m.v;
+	io.i8(m.type);
+	io.f32(v.walkaccelerate);
+	io.f32(v.strafeaccelerate);
+	io.f32(v.resistance);
+	io.f32(v.stopresistance);
+	io.f32(v.gravity);
+	io.i32(v.chopperthrust);
+	io.i32(v.radarenable);
+	io.i32(v.gattimeout);
+	io.i32(v.m16timeout);
+	io.i32(v.steyrtimeout);
+	io.i32(v.umptimeout);
+	io.i32(v.grenadetimeout);
+	io.i32(v.berettatimeout);
+	io.i32(v.sr1000timeout);
+	io.i32(v.grenadeexplodetime);
+	io.i32(v.gatammohold);
+	io.i32(v.m16ammohold);
+	io.i32(v.steyrammohold);
+	io.i32(v.umpammohold);
+	io.i32(v.grenadeammohold);
+	io.i32(v.berettaammohold);
+	io.i32(v.sr1000ammohold);
+	io.i32(v.gatreloadtime);
+	io.i32(v.m16reloadtime);
+	io.i32(v.steyrreloadtime);
+	io.i32(v.umpreloadtime);
+	io.i32(v.grenadereloadtime);
+	io.i32(v.berettareloadtime);
+	io.i32(v.sr1000reloadtime);
+	io.f32(v.gatspeed);
+	io.f32(v.m16speed);
+	io.f32(v.steyrspeed);
+	io.f32(v.umpspeed);
+	io.f32(v.grenadespeed);
+	io.f32(v.berettaspeed);
+	io.f32(v.sr1000speed);
+	io.f32(v.highbulletdamage);
+	io.f32(v.lowbulletdamage);
+	io.f32(v.grenadedamage);
+	io.f32(v.scale);
+	io.f32(v.thrustrechargerate);
+	io.f32(v.thrustuse);
+	io.i32(v.capturelimit);
+	io.i32(v.timelimit);
+	io.i32(v.gamemode);
+	io.i32(v.positionresendtime);
+}
+WIREPAIR(ServerVars,ServerVarsMessage)
+#define SERVERVARSSIZE (1+46*4)
+static_assert(sizeof(ServerVars)==46*4,"ServerVars changed: update SyncServerVars and bump the protocol");
+
+//REMOTEGAMEDATA: type, int32 gamestate
+struct RemoteGameDataMessage
+{
+	char type;
+	RemoteGameData d;
+};
+template<class IO> static void SyncRGD(IO &io,RemoteGameDataMessage &m)
+{
+	io.i8(m.type);
+	io.i32(m.d.gamestate);
+}
+WIREPAIR(RGD,RemoteGameDataMessage)
+#define RGDSIZE 5
+
+//LANDINFO: type, LandDefs (every deformation), SkySettings
+template<class IO> static void SyncLandInfo(IO &io,LandInfo &l)
+{
+	io.i8(l.type);
+	LandDefs &d=l.ldfs;
+	io.i32(d.numdefs);
+	for(int i=0;i<NUMDEF;i++)
+	{
+		LandDeformation &df=d.df[i];
+		io.i8(df.type);
+		io.i32(df.sx);
+		io.i32(df.sy);
+		io.i32(df.sh);
+		io.i32(df.sw);
+		io.f32(df.sc);
+		io.f32(df.sd);
+		io.f32(df.sf);
+	}
+	for(int t=0;t<9;t++) io.str(d.groundtex[t],sizeof(d.groundtex[t]));
+	io.i32(d.numgroundtex);
+	io.u32(d.randomseed);
+	io.u32(d.numscenery);
+	io.u32(d.numblotch);
+	SkySettings &k=l.skysets;
+	io.f32(k.sunheight);
+	io.f32(k.fogr);
+	io.f32(k.fogg);
+	io.f32(k.fogb);
+	io.f32(k.cloudvelx);
+	io.f32(k.cloudvely);
+	io.f32(k.cloudmistvelx);
+	io.f32(k.cloudmistvely);
+	io.f32(k.sunskylight);
+	io.f32(k.suneyelight);
+	io.f32(k.fogbegin);
+	io.i32(k.uselandclouds);
+	io.i32(k.lightning);
+	io.i32(k.usemist);
+	io.i32(k.precipitation);
+	io.f32(k.mistopacity);
+	io.f32(k.cloudheight);
+	io.str(k.cloudtex,sizeof(k.cloudtex));
+	io.str(k.misttex,sizeof(k.misttex));
+	io.str(k.sound,sizeof(k.sound));
+	io.i32(k.numlillypad);
+}
+WIREPAIR(LandInfo,LandInfo)
+#define LANDINFOSIZE (1+4+NUMDEF*29+9*60+4*4+17*4+3*60+4)
+static_assert(sizeof(SkySettings)==17*4+3*60+4,"SkySettings changed: update SyncLandInfo and bump the protocol");
+
+//PLAYERNAMES: uint8 count, then per player: uint8 number, int32 kills,
+//int32 deaths, int8 team, uint8 name length (<=31), name
+static void WritePlayerName(ByteWriter &w,int i)
+{
+	Player *pl=GetPlayer(i);
+	int namelen=strlen(pl->name);
+	if(namelen>31) namelen=31;
+	w.U8(i);
+	w.I32(pl->kills);
+	w.I32(pl->deaths);
+	w.U8((unsigned char)pl->team);
+	w.U8(namelen);
+	w.Bytes(pl->name,namelen);
+}
+#define PLAYERNAMESIZE (11+31)
+
+//REQUESTENTER and INFO: type, uint8 n, name[n], NUL, version trailer (version.h).
+//Copies the name (at most namesize-1 bytes, up to a NUL) and returns the offset
+//of the trailer.
+static int ReadHelloName(const char *msg,int msglen,char *name,int namesize)
+{
+	int n=msglen>=2?(unsigned char)msg[1]:0;
+	if(n>namesize-1) n=namesize-1;
+	int i;
+	for(i=0;i<n&&2+i<msglen&&msg[2+i];i++) name[i]=msg[2+i];
+	name[i]=0;
+	return 2+n+1;
+}
+
 void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pnum);
-void ReceivePosition(Message *msg,int sender);
+void ReceivePosition(const char *msg,int msglen,int sender);
 #ifndef HK_WIN32_NATIVE
-static void JoinNetAddGame(Info *info,int msglen,SOCKADDR_IN source);
+static void JoinNetAddGame(const char *msg,int msglen,SOCKADDR_IN source);
 #endif
 void DeletePlayer(int num,int reason);
-void ReceiveChatMessage(Message *msg,int msglen=-1);
+void ReceiveChatMessage(char *msg,int msglen);
 
 
 //reads a configuration file
@@ -371,17 +596,14 @@ void CloseSocks()
 
 void SendState(int srcnum,int destnum)
 {
-	SimpleMessage state;
-	state.type=SIMPLE;
-	state.type2=STATECHANGE;
-	state.msg=GetPlayer(srcnum)->playstate;
+	SimpleBuf state=MakeSimple(STATECHANGE,GetPlayer(srcnum)->playstate,0);
 	if(server)
 	{
-		clientsock[destnum].SendReliable(&state,sizeof(state),0);
+		clientsock[destnum].SendReliable(state.b,sizeof(state.b),0);
 	}
 	else
 	{
-		datasock.SendReliable(&state,sizeof(state),0);
+		datasock.SendReliable(state.b,sizeof(state.b),0);
 	}
 }
 
@@ -400,29 +622,13 @@ void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pn
 		case PORTACK:
 			{
 
-				static Message names;
-				names.type=PLAYERNAMES;
-				char *buf=names.buf;
-				int bufpos=0;
-				buf[bufpos]=numplayers;
-				bufpos++;
+				char names[2+MAXPLAYERS*PLAYERNAMESIZE];
+				ByteWriter w(names,sizeof(names));
+				w.U8(PLAYERNAMES);
+				w.U8(numplayers);
 				for(int i=0;i<numplayers;i++)
-				{
-					buf[bufpos]=i;
-					bufpos++;
-					*(int *)&buf[bufpos]=GetPlayer(i)->kills;
-					bufpos+=4;
-					*(int *)&buf[bufpos]=GetPlayer(i)->deaths;
-					bufpos+=4;
-					buf[bufpos]=GetPlayer(i)->team;
-					bufpos+=1;
-					int namelen=strlen(GetPlayer(i)->name);
-					buf[bufpos]=namelen;
-					bufpos++;
-					CopyMemory(&buf[bufpos],GetPlayer(i)->name,namelen);
-					bufpos+=namelen;
-				}
-				clientsock[pnum].SendReliable(&names,bufpos+1,RECEIVEDPLAYERNAMES);
+					WritePlayerName(w,i);
+				clientsock[pnum].SendReliable(names,w.Size(),RECEIVEDPLAYERNAMES);
 				
 				ConsoleDisplayText("received port acknowledgement, sending player names");
 				break;
@@ -447,20 +653,22 @@ void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pn
 						AddBlockBuffer(x,y,z,cur->type,0,cur->top,cur->side,cur->bottom,0);
 						if(blockbufferpos+20>BIGBUFSIZE)
 						{
-							*(DWORD *)&blockbuffer[1]=numblocks;
+							WirePutU32(&blockbuffer[1],numblocks);
 							clientsock[pnum].SendReliable(blockbuffer,blockbufferpos,0);
 							StartBlockBuffer();
 						}
 					}
 				}
-				*(DWORD *)&blockbuffer[1]=numblocks;
+				WirePutU32(&blockbuffer[1],numblocks);
 				clientsock[pnum].SendReliable(blockbuffer,blockbufferpos,RECEIVEDBLOCKINFO);
 				StartBlockBuffer();
 				ConsoleDisplayText("received landinfo acknowledgement, sending blockinfo");
-				char sobjectbuf[50000];
-				sobjectbuf[0]=SERVEROBJECTSNAPSHOT;
-				CopyMemory(&sobjectbuf[1],sobject,sizeof(ServerObject)*MAXSERVEROBJS);
-				clientsock[pnum].SendReliable(sobjectbuf,sizeof(ServerObject)*MAXSERVEROBJS+1,0);
+				static ServerObjectSnapshot snapshot;
+				static char sobjectbuf[SNAPSHOTSIZE];
+				snapshot.type=SERVEROBJECTSNAPSHOT;
+				CopyMemory(snapshot.obj,sobject,sizeof(snapshot.obj));
+				int snapsize=WriteSnapshot(sobjectbuf,sizeof(sobjectbuf),&snapshot);
+				clientsock[pnum].SendReliable(sobjectbuf,snapsize,0);
 				SendServerVars(pnum); 
 				SendRGD(pnum);
 				
@@ -470,17 +678,17 @@ void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pn
 			}
 		case RECEIVEDBLOCKINFO:
 			{
-				SimpleMessage joingame=MakeSimple(JOINGAME,pnum,0);
+				SimpleBuf joingame=MakeSimple(JOINGAME,pnum,0);
 				int i;
 				for(i=1;i<numplayers;i++)
 				{
-					clientsock[i].SendReliable(&joingame,sizeof(joingame),0);
+					clientsock[i].SendReliable(joingame.b,sizeof(joingame.b),0);
 				}
 				for(i=0;i<numplayers;i++)
 				if(GetPlayer(i)->playstate==10)
 				{
 					joingame=MakeSimple(JOINGAME,i,0);
-					clientsock[pnum].SendReliable(&joingame,sizeof(joingame),0);
+					clientsock[pnum].SendReliable(joingame.b,sizeof(joingame.b),0);
 				}
 				GPlayerEnterGame(pnum);
 				ResetPlayer(pnum);
@@ -521,11 +729,11 @@ void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pn
 			{
 				if(!ValidPlayer(msg2)) break;
 				ReceiveKillMessage(pnum,msg2);
-				SimpleMessage killed=MakeSimple(KILLED,pnum,msg2);
+				SimpleBuf killed=MakeSimple(KILLED,pnum,msg2);
 				if(server)
 				{
 					for(int i=1;i<numplayers;i++)
-						if(i!=pnum)clientsock[i].SendReliable(&killed,sizeof(killed),0);
+						if(i!=pnum)clientsock[i].SendReliable(killed.b,sizeof(killed.b),0);
 				}
 				break;
 			}
@@ -559,16 +767,14 @@ void ServerLoop()
 		{
 		case REQUESTENTER:
 			{
-				RequestEnter *req=(RequestEnter *)&msg;
-				req->name[sizeof(req->name)-1]=0;
-				int reqnamelen=(unsigned char)req->namelen;
-				if(reqnamelen>31) reqnamelen=31;
+				char reqname[32];
+				int trailer=ReadHelloName((char *)&msg,msglen,reqname,sizeof(reqname));
 				PeerVersion peer;
-				ReadVersionTrailer((char *)&msg+2+reqnamelen+1,msglen-(2+reqnamelen+1),&peer);
+				ReadVersionTrailer((char *)&msg+trailer,msglen-trailer,&peer);
 				int addplayer=numplayers;
-				
+
 				char message[1000];
-				strcpy(message,req->name);
+				strcpy(message,reqname);
 				strcat(message," at ");
 				strcat(message,inet_ntoa(source.sin_addr));
 				strcat(message," requests to connect");
@@ -594,9 +800,9 @@ void ServerLoop()
 						break;
 				if(known<numplayers)
 				{
-					SimpleMessage enter=MakeSimple(ENTER,htons(clientsock[known].localport),known);
+					SimpleBuf enter=MakeSimple(ENTER,htons(clientsock[known].localport),known);
 					infosock.dest=source;
-					infosock.Send(&enter,sizeof(enter));
+					infosock.Send(enter.b,sizeof(enter.b));
 					infosock.Flush();
 					break;
 				}
@@ -628,7 +834,7 @@ void ServerLoop()
 					break;
 				}
 
-				strcpy(GetPlayer(addplayer)->name,req->name);
+				strcpy(GetPlayer(addplayer)->name,reqname);
 				clientsock[addplayer].sock=newsock;
 				clientsock[addplayer].dest=source;
 				clientsock[addplayer].dest.sin_port=htons(port);   //the client binds the same port
@@ -636,14 +842,14 @@ void ServerLoop()
 				clientsock[addplayer].requestaddr=source;
 				clientsock[addplayer].filterip=1;
 				clientsock[addplayer].ResetReliable();
-				SimpleMessage enter=MakeSimple(ENTER,htons(port),addplayer);
+				SimpleBuf enter=MakeSimple(ENTER,htons(port),addplayer);
 				infosock.dest=source;
-				infosock.Send(&enter,sizeof(enter));
+				infosock.Send(enter.b,sizeof(enter.b));
 				infosock.Flush();
-				SimpleMessage tmpmsg=MakeSimple(PORTOPENER,0,0);
-				/*for(int m=0;m<30;m++)
+				/*SimpleBuf tmpmsg=MakeSimple(PORTOPENER,0,0);
+				for(int m=0;m<30;m++)
 				{
-					clientsock[addplayer].Send(&tmpmsg,sizeof(tmpmsg));
+					clientsock[addplayer].Send(tmpmsg.b,sizeof(tmpmsg.b));
 					clientsock[addplayer].Flush();
 				}*/
 				strcpy(message,GetPlayer(addplayer)->name);
@@ -652,30 +858,15 @@ void ServerLoop()
 				GetPlayer(addplayer)->playstate=1;
 				GetPlayer(addplayer)->kills=0;
 				GetPlayer(addplayer)->deaths=0;
-				static Message names;
-				names.type=PLAYERNAMES;
-				char *buf=names.buf;
-				int bufpos=0;
-				buf[bufpos]=1;
-				bufpos++;
-				buf[bufpos]=addplayer;
-				bufpos++;
-				*(int *)&buf[bufpos]=GetPlayer(addplayer)->kills;
-				bufpos+=4;
-				*(int *)&buf[bufpos]=GetPlayer(addplayer)->deaths;
-				bufpos+=4;
-				buf[bufpos]=GetPlayer(addplayer)->team;
-				bufpos+=1;
-				
-				int namelen=strlen(GetPlayer(addplayer)->name);
-				buf[bufpos]=namelen;
-				bufpos++;
-				CopyMemory(&buf[bufpos],GetPlayer(addplayer)->name,namelen);
-				bufpos+=namelen;
-				
+				char names[2+PLAYERNAMESIZE];
+				ByteWriter w(names,sizeof(names));
+				w.U8(PLAYERNAMES);
+				w.U8(1);
+				WritePlayerName(w,addplayer);
+
 				for(int i=1;i<numplayers;i++)
 				{
-					clientsock[i].SendReliable(&names,bufpos+1,0);
+					clientsock[i].SendReliable(names,w.Size(),0);
 				}
 				GetPlayer(addplayer)->timeout=curtime+70000;
 				GetPlayer(addplayer)->gunup=Vector(0,1,0);
@@ -688,10 +879,11 @@ void ServerLoop()
 			
 		case SIMPLE:
 			{
-				SimpleMessage *simple=(SimpleMessage*)&msg;
+				SimpleMessage simple;
+				if(!ReadSimple(&msg,msglen,&simple)) break;
 				//anyone can reach the info port: only info requests are answered there
-				if(simple->type2==REQUESTINFO)
-					HandleSimpleServer(simple->type2,simple->msg,simple->msg2,source,0);
+				if(simple.type2==REQUESTINFO)
+					HandleSimpleServer(simple.type2,simple.msg,simple.msg2,source,0);
 				break;
 			}
 		}
@@ -709,18 +901,19 @@ void ServerLoop()
 			{
 				case PLAYERPOSITION:
 					{
-						ReceivePosition(&msg,i);   //a client only moves itself
+						ReceivePosition((char *)&msg,clen,i);   //a client only moves itself
 						break;
 					}
 				case SIMPLE:
 				{
-					SimpleMessage *simple=(SimpleMessage*)&msg;
-					int ackcallback=simple->type2==0||simple->type2==RECEIVEDLANDINFO||
-						simple->type2==RECEIVEDPLAYERNAMES||simple->type2==RECEIVEDJOINGAME||
-						simple->type2==RECEIVEDBLOCKINFO;
+					SimpleMessage simple;
+					if(!ReadSimple(&msg,clen,&simple)) break;
+					int ackcallback=simple.type2==0||simple.type2==RECEIVEDLANDINFO||
+						simple.type2==RECEIVEDPLAYERNAMES||simple.type2==RECEIVEDJOINGAME||
+						simple.type2==RECEIVEDBLOCKINFO;
 					//"received" steps come from our own reliable acks, never from the client
 					if(ackcallback&&!clientsock[i].fromack) break;
-					HandleSimpleServer(simple->type2,simple->msg,simple->msg2,source,i);
+					HandleSimpleServer(simple.type2,simple.msg,simple.msg2,source,i);
 					break;
 				}
 				case BLOCKS:
@@ -731,27 +924,31 @@ void ServerLoop()
 					}
 				case CHATMESSAGE:
 					{
-						msg.buf[1]=i;
-						ReceiveChatMessage(&msg,clen);
+						if(clen>=3) msg.buf[1]=i;   //sender: the client, whatever it wrote
+						ReceiveChatMessage((char *)&msg,clen);
 						break;
 					}
 				case FIREGUN:
 				{
-					FireGunDirection *firegun=(FireGunDirection *)&msg;
-					TryFireGun(i,firegun->pos,firegun->dir,firegun->reload);
+					FireGunDirection firegun;
+					if(!ReadFireGun(&msg,clen,&firegun)) break;
+					TryFireGun(i,firegun.pos,firegun.dir,firegun.reload);
 					break;
 				}
 				case KILLEDPOSITION:
 				{
-					KilledPosition *kp=(KilledPosition*)&msg;
-					if(!ValidPlayer(kp->killer)) break;
-					kp->killed=i;
-					GetPlayer(i)->pos=kp->pos;
-					ReceiveKillMessage(i,kp->killer);
+					KilledPosition kp;
+					if(!ReadKilledPosition(&msg,clen,&kp)) break;
+					if(!ValidPlayer(kp.killer)) break;
+					kp.killed=i;
+					GetPlayer(i)->pos=kp.pos;
+					ReceiveKillMessage(i,kp.killer);
 					if(server)
 					{
+						char kpbuf[KILLEDPOSITIONSIZE];
+						int kpsize=WriteKilledPosition(kpbuf,sizeof(kpbuf),&kp);
 						for(int i3=1;i3<numplayers;i3++)
-							if(i3!=i)clientsock[i3].SendReliable(kp,sizeof(*kp),0);   //was &kp,sizeof(kp): sent the pointer
+							if(i3!=i)clientsock[i3].SendReliable(kpbuf,kpsize,0);
 					}
 					break;
 				}
@@ -797,15 +994,11 @@ void ServerLoop()
 
 void SendSimple(char num,char type,DWORD msg,DWORD msg2)
 {
-	SimpleMessage simple;
-	simple.type=SIMPLE;
-	simple.type2=type;
-	simple.msg=msg;
-	simple.msg2=msg2;
+	SimpleBuf simple=MakeSimple(type,msg,msg2);
 	if(server)
-		clientsock[num].Send(&simple,sizeof(SimpleMessage));
+		clientsock[num].Send(simple.b,sizeof(simple.b));
 	else
-		datasock.Send(&simple,sizeof(SimpleMessage));
+		datasock.Send(simple.b,sizeof(simple.b));
 }
 
 //client calls this when it receives a simplemessage
@@ -849,11 +1042,8 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 					datasock.dest=source;
 					datasock.dest.sin_port=msg;
 					datasock.filterip=1;   //from now on, only the server's IP
-					SimpleMessage portack;
-					portack.type=SIMPLE;
-					portack.type2=PORTACK;
-					portack.msg=msg;
-					datasock.SendReliable(&portack,sizeof(portack),0);
+					SimpleBuf portack=MakeSimple(PORTACK,msg,0);
+					datasock.SendReliable(portack.b,sizeof(portack.b),0);
 					closesocket(infosock.sock);
 					infosock.sock=0;
 					ConsoleDisplayText("connection accepted");
@@ -968,30 +1158,30 @@ void ClientLoop()
 							locallistaddr[i].sin_port==source.sin_port) break;
 					}
 					if(i!=numlocallistaddr) break;
-					Info *info=(Info *)&msg;
-					info->name[sizeof(info->name)-1]=0;
-					int namelen=(unsigned char)info->namelen;
-					if(namelen>99) namelen=99;
+					char infoname[100];
+					int trailer=ReadHelloName((char *)&msg,msglen,infoname,sizeof(infoname));
 					PeerVersion peer;
-					ReadVersionTrailer((char *)&msg+2+namelen+1,msglen-(2+namelen+1),&peer);
+					ReadVersionTrailer((char *)&msg+trailer,msglen-trailer,&peer);
 					locallistaddr[numlocallistaddr]=source;
 					numlocallistaddr++;
 #ifdef HK_WIN32_NATIVE
-					SendDlgItemMessage(dlghwnd,IDC_LOCALGAMES,LB_ADDSTRING,0,(long)info->name);
+					SendDlgItemMessage(dlghwnd,IDC_LOCALGAMES,LB_ADDSTRING,0,(long)infoname);
 #else
-					JoinScreenAddGame(info->name,&peer);
+					JoinScreenAddGame(infoname,&peer);
 #endif
 					ConsoleDisplayText("received info");
 					break;
 #else
-					JoinNetAddGame((Info *)&msg,msglen,source);
+					JoinNetAddGame((char *)&msg,msglen,source);
 					break;
 #endif
 				}
 			case LANDINFO:
 				{
 					
-					LandInfo *linfo=(LandInfo*)&msg;
+					static LandInfo landinfo;
+					if(!ReadLandInfo(&msg,msglen,&landinfo)) break;
+					LandInfo *linfo=&landinfo;
 					//bound everything the land builder uses as a count or a file name
 					LandDefs *ld=&linfo->ldfs;
 					if(ld->numdefs<0) ld->numdefs=0;
@@ -1034,49 +1224,45 @@ void ClientLoop()
 				}
 			case SIMPLE:
 				{
-					SimpleMessage *simple=(SimpleMessage*)&msg;
-					HandleSimpleClient(simple->type2,simple->msg,simple->msg2,source);
+					SimpleMessage simple;
+					if(!ReadSimple(&msg,msglen,&simple)) break;
+					HandleSimpleClient(simple.type2,simple.msg,simple.msg2,source);
 					break;
 				}
 			case PLAYERPOSITION:
 				{
 					if(connected)
 					{
-						ReceivePosition(&msg,-1);
+						ReceivePosition((char *)&msg,msglen,-1);
 					}
 					break;
 				}
 			case SERVERVARS:
 				{
-					CopyMemory(&sv,msg.buf,sizeof(sv));
+					ServerVarsMessage vars;
+					if(ReadServerVars(&msg,msglen,&vars)) sv=vars.v;
 					break;
 				}
 			case PLAYERNAMES:
 				{
-					int bufpos=0;
-					char *buf=msg.buf;
-					int bufsize=msglen-1;   //bytes after the message type
-					if(bufsize<1) break;
-					int numnames=(unsigned char)buf[bufpos];
-					bufpos++;
+					ByteReader r(&msg,msglen);
+					r.U8();   //type
+					int numnames=r.U8();
+					if(!r.Ok()) break;
 					if(numnames>MAXPLAYERS) numnames=MAXPLAYERS;
 					for(int i=0;i<numnames;i++)
 					{
-						if(bufpos+11>bufsize) break;   //number, kills, deaths, team, name length
-						int playernum=(unsigned char)buf[bufpos];
-						bufpos++;
-						int namelen=(unsigned char)buf[bufpos+9];
-						if(!ValidPlayer(playernum)||namelen>31||bufpos+10+namelen>bufsize) break;
-						CopyMemory(&GetPlayer(playernum)->kills,&buf[bufpos],4);
-						bufpos+=4;
-						CopyMemory(&GetPlayer(playernum)->deaths,&buf[bufpos],4);
-						bufpos+=4;
-						GetPlayer(playernum)->team=buf[bufpos];
-						bufpos+=1;
-						bufpos++;
-						CopyMemory(GetPlayer(playernum)->name,&buf[bufpos],namelen);
+						int playernum=r.U8();
+						int kills=r.I32();
+						int deaths=r.I32();
+						char team=(char)r.U8();
+						int namelen=r.U8();
+						if(!r.Ok()||!ValidPlayer(playernum)||namelen>31||namelen>r.Left()) break;
+						GetPlayer(playernum)->kills=kills;
+						GetPlayer(playernum)->deaths=deaths;
+						GetPlayer(playernum)->team=team;
+						r.Bytes(GetPlayer(playernum)->name,namelen);
 						GetPlayer(playernum)->name[namelen]=0;
-						bufpos+=namelen;
 						if(playernum>=numplayers) 
 						{
 							char message[1000];
@@ -1091,7 +1277,8 @@ void ClientLoop()
 				}
 			case REMOTEGAMEDATA:
 				{
-					CopyMemory(&rgd,msg.buf,sizeof(rgd));
+					RemoteGameDataMessage data;
+					if(ReadRGD(&msg,msglen,&data)) rgd=data.d;
 					break;
 				}
 			case BLOCKS:
@@ -1102,31 +1289,37 @@ void ClientLoop()
 			case CHATMESSAGE:
 				{
 					//ConsoleDisplayText("chat message");
-					ReceiveChatMessage(&msg,msglen);
+					ReceiveChatMessage((char *)&msg,msglen);
 					break;		
 				}
 			case FIREGUN:
 				{
-					HandleFireGun(0,&msg);
+					FireGunDirection firegun;
+					if(ReadFireGun(&msg,msglen,&firegun)) HandleFireGun(&firegun);
 					break;
 				}
 			case SERVEROBJECTSNAPSHOT:
 				{
-					CopyMemory(sobject,&msg.buf,sizeof(ServerObject)*MAXSERVEROBJS);
+					static ServerObjectSnapshot snapshot;
+					CopyMemory(snapshot.obj,sobject,sizeof(snapshot.obj));   //keeps the (unsent) timeouts
+					if(ReadSnapshot(&msg,msglen,&snapshot))
+						CopyMemory(sobject,snapshot.obj,sizeof(snapshot.obj));
 					break;
 				}
 			case UPDATESERVEROBJECT:
 				{
-					UpdateServerObject *update=(UpdateServerObject *)&msg;
-					if(ValidSObj(update->num)) ReceiveUpdateServerObject(update);
+					UpdateServerObject update;
+					if(ReadUpdateServerObject(&msg,msglen,&update)&&ValidSObj(update.num))
+						ReceiveUpdateServerObject(&update);
 					break;
 				}
 			case KILLEDPOSITION:
 				{
-					KilledPosition *kp=(KilledPosition*)&msg;
-					if(!ValidPlayer(kp->killed)||!ValidPlayer(kp->killer)) break;
-					GetPlayer(kp->killed)->pos=kp->pos;
-					ReceiveKillMessage(kp->killed,kp->killer);
+					KilledPosition kp;
+					if(!ReadKilledPosition(&msg,msglen,&kp)) break;
+					if(!ValidPlayer(kp.killed)||!ValidPlayer(kp.killer)) break;
+					GetPlayer(kp.killed)->pos=kp.pos;
+					ReceiveKillMessage(kp.killed,kp.killer);
 					break;
 				}
 			case 0:
@@ -1230,10 +1423,8 @@ LRESULT CALLBACK Multiplay(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
 			{
 				SOCKADDR_IN dest;
 				infosock.dest=MakeSockAddr(255,255,255,255,netsettings.infosendport);
-				SimpleMessage simple;
-				simple.type=SIMPLE;
-				simple.type2=REQUESTINFO;
-				infosock.Send(&simple,sizeof(simple));
+				SimpleBuf simple=MakeSimple(REQUESTINFO,0,0);
+				infosock.Send(simple.b,sizeof(simple.b));
 				infosock.Flush();
 				SendDlgItemMessage(dlghwnd,IDC_LOCALGAMES,LB_RESETCONTENT,0,0);
 				numlocallistaddr=0;
@@ -1249,10 +1440,8 @@ LRESULT CALLBACK Multiplay(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
 				GetWindowText(GetDlgItem(hDlg,IDC_IP),iptext,40);
 				
 				infosock.dest.sin_addr.s_addr=inet_addr(iptext);
-				SimpleMessage simple;
-				simple.type=SIMPLE;
-				simple.type2=REQUESTINFO;
-				infosock.Send(&simple,sizeof(simple));
+				SimpleBuf simple=MakeSimple(REQUESTINFO,0,0);
+				infosock.Send(simple.b,sizeof(simple.b));
 				infosock.Flush();
 				SendDlgItemMessage(dlghwnd,IDC_LOCALGAMES,LB_RESETCONTENT,0,0);
 				numlocallistaddr=0;
@@ -1326,8 +1515,8 @@ JoinGame *JoinGameAt(int i)
 static void SendInfoRequest(SOCKADDR_IN dest)
 {
 	infosock.dest=dest;
-	SimpleMessage simple=MakeSimple(REQUESTINFO,0,0);
-	infosock.Send(&simple,sizeof(simple));
+	SimpleBuf simple=MakeSimple(REQUESTINFO,0,0);
+	infosock.Send(simple.b,sizeof(simple.b));
 	infosock.Flush();
 	lastinfoquery=GetTickCount();
 }
@@ -1395,7 +1584,7 @@ void JoinNetDebugAdd(const char *name,const char *addr,const char *version,int p
 	memset(&peer,0,sizeof(peer));
 	peer.present=protocol>1;
 	peer.protocol=protocol;
-	peer.layout=LayoutHash();
+	peer.layout=EDIFICE_NET_LAYOUT;
 	strncpy(peer.version,version,sizeof(peer.version)-1);
 	game.compatible=VersionCompatible(&peer,game.reason,sizeof(game.reason));
 	game.ping=ping;
@@ -1407,13 +1596,12 @@ void JoinNetDebugAdd(const char *name,const char *addr,const char *version,int p
 
 //INFO answer: name, version, then (servers since 0.3.0) players, max players,
 //game mode, capture limit
-static void JoinNetAddGame(Info *info,int msglen,SOCKADDR_IN source)
+static void JoinNetAddGame(const char *msg,int msglen,SOCKADDR_IN source)
 {
-	info->name[sizeof(info->name)-1]=0;
-	int namelen=(unsigned char)info->namelen;
-	if(namelen>99) namelen=99;
-	const char *trailer=(const char *)info+2+namelen+1;
-	int trailerlen=msglen-(2+namelen+1);
+	char name[100];
+	int trailerpos=ReadHelloName(msg,msglen,name,sizeof(name));
+	const char *trailer=msg+trailerpos;
+	int trailerlen=msglen-trailerpos;
 	PeerVersion peer;
 	ReadVersionTrailer(trailer,trailerlen,&peer);
 
@@ -1426,7 +1614,7 @@ static void JoinNetAddGame(Info *info,int msglen,SOCKADDR_IN source)
 	locallistaddr[i]=source;
 	JoinGame &game=joingames[i];
 	memset(&game,0,sizeof(game));
-	strncpy(game.name,info->name,sizeof(game.name)-1);
+	strncpy(game.name,name,sizeof(game.name)-1);
 	strcpy(game.version,peer.version);
 	strncpy(game.address,inet_ntoa(source.sin_addr),sizeof(game.address)-1);
 	game.compatible=VersionCompatible(&peer,game.reason,sizeof(game.reason));
@@ -1468,10 +1656,10 @@ void DeletePlayer(int num,int reason)
 	if(server)
 	{
 		GPlayerLeave(num);
-		SimpleMessage deleteplayer=MakeSimple(DELETEPLAYER,num,reason);
+		SimpleBuf deleteplayer=MakeSimple(DELETEPLAYER,num,reason);
 		for(int i=1;i<numplayers;i++)
 		{
-			clientsock[i].SendReliable(&deleteplayer,sizeof(deleteplayer),0);
+			clientsock[i].SendReliable(deleteplayer.b,sizeof(deleteplayer.b),0);
 		}
 		
 		closesocket(clientsock[num].sock);
@@ -1520,21 +1708,23 @@ void DeletePlayer(int num,int reason)
 
 void SendLandInfo(int num)
 {
-	LandInfo landinfo;
+	static LandInfo landinfo;
+	static char buf[LANDINFOSIZE];
 	landinfo.type=LANDINFO;
 	CopyMemory(&landinfo.ldfs,GetDefs(),sizeof(landinfo.ldfs));
 	CopyMemory(&landinfo.skysets,GetSkySettings(),sizeof(SkySettings));
+	int size=WriteLandInfo(buf,sizeof(buf),&landinfo);
 	if(num>0)
 	{
 		GetPlayer(num)->playstate=1;
-		clientsock[num].SendReliable(&landinfo,sizeof(landinfo),RECEIVEDLANDINFO);
+		clientsock[num].SendReliable(buf,size,RECEIVEDLANDINFO);
 	}
 	else
 	{
 		for(int i=1;i<numplayers;i++)
 		{
 			GetPlayer(i)->playstate=1;
-			clientsock[i].SendReliable(&landinfo,sizeof(landinfo),RECEIVEDLANDINFO);
+			clientsock[i].SendReliable(buf,size,RECEIVEDLANDINFO);
 		}
 	}
 }
@@ -1559,9 +1749,11 @@ unsigned char GetAng(float x,float y)
 //called to receive a player position
 
 //sender: the client that sent it (server side), or -1 for positions relayed by the server
-void ReceivePosition(Message *msg,int sender)
+void ReceivePosition(const char *msg,int msglen,int sender)
 {
-	PlayerPosition *pos=(PlayerPosition*)msg;
+	PlayerPosition position;
+	if(!ReadPosition(msg,msglen,&position)) return;
+	PlayerPosition *pos=&position;
 	int pnum=sender>=0?sender:pos->pnum;
 	if(!ValidPlayer(pnum)) return;
 	Player *src=GetPlayer(pnum);
@@ -1620,13 +1812,15 @@ void SendPosition(char srcnum,char destnum)
 	pos.weapon=src->weapon;
 	pos.pnum=srcnum;
 	pos.state=src->playstate;
+	char buf[POSITIONSIZE];
+	int size=WritePosition(buf,sizeof(buf),&pos);
 	if(!server)
 	{
-		datasock.Send(&pos,sizeof(pos));
+		datasock.Send(buf,size);
 	}
 	else
 	{
-		clientsock[destnum].Send(&pos,sizeof(pos));
+		clientsock[destnum].Send(buf,size);
 	}
 }
 
@@ -1674,7 +1868,7 @@ void AddBlockBuffer(char x,char y,char z,char type,char team,char top,char side,
 
 void SendBlockBuffer()
 {
-	*(DWORD *)&blockbuffer[1]=numblocks;
+	WirePutU32(&blockbuffer[1],numblocks);
 	if(server)
 	{
 		ReceiveBlockBuffer(blockbuffer,0,blockbufferpos);
@@ -1698,8 +1892,7 @@ void ReceiveBlockBuffer(char *buf,int pnum,int len)
 	GiveCredit(pnum,0,-1);
 						
 	int pos=0;
-	DWORD numblocks;
-	CopyMemory(&numblocks,&buf[1],4);
+	DWORD numblocks=WireGetU32(&buf[1]);   //len>=5 checked above
 	if(numblocks>(DWORD)(len-5)/9) numblocks=(len-5)/9;   //9 bytes per block
 	pos=5;
 	int i;
@@ -1735,6 +1928,7 @@ void ReceiveBlockBuffer(char *buf,int pnum,int len)
 	}
 	if(server)
 	{
+		WirePutU32(&buf[1],numblocks);   //relay the blocks actually received
 		for(i=1;i<numplayers;i++)
 		{
 			clientsock[i].SendReliable(buf,pos,0);
@@ -1742,7 +1936,7 @@ void ReceiveBlockBuffer(char *buf,int pnum,int len)
 	}
 }
 
-int SendMultMessage(Message *msg,int len,int player=-1)
+int SendMultMessage(const void *msg,int len,int player=-1)
 {
 	int selfrecv=0;
 	if(!server) return 0;
@@ -1760,14 +1954,18 @@ int SendMultMessage(Message *msg,int len,int player=-1)
 }
 
 
-//sends a message reliably
-//msglen: size of the message as received, -1 when it was built locally
-void ReceiveChatMessage(Message *msg,int msglen)
+//CHATMESSAGE: type, int8 dest (CMSG_*), uint8 sender, uint16 length, text
+//msglen: size of the message, type included
+void ReceiveChatMessage(char *msg,int msglen)
 {
-	char dest=msg->buf[0];
-	if(msglen!=-1&&msglen<5) return;
+	ByteReader r(msg,msglen);
+	r.U8();   //type
+	char dest=(char)r.U8();
+	int sender=r.U8();
+	WORD len=r.U16();
+	if(!r.Ok()) return;
 	//score, objective and info lines come from the server only
-	if(server&&msg->buf[1]&&dest!=CMSG_BROADCAST&&dest!=CMSG_TEAM) return;
+	if(server&&sender&&dest!=CMSG_BROADCAST&&dest!=CMSG_TEAM) return;
 	//if(server==1&&(dest!=CMSG_BROADCAST&&dest!=CMSG_TEAM)) return;
 	
 
@@ -1775,16 +1973,13 @@ void ReceiveChatMessage(Message *msg,int msglen)
 	char chatmessage[1000];
 	char message[1000];
 	
-	WORD len;
-	CopyMemory(&len,&msg->buf[2],2);
 	if(len>255) len=255;
-	if(msglen!=-1&&len>msglen-5) len=msglen-5;
-	CopyMemory(chatmessage,&msg->buf[4],len);
+	if(len>r.Left()) len=r.Left();
+	r.Bytes(chatmessage,len);
 	chatmessage[len]=0;
-		
+
 	if(dest==CMSG_BROADCAST||dest==CMSG_TEAM)
 	{
-		int sender=(unsigned char)msg->buf[1];
 #ifdef HK_WIN32_NATIVE
 		snprintf(message,sizeof(message),"%.31s: %s",ValidPlayer(sender)?GetPlayer(sender)->name:"?",chatmessage);
 		ConsoleDisplayText(message);
@@ -1812,38 +2007,35 @@ void ReceiveChatMessage(Message *msg,int msglen)
 			clientsock[i2].SendReliable(msg,len+5,0);
 		}
 	}*/
-	if(msg->buf[1])  //this came from a player (called from serverloop)
+	if(sender)  //this came from a player (called from serverloop)
 	{
 		if(dest==CMSG_BROADCAST)
 			SendMultMessage(msg,len+5,-1);
-		if(dest==CMSG_TEAM)
-			SendMultMessage(msg,len+5,GetPlayer(msg->buf[1])->team+TARGTEAM);
+		if(dest==CMSG_TEAM&&ValidPlayer(sender))
+			SendMultMessage(msg,len+5,GetPlayer(sender)->team+TARGTEAM);
 	}
 
 }
 
 void SendChatMessage(char *text,int dest,int player)
 {
-	static Message chat;
-	chat.type=CHATMESSAGE;
-	int bufpos=0;
-	chat.buf[bufpos]=dest;
-	bufpos++;
-	chat.buf[bufpos]=0;
-	bufpos++;
-	WORD len=strlen(text);
-	*(WORD *)&chat.buf[bufpos]=len;
-	bufpos+=2;
-	CopyMemory(&chat.buf[bufpos],text,len);
-	bufpos+=len;
+	static char chat[5+60000];
+	int len=strlen(text);
+	if(len>60000) len=60000;
+	ByteWriter w(chat,sizeof(chat));
+	w.U8(CHATMESSAGE);
+	w.U8(dest);
+	w.U8(0);   //sender: the server fills it in
+	w.U16(len);
+	w.Bytes(text,len);
 	if(server)
 	{
-		if(SendMultMessage(&chat,len+5,player))
-			ReceiveChatMessage(&chat);
+		if(SendMultMessage(chat,w.Size(),player))
+			ReceiveChatMessage(chat,w.Size());
 	}
 	else
 	{
-		datasock.SendReliable(&chat,bufpos+1,0);
+		datasock.SendReliable(chat,w.Size(),0);
 	}
 }
 
@@ -1883,9 +2075,8 @@ void CreateObject(int num,int obj,Vector pos,Vector dir,Vector vel)
 
 //called on all computers when someone fires
 
-void HandleFireGun(int num,Message *msg)
+void HandleFireGun(FireGunDirection *firegun)
 {
-	FireGunDirection *firegun=(FireGunDirection *)msg;
 	if(!ValidPlayer(firegun->pnum)) return;
 	float speed=0;
 	if(GetPlayer(firegun->pnum)->weapon==0)
@@ -1945,18 +2136,20 @@ int TryFireGun(int num,Vector pos,Vector dir,char reload)
 	firegun.dir=dir;
 	firegun.pos=pos;
 	firegun.reload=reload;
-	HandleFireGun(0,(Message *)&firegun);
+	HandleFireGun(&firegun);
+	char buf[FIREGUNSIZE];
+	int size=WriteFireGun(buf,sizeof(buf),&firegun);
 	if(server)
 	{
 		for(int i=1;i<numplayers;i++)
 		{
-			if(i!=num) clientsock[i].Send(&firegun,sizeof(firegun));
+			if(i!=num) clientsock[i].Send(buf,size);
 		}
-		
+
 	}
 	else
 	{
-		datasock.Send(&firegun,sizeof(firegun));
+		datasock.Send(buf,size);
 	}
 	return 1;
 }
@@ -2011,16 +2204,16 @@ void ReceiveKillMessage(int killed,int killer)
 
 void Killed(int killer)
 {
-	SimpleMessage killed=MakeSimple(KILLED,GetLocalNum(),killer);
+	SimpleBuf killed=MakeSimple(KILLED,GetLocalNum(),killer);
 	ReceiveKillMessage(GetLocalNum(),killer);
 	if(server)
 	{
 		for(int i=1;i<numplayers;i++)
-			clientsock[i].SendReliable(&killed,sizeof(killed),0);
+			clientsock[i].SendReliable(killed.b,sizeof(killed.b),0);
 	}
 	else
 	{
-		datasock.SendReliable(&killed,sizeof(killed),0);
+		datasock.SendReliable(killed.b,sizeof(killed.b),0);
 	}
 }
 
@@ -2038,35 +2231,39 @@ void ResetPlayer(int num)
 
 void SendServerVars(int num)
 {
-	Message servervars;
-	servervars.type=SERVERVARS;
-	CopyMemory(servervars.buf,&sv,sizeof(sv));
+	ServerVarsMessage vars;
+	vars.type=SERVERVARS;
+	vars.v=sv;
+	char buf[SERVERVARSSIZE];
+	int size=WriteServerVars(buf,sizeof(buf),&vars);
 	if(server)
 	{
 		if(num)
 		{
-			clientsock[num].SendReliable(&servervars,sizeof(sv)+1,0);
+			clientsock[num].SendReliable(buf,size,0);
 		}
 		else
 		{
 			for(int i=0;i<numplayers;i++)
 			{
-				clientsock[i].SendReliable(&servervars,sizeof(sv)+1,0);
+				clientsock[i].SendReliable(buf,size,0);
 			}
 		}
 	}
 	else
 	{
-		datasock.SendReliable(&servervars,sizeof(sv)+1,0);
+		datasock.SendReliable(buf,size,0);
 	}
 }
 
 void SendRGD(int player)
 {
-	Message msg;
-	msg.type=REMOTEGAMEDATA;
-	CopyMemory(msg.buf,&rgd,sizeof(rgd));
-	SendMultMessage(&msg,sizeof(rgd)+1);
+	RemoteGameDataMessage data;
+	data.type=REMOTEGAMEDATA;
+	data.d=rgd;
+	char buf[RGDSIZE];
+	int size=WriteRGD(buf,sizeof(buf),&data);
+	SendMultMessage(buf,size);
 }
 //called by everyone when someone changes team
 
@@ -2089,18 +2286,18 @@ void ChangeTeam(int player,int team)
 {
 	if(team<0||team>2) return;
 	if((team=GPlayerChangeTeam(player,team))==-1) return;
-	SimpleMessage changeteam=MakeSimple(CHANGETEAM,player,team);
+	SimpleBuf changeteam=MakeSimple(CHANGETEAM,player,team);
 	if(server)
 	{
 		ReceiveChangeTeam(player,team);
 		for(int i=1;i<numplayers;i++)
 		{
-			clientsock[i].SendReliable(&changeteam,sizeof(changeteam),0);
+			clientsock[i].SendReliable(changeteam.b,sizeof(changeteam.b),0);
 		}
 	}
 	else
 	{
-		datasock.SendReliable(&changeteam,sizeof(changeteam),0);
+		datasock.SendReliable(changeteam.b,sizeof(changeteam.b),0);
 	}
 }
 
@@ -2109,16 +2306,18 @@ void ChangeTeam(int player,int team)
 
 void SendUpdateServerObject(int num)
 {
+	if(!ValidSObj(num)) return;
 	UpdateServerObject update;
 	update.type=UPDATESERVEROBJECT;
 	update.num=num;
-	int size=(char *)&sobject[num].timeout-(char *)&sobject[num];
-	CopyMemory(&update.updated,&sobject[num],size);
+	update.updated=sobject[num];   //timeout is not sent
+	char buf[UPDATESERVEROBJECTSIZE];
+	int size=WriteUpdateServerObject(buf,sizeof(buf),&update);
 	if(server)
 	{
 		for(int i=1;i<numplayers;i++)
 		{
-			clientsock[i].SendReliable(&update,sizeof(update),0);
+			clientsock[i].SendReliable(buf,size,0);
 		}
 	}
 }
@@ -2126,9 +2325,9 @@ void SendUpdateServerObject(int num)
 void ReceiveUpdateServerObject(UpdateServerObject *update)
 {
 	if(!ValidSObj(update->num)) return;
-	int size=(char *)&sobject->timeout-(char *)sobject;
-	CopyMemory(&sobject[update->num],&update->updated,size);
-
+	int timeout=sobject[update->num].timeout;   //not sent: stays as it was
+	sobject[update->num]=update->updated;
+	sobject[update->num].timeout=timeout;
 }
 
 //called by console.cpp for the command, "createdome"
@@ -2163,9 +2362,8 @@ void ClaimObject(int pnum)
 	if(GetPlayer(pnum)->playstate!=10) return;
 	if(!server)
 	{
-		SimpleMessage claim;
-		claim=MakeSimple(CLAIMOBJECT,0,0);
-		datasock.SendReliable(&claim,sizeof(claim),0);
+		SimpleBuf claim=MakeSimple(CLAIMOBJECT,0,0);
+		datasock.SendReliable(claim.b,sizeof(claim.b),0);
 		return;
 	}
 	Vector pos=GetPlayer(pnum)->pos;
@@ -2201,7 +2399,7 @@ void ClaimObject(int pnum)
 
 void ScoreReset()
 {
-	SimpleMessage scorereset=MakeSimple(SCORERESET,0,0);
+	SimpleBuf scorereset=MakeSimple(SCORERESET,0,0);
 	ConsoleDisplayText("Scores reset");
 	for(int i=0;i<numplayers;i++)
 	{
@@ -2211,7 +2409,7 @@ void ScoreReset()
 	if(server)
 	for(int i=1;i<numplayers;i++)
 	{
-		clientsock[i].SendReliable(&scorereset,sizeof(scorereset),0);
+		clientsock[i].SendReliable(scorereset.b,sizeof(scorereset.b),0);
 	}
 }
 
@@ -2231,13 +2429,13 @@ void GiveCredit(int player, int credit, int number)
 			{
 				ZeroMemory(&GetPlayer(i)->credits,sizeof(GetPlayer(i)->credits));
 			}
-			SimpleMessage crd;
+			SimpleBuf crd;
 			if(credit>=0)
 				crd=MakeSimple(CREDITS,credit,GetPlayer(i)->credits[credit]);
 			else
 				crd=MakeSimple(CREDITS,credit,0);
 			if(i>0) 
-				clientsock[i].SendReliable(&crd,sizeof(crd),0);
+				clientsock[i].SendReliable(crd.b,sizeof(crd.b),0);
 		}
 	}
 }

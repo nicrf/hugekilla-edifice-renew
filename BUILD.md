@@ -43,12 +43,16 @@ Avec les presets CMake : `cmake --preset macos-release && cmake --build --preset
 
 ## Tests
 
-- `ctest --test-dir build/<os>-release -C Release` : tests unitaires sans fenêtre (valeurs de référence du générateur du monde, `tests/worldrandom_test.cpp`), lancés par la CI sur les trois OS.
+- `ctest --test-dir build/<os>-release -C Release` : tests unitaires sans fenêtre (valeurs de référence du générateur du monde, `tests/worldrandom_test.cpp` ; lecture/écriture little-endian bornée de `src/net/wire.h`, `tests/wire_test.cpp`), lancés par la CI sur les trois OS.
 - Tests réseau contre un serveur local (`HK_AUTOSTART=1 <binaire> &`, puis) :
   - `python3 tests/net_handshake.py` : version dans INFO, refus des versions incompatibles ;
   - `python3 tests/net_identity.py` : une nouvelle demande garde son slot, un autre client a le sien ;
+  - `python3 tests/net_join.py` : rejoint la partie comme un vrai client et décode PLAYERNAMES, LANDINFO, SERVERVARS, etc. (tailles et valeurs du format explicite), puis envoie des messages tronqués ;
   - `python3 tests/net_fuzz.py` : paquets malformés, à lancer de préférence contre un build AddressSanitizer (voir l'en-tête du script).
-  - `tests/run_netplay_tests.sh <binaire>` lance les trois, un serveur neuf par test (sous Linux avec Xvfb si aucun écran) ; la CI le fait à chaque push contre un build AddressSanitizer, et une release n'est publiée que s'ils passent.
+  - `tests/run_netplay_tests.sh <binaire>` lance les quatre, un serveur neuf par test (sous Linux avec Xvfb si aucun écran) ; la CI le fait à chaque push contre un build AddressSanitizer, et une release n'est publiée que s'ils passent.
+- Partie à deux sur une machine : `HK_AUTOSTART=1 <binaire> &` puis `HK_JOIN=127.0.0.1 <binaire>` (le second rejoint le premier serveur qui répond).
+
+Format réseau (protocole 4) : aucun struct n'est copié tel quel sur le fil ; chaque message a ses fonctions d'écriture et de lecture explicites (`Sync*` dans `src/net/multiplay.cpp`, `WriteSimple`/`ReadSimple` dans `src/net/sock.cpp`, primitives dans `src/net/wire.h`). Changer un de ces formats impose d'incrémenter `EDIFICE_PROTOCOL_VERSION` (`src/net/version.h`).
 
 ## Releases automatiques
 

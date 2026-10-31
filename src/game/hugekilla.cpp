@@ -735,7 +735,13 @@ void Load(char *filename)
 	DWORD br;
 	if(file==INVALID_HANDLE_VALUE) return;
 	char sig[7];
-	ReadFile(file,sig,7,&br,0);
+	if(!ReadFile(file,sig,7,&br,0)||br!=7||memcmp(sig,"edifice",7))
+	{
+		//not a save: keep the land StartServer made, as for a missing file
+		CloseHandle(file);
+		ConsoleDisplayText("Not an Edifice save file");
+		return;
+	}
 	ReadFile(file,GetSkySettings(),sizeof(SkySettings),&br,0);
 	ReadFile(file,&ldfs,sizeof(ldfs),&br,0);
 	char fullfilename[400];
