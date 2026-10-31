@@ -41,6 +41,14 @@ La version vient de `project(Edifice VERSION …)` dans `CMakeLists.txt`.
 
 Avec les presets CMake : `cmake --preset macos-release && cmake --build --preset macos-release` (ou `linux-release`, `windows-vs` / `windows-release`).
 
+## Tests
+
+- `ctest --test-dir build/<os>-release -C Release` : tests unitaires sans fenêtre (valeurs de référence du générateur du monde, `tests/worldrandom_test.cpp`), lancés par la CI sur les trois OS.
+- Tests réseau contre un serveur local (`HK_AUTOSTART=1 <binaire> &`, puis) :
+  - `python3 tests/net_handshake.py` : version dans INFO, refus des versions incompatibles ;
+  - `python3 tests/net_identity.py` : une nouvelle demande garde son slot, un autre client a le sien ;
+  - `python3 tests/net_fuzz.py` : paquets malformés, à lancer de préférence contre un build AddressSanitizer (voir l'en-tête du script).
+
 ## Releases automatiques
 
 `.github/workflows/release.yml` : à chaque tag `v*` poussé (`git tag v0.2.0 && git push origin v0.2.0`), GitHub Actions compile macOS, Linux et Windows avec `build.py --package` et publie une release GitHub avec les trois archives. Lancement manuel possible (« Run workflow ») : les archives sont alors disponibles comme artefacts, sans release.

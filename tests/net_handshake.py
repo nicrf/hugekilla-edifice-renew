@@ -69,7 +69,7 @@ t = m[2 + namelen + 1:]
 magic, proto, layout, vlen = struct.unpack_from("<IHIB", t, 0)
 ver = t[11:11 + vlen].decode()
 print("INFO: name=%r magic_ok=%s protocol=%d layout=%08x version=%s" % (name, magic == MAGIC, proto, layout, ver))
-ok &= magic == MAGIC and proto == 2
+ok &= magic == MAGIC and proto >= 2
 
 # 2. original client (no trailer) is refused with VERSIONMISMATCH + readable text
 s.sendto(packet(bytes([REQUESTENTER, 3]) + b"Old\x00"), SERVER)
@@ -81,14 +81,14 @@ print("legacy REQUESTENTER ->", "VERSIONMISMATCH" if mismatch else "no refusal",
 ok &= bool(mismatch) and bool(chats)
 
 # 3. other protocol is refused too
-s.sendto(packet(bytes([REQUESTENTER, 3]) + b"New\x00" + trailer(layout, proto=3, ver=b"0.3.0")), SERVER)
+s.sendto(packet(bytes([REQUESTENTER, 3]) + b"New\x00" + trailer(layout, proto=proto + 1, ver=b"9.9.9")), SERVER)
 got = recv_all(s)
 refused = any(len(g) >= 2 and g[0] == SIMPLE and g[1] == VERSIONMISMATCH for g in got)
-print("protocol 3 REQUESTENTER ->", "VERSIONMISMATCH" if refused else "accepted?!")
+print("other protocol REQUESTENTER ->", "VERSIONMISMATCH" if refused else "accepted?!")
 ok &= refused
 
 # 4. same version is accepted (ENTER)
-s.sendto(packet(bytes([REQUESTENTER, 4]) + b"Same\x00" + trailer(layout)), SERVER)
+s.sendto(packet(bytes([REQUESTENTER, 4]) + b"Same\x00" + trailer(layout, proto=proto, ver=ver.encode())), SERVER)
 got = recv_all(s, 2.5)
 entered = any(len(g) >= 2 and g[0] == SIMPLE and g[1] == ENTER for g in got)
 print("same-version REQUESTENTER ->", "ENTER" if entered else "no ENTER (types: %s)" % [g[:2] for g in got])

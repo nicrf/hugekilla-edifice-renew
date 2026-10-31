@@ -172,3 +172,10 @@ else()
     message(FATAL_ERROR "GLU not found (Debian/Ubuntu: sudo apt install libglu1-mesa-dev)")
   endif()
 endif()
+
+# ---- Tests -------------------------------------------------------------------
+# Unit tests that need neither a window nor the game data (run with ctest).
+enable_testing()
+add_executable(worldrandom_test tests/worldrandom_test.cpp)
+target_include_directories(worldrandom_test PRIVATE ${SRC}/game)
+add_test(NAME worldrandom COMMAND worldrandom_test)

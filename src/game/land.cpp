@@ -5,6 +5,7 @@
 #include "StdAfx.h"
 #include "math.h"
 #include "land.h"
+#include "worldrandom.h"
 #include "cfgfile.h"
 #include "redrawing.h"
 #include "time.h"
@@ -491,21 +492,23 @@ void Blotchify(LandDefs &ldfs)
 	}
 	for(int i=0;i<ldfs.numblotch;i++)
 	{
+		WorldRandom wr;
+		wr.Seed(ldfs.randomseed,2,i);
 		int x;
 		int y;
 		int numtries=0;
 reposition:
 		numtries++;
-		x=RND*LANDTEXGRIDSIZE;
-		y=RND*LANDTEXGRIDSIZE;
-		if(x>=LANDTEXGRIDSIZE) x=LANDTEXGRIDSIZE-1;   //RND can be exactly 1
+		x=wr.Float()*LANDTEXGRIDSIZE;
+		y=wr.Float()*LANDTEXGRIDSIZE;
+		if(x>=LANDTEXGRIDSIZE) x=LANDTEXGRIDSIZE-1;   //wr.Float() can be exactly 1
 		if(y>=LANDTEXGRIDSIZE) y=LANDTEXGRIDSIZE-1;
 		if((landtex[x&LANDTEXGRIDSIZE-1][y&LANDTEXGRIDSIZE-1]||
 			landtex[x-1&LANDTEXGRIDSIZE-1][y&LANDTEXGRIDSIZE-1]||
 			landtex[x+1&LANDTEXGRIDSIZE-1][y&LANDTEXGRIDSIZE-1]||
 			landtex[x&LANDTEXGRIDSIZE-1][y-1&LANDTEXGRIDSIZE-1]||
 			landtex[x&LANDTEXGRIDSIZE-1][y+1&LANDTEXGRIDSIZE-1])&numtries<60) goto reposition;
-		landtex[x][y]=RND*(ldfs.numgroundtex-1)+1;
+		landtex[x][y]=wr.Float()*(ldfs.numgroundtex-1)+1;
 	}
 }
 
@@ -645,21 +648,22 @@ void CreateLand(LandDefs &ldfs)
 	CopyMemory(clouds,jonx.bmBits,jonx.bmWidth*jonx.bmHeight);
 	DeleteObject(himage);
 	numsceneries=ldfs.numscenery;
-	srand(ldfs.randomseed);
 	int numscenery=GetNumScenery();
 	int clumpsize=0;
 	int tries;
 	for(i=0;i<numsceneries;i++)
 	{
-		if(clumpsize==0)clumpsize=RND*8;
+		WorldRandom wr;
+		wr.Seed(ldfs.randomseed,1,i);
+		if(clumpsize==0)clumpsize=wr.Float()*8;
 		clumpsize--;
 		tries=0;
 reposition:
 		tries++;
 		if(clumpsize&&i>0)
-			scenery[i].pos=scenery[i].pos+Vector(RND*6-3,0,RND*6-3);
+			scenery[i].pos=scenery[i].pos+Vector(wr.Float()*6-3,0,wr.Float()*6-3);
 		else
-			scenery[i].pos=Vector(RND*LANDGRIDSIZE,0,RND*LANDGRIDSIZE);
+			scenery[i].pos=Vector(wr.Float()*LANDGRIDSIZE,0,wr.Float()*LANDGRIDSIZE);
 		scenery[i].pos.y=GetLandSmooth(scenery[i].pos.x,scenery[i].pos.z);
 		float xn=*GetRepeat(scenery[i].pos.x-2,scenery[i].pos.z);
 		float xp=*GetRepeat(scenery[i].pos.x+2,scenery[i].pos.z);
@@ -671,21 +675,23 @@ reposition:
 			if(scenery[i].pos.y<WATERHEIGHT||scenery[i].pos.y>WATERHEIGHT+7) goto reposition;
 		}
 		
-		scenery[i].size=RND*5+.5;
-		scenery[i].top=Normalize(Vector(RND*.4-.2,1,RND*.4-.2));
-		scenery[i].side=GetRight(scenery[i].top,Vector(RND-.5,0,RND-.5));
-		scenery[i].type=RND*numscenery;
+		scenery[i].size=wr.Float()*5+.5;
+		scenery[i].top=Normalize(Vector(wr.Float()*.4-.2,1,wr.Float()*.4-.2));
+		scenery[i].side=GetRight(scenery[i].top,Vector(wr.Float()-.5,0,wr.Float()-.5));
+		scenery[i].type=wr.Float()*numscenery;
 		
 	}
 	Blotchify(ldfs);
 	numlillypad=GetSkySettings()->numlillypad;
 	for(i=0;i<numlillypad;i++)
 	{
+		WorldRandom wr;
+		wr.Seed(ldfs.randomseed,3,i);
 		tries=0;
 repos:
 		tries++;
-		lillypad[i].pos=Vector(RND*(LANDGRIDSIZE-8),0,RND*(LANDGRIDSIZE-8));
-		lillypad[i].size=RND*.5+.5;
+		lillypad[i].pos=Vector(wr.Float()*(LANDGRIDSIZE-8),0,wr.Float()*(LANDGRIDSIZE-8));
+		lillypad[i].size=wr.Float()*.5+.5;
 		lillypad[i].type=0;
 		float height=*GetRepeat(lillypad[i].pos.x,lillypad[i].pos.z);
 		for(int i2=0;i2<i;i2++)
