@@ -1669,8 +1669,11 @@ void Draw(float offset)
 			for(int i=0;i<15;i++)
 			if(RND*5<4)
 			{
+				//bolts fork until the next strike: stay inside lightningpos/lightningend[500]
+				if(numlightning>=(int)(sizeof(lightningpos)/sizeof(lightningpos[0]))) break;
 				int forkpos=RND*2+(numlightning-2);
-				if(forkpos>numlightning) forkpos=numlightning;
+				if(forkpos>numlightning-1) forkpos=numlightning-1;
+				if(forkpos<0) forkpos=0;
 				lightningpos[numlightning]=lightningend[forkpos];
 				lightningend[numlightning]=lightningpos[numlightning]+Vector(RND*30-15,RND*-20-20,RND*30-15)/2;//+lightningend[0]-lightningpos[0];
 				numlightning++;
