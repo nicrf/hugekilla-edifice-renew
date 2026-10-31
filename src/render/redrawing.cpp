@@ -14,6 +14,7 @@
 #include "mmsystem.h" 
 #include "multiplay.h"
 #include "sound.h"
+#include "ui.h"
 float cloudposx,cloudposy;
 float cloudmistposx,cloudmistposy;	
 #define PI (3.1415926)
@@ -1303,6 +1304,10 @@ void Redraw()
 		if(menu) DrawText(-.6,.5,menutext);
 	}
 	if(GetLocalPlayer()->scores||rgd.gamestate==2)
+		DrawScoreboard();
+	DrawBuildMenu();
+#ifdef HK_WIN32_NATIVE  // original score table, replaced by DrawScoreboard (src/ui/scoreboard.cpp)
+	if(GetLocalPlayer()->scores||rgd.gamestate==2)
 	{
 		DrawText(-.8,.74,"Name");
 		DrawText(-.1,.74,"Ping");
@@ -1341,6 +1346,7 @@ void Redraw()
 		}
 		glColor3f(1,1,1);
 	}
+#endif
 	itoa(curtime&999,tmptext,10);
 	int i;
 	for(i=0;i<consolepartvisible;i++)

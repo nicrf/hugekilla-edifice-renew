@@ -66,6 +66,8 @@ set(SOURCES
   src/ui/ui.cpp
   src/ui/options.cpp
   src/ui/serversetup.cpp
+  src/ui/scoreboard.cpp
+  src/ui/buildmenu.cpp
   src/audio/sound_sdl.cpp
   src/platform/platform_sdl.cpp
   src/compat/win32compat.cpp

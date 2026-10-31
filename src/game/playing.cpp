@@ -3,6 +3,7 @@
 
 #include "StdAfx.h"
 #include "hugekilla.h"
+#include "ui.h"
 #include "vector.h"
 #include "playing.h"
 #include "land.h"
@@ -1035,8 +1036,12 @@ int HandleMenuKey(DWORD key)
 				ConsoleDisplayText("Too far from station to build");
 				return 1;
 			}
+#ifdef HK_WIN32_NATIVE
 		DisplayBuildingType("structures");
 		menu=BUILD;
+#else
+		OpenBuildMenu();   //src/ui/buildmenu.cpp
+#endif
 		return 1;
 	}
 	if(key=='0')
@@ -1126,7 +1131,7 @@ int HandleMenuKey(DWORD key)
 			}
 			LoadStructure(name);
 			menu=BUILDING;
-			strcpy(menutext,"1. Build here\r2. Cancel");
+			strcpy(menutext,"Left click / 1: build here\rRight click / 2: cancel");
 			return 1;
 		}
 		
@@ -1369,6 +1374,17 @@ void HandleKey(DWORD key,DWORD flags)
 	}
 	if(HandleTalkKey(key,flags)) return;
 	if(flags&(1<<30)) return;
+	//placing a structure: left click (fire) builds it, right click cancels
+	if(menu==BUILDING&&key==controls.fire)
+	{
+		HandleMenuKey('1');
+		return;
+	}
+	if(menu==BUILDING&&key==VK_RBUTTON)
+	{
+		HandleMenuKey('2');
+		return;
+	}
 	if(HandleMenuKey(key)) return;
 	int extended;
 	if(flags&(1<<24)) extended=1;

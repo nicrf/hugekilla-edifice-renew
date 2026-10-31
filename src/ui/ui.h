@@ -2,6 +2,13 @@ void DrawMenu();
 void MenuMouseDown();
 void HandleButton(int handler);
 int CloseCredits();
+void DrawScoreboard();
+int IsBuildMenuOpen();
+void OpenBuildMenu();
+void BuildMenuClick();
+void BuildMenuWheel(int dir);
+int BuildMenuHandleKey(int vk);
+void DrawBuildMenu();
 #ifndef HK_WIN32_NATIVE
 void OpenOptions();
 int IsOptionsOpen();

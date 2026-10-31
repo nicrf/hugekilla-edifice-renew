@@ -192,7 +192,7 @@ static int KeyToVK(const SDL_Keysym &ks)
 static void KeyDown(int vk, int repeat)
 {
 	DWORD flags = repeat ? (1u << 30) : 0;
-	if (OptionsHandleKey(vk) || ServerSetupHandleKey(vk))
+	if (OptionsHandleKey(vk) || ServerSetupHandleKey(vk) || BuildMenuHandleKey(vk))
 		return;
 	if (vk == VK_ESCAPE && CloseCredits())
 		return;
@@ -264,6 +264,11 @@ static void HandleEvent(const SDL_Event &ev)
 		if (ev.button.button == SDL_BUTTON_LEFT)
 		{
 			HKSetKeyDown(VK_LBUTTON, 1);
+			if (IsBuildMenuOpen())
+			{
+				BuildMenuClick();
+				break;
+			}
 			if (GetLocalPlayer()->playstate == 0 || lockedcursor == 0)
 			{
 				MenuMouseDown();
@@ -274,7 +279,7 @@ static void HandleEvent(const SDL_Event &ev)
 		else if (ev.button.button == SDL_BUTTON_RIGHT)
 		{
 			HKSetKeyDown(VK_RBUTTON, 1);
-			if (OptionsHandleKey(VK_RBUTTON)) break;
+			if (OptionsHandleKey(VK_RBUTTON) || BuildMenuHandleKey(VK_RBUTTON)) break;
 			HandleKey(VK_RBUTTON, 0);
 		}
 		break;
@@ -294,6 +299,11 @@ static void HandleEvent(const SDL_Event &ev)
 	{
 		int ud = ev.wheel.y;
 		if (ev.wheel.direction == SDL_MOUSEWHEEL_FLIPPED) ud = -ud;
+		if (IsBuildMenuOpen())
+		{
+			BuildMenuWheel(ud);
+			break;
+		}
 		if (ud < 0) SwitchGun(50);
 		if (ud > 0) SwitchGun(51);
 		break;
@@ -417,6 +427,8 @@ int main(int argc, char **argv)
 		if (!strcmp(m, "credits")) { mousepos = Vector(0, -.92f, 0); MenuMouseDown(); }
 		if (!strcmp(m, "join")) OpenJoinScreen();
 		if (!strcmp(m, "server")) OpenServerSetup();
+		if (!strcmp(m, "build")) { StartServer(); OpenBuildMenu(); }
+		if (!strcmp(m, "scores")) { StartServer(); GetLocalPlayer()->scores = 1; }
 		if (!strcmp(m, "serverstart")) { OpenServerSetup(); ServerSetupHandleKey(VK_RETURN); }
 		if (!strcmp(m, "player")) { OpenOptions(); mousepos = Vector(.4f, .72f, 0); OptionsClick(); }
 	}
@@ -454,7 +466,8 @@ int main(int argc, char **argv)
 			redraw = 1;
 		else
 			Sleep(4);
-		if (GetLocalPlayer()->playstate == 0 || lockedcursor == 0)
+		// The build menu frees the mouse but keeps drawing the game behind it.
+		if (GetLocalPlayer()->playstate == 0 || (lockedcursor == 0 && !IsBuildMenuOpen()))
 		{
 			if (redraw)
 				DrawMenu();
