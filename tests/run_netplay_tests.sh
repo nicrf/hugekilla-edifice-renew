@@ -22,7 +22,7 @@ export ASAN_OPTIONS=detect_leaks=0
 export HK_AUTOSTART=1 HK_SHOT=/dev/null HK_SHOT_FRAME=999999
 
 status=0
-for t in net_handshake net_identity net_fuzz; do
+for t in net_handshake net_identity net_join net_fuzz; do
 	log="$LOGDIR/$t.log"
 	"$BIN" >"$log" 2>&1 &
 	pid=$!
