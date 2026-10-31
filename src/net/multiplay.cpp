@@ -189,7 +189,7 @@ static void SendRequestEnter()
 //server answers an info request, with its version
 static void SendInfo(SOCKADDR_IN dest)
 {
-	char buf[2+100+VERSIONTRAILER_MAX];
+	char buf[2+100+VERSIONTRAILER_MAX+4];
 	int nl=strlen(netsettings.servername);
 	if(nl>99) nl=99;
 	buf[0]=INFO;
@@ -198,6 +198,11 @@ static void SendInfo(SOCKADDR_IN dest)
 	buf[2+nl]=0;
 	int len=2+nl+1;
 	len+=WriteVersionTrailer(&buf[len]);
+	//server details for the join list (ignored by older clients)
+	buf[len++]=(char)numplayers;
+	buf[len++]=(char)MAXPLAYERS;
+	buf[len++]=(char)sv.gamemode;
+	buf[len++]=(char)sv.capturelimit;
 	infosock.dest=dest;
 	infosock.Send(buf,len);
 	infosock.Flush();
@@ -250,6 +255,9 @@ static void SanitizeNetFileName(char *name,int size)
 
 void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pnum);
 void ReceivePosition(Message *msg,int sender);
+#ifndef HK_WIN32_NATIVE
+static void JoinNetAddGame(Info *info,int msglen,SOCKADDR_IN source);
+#endif
 void DeletePlayer(int num,int reason);
 void ReceiveChatMessage(Message *msg,int msglen=-1);
 
@@ -951,6 +959,7 @@ void ClientLoop()
 		{
 			case INFO:
 				{
+#ifdef HK_WIN32_NATIVE
 					if(numlocallistaddr==MAXLOCALLIST) break;
 					int i;
 					for(i=0;i<numlocallistaddr;i++)
@@ -974,6 +983,10 @@ void ClientLoop()
 #endif
 					ConsoleDisplayText("received info");
 					break;
+#else
+					JoinNetAddGame((Info *)&msg,msglen,source);
+					break;
+#endif
 				}
 			case LANDINFO:
 				{
@@ -1266,88 +1279,12 @@ LRESULT CALLBACK Multiplay(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
 }
 #else
 
-//in-game replacement for the connect dialog (drawn by DrawMenu)
+//---- server list for the join screen (src/ui/joinscreen.cpp draws it) ----
 
-int joinscreen;
-char joinip[64];
-int joinselected;
-int joinipedited;
-struct JoinGame
-{
-	char name[100];
-	char version[16];
-	int compatible;
-	char reason[120];
-};
 JoinGame joingames[MAXLOCALLIST];
-char joinstatus[200];   //last refusal or error, shown on the screen
+static DWORD lastinfoquery;   //GetTickCount() of the last info request, for the ping
 
-static void JoinScreenRefresh()
-{
-	joinstatus[0]=0;
-	infosock.dest=MakeSockAddr(255,255,255,255,netsettings.infosendport);
-	SimpleMessage simple;
-	simple.type=SIMPLE;
-	simple.type2=REQUESTINFO;
-	infosock.Send(&simple,sizeof(simple));
-	infosock.Flush();
-	numlocallistaddr=0;
-	joinselected=0;
-	ConsoleDisplayText("Sent info request");
-}
-
-//asks a server for its info; it shows up in the list when it answers
-
-static void JoinScreenQueryIP()
-{
-	datasock.ResetReliable();
-	infosock.dest=MakeSockAddr(255,255,255,255,netsettings.infosendport);
-	in_addr_t addr=inet_addr(joinip);
-	if(addr==INADDR_NONE)
-	{
-		addrinfo hints,*res=0;
-		memset(&hints,0,sizeof(hints));
-		hints.ai_family=AF_INET;
-		hints.ai_socktype=SOCK_DGRAM;
-		if(getaddrinfo(joinip,0,&hints,&res)!=0||!res)
-		{
-			ConsoleDisplayText("Unknown host");
-			return;
-		}
-		addr=((sockaddr_in *)res->ai_addr)->sin_addr.s_addr;
-		freeaddrinfo(res);
-	}
-	infosock.dest.sin_addr.s_addr=addr;
-	SimpleMessage simple;
-	simple.type=SIMPLE;
-	simple.type2=REQUESTINFO;
-	infosock.Send(&simple,sizeof(simple));
-	infosock.Flush();
-	numlocallistaddr=0;
-	joinselected=0;
-	ConsoleDisplayText("Sent info request");
-}
-
-static void JoinScreenJoin()
-{
-	if(joinselected<0||joinselected>=numlocallistaddr) return;
-	if(!joingames[joinselected].compatible)
-	{
-		snprintf(joinstatus,sizeof(joinstatus),"Can't join:\r%s",joingames[joinselected].reason);
-		return;
-	}
-	joinstatus[0]=0;
-	datasock.ResetReliable();
-	infosock.dest=locallistaddr[joinselected];
-	SendRequestEnter();
-	connected=0;
-	GetLocalPlayer()->playstate=1;
-	GetLocalPlayer()->timeout=curtime+2000;
-	joinscreen=0;
-	ConsoleDisplayText("Sent connection request");
-}
-
-void OpenJoinScreen()
+void JoinNetOpen()
 {
 	LoadNetSettings();
 	if(!infosock.sock)
@@ -1358,13 +1295,10 @@ void OpenJoinScreen()
 		BOOL broadcast=TRUE;
 		setsockopt(infosock.sock,SOL_SOCKET,SO_BROADCAST,(char *)&broadcast,sizeof(broadcast));
 	}
-	joinscreen=1;
-	JoinScreenRefresh();
 }
 
-static void CloseJoinScreen()
+void JoinNetClose()
 {
-	joinscreen=0;
 	GetLocalPlayer()->playstate=0;
 	if(infosock.sock)
 	{
@@ -1373,160 +1307,142 @@ static void CloseJoinScreen()
 	}
 }
 
-int IsJoinScreenOpen()
+void JoinNetClearList()
 {
-	return joinscreen;
+	numlocallistaddr=0;
 }
 
-void JoinScreenAddGame(const char *name,const PeerVersion *peer)
+int JoinGameCount()
 {
-	if(numlocallistaddr<1||numlocallistaddr>MAXLOCALLIST) return;
-	JoinGame &game=joingames[numlocallistaddr-1];
-	strncpy(game.name,name,99);
-	game.name[99]=0;
-	strcpy(game.version,peer->version);
-	game.compatible=VersionCompatible(peer,game.reason,sizeof(game.reason));
+	return numlocallistaddr;
 }
 
-//back to the join screen after a refused connection, with the reason
-void JoinScreenShowError(const char *text)
+JoinGame *JoinGameAt(int i)
 {
-	OpenJoinScreen();
-	strncpy(joinstatus,text,sizeof(joinstatus)-1);
-	joinstatus[sizeof(joinstatus)-1]=0;
+	if(i<0||i>=numlocallistaddr) return 0;
+	return &joingames[i];
 }
 
-//returns 1 when the key was used by the join screen
-
-int HandleJoinScreenKey(int sdlkey)
+static void SendInfoRequest(SOCKADDR_IN dest)
 {
-	if(!joinscreen) return 0;
-	switch(sdlkey)
+	infosock.dest=dest;
+	SimpleMessage simple=MakeSimple(REQUESTINFO,0,0);
+	infosock.Send(&simple,sizeof(simple));
+	infosock.Flush();
+	lastinfoquery=GetTickCount();
+}
+
+void JoinNetSearchLAN()
+{
+	SendInfoRequest(MakeSockAddr(255,255,255,255,netsettings.infosendport));
+}
+
+//asks one server (IP or host name) for its info; it shows up in the list when it
+//answers. Returns 0 if the host name can't be resolved.
+int JoinNetQuery(const char *host)
+{
+	in_addr_t addr=inet_addr(host);
+	if(addr==INADDR_NONE)
 	{
-	case 27:  //escape
-		CloseJoinScreen();
-		break;
-	case '\r':
-	case 0x40000058:  //keypad enter
-		if(joinipedited&&joinip[0])
-		{
-			joinipedited=0;
-			JoinScreenQueryIP();
-		}
-		else
-			JoinScreenJoin();
-		break;
-	case '\b':
-		{
-			int len=strlen(joinip);
-			if(len) joinip[len-1]=0;
-			joinipedited=1;
-		}
-		break;
-	case 0x4000003E:  //F5
-		JoinScreenRefresh();
-		break;
-	case 0x40000052:  //up
-		if(joinselected>0) joinselected--;
-		break;
-	case 0x40000051:  //down
-		if(joinselected<numlocallistaddr-1) joinselected++;
-		break;
-	case 'v':
-		if(SDL_GetModState()&(KMOD_GUI|KMOD_CTRL))
-		{
-			char *clip=SDL_GetClipboardText();
-			if(clip)
-			{
-				strncpy(joinip,clip,sizeof(joinip)-1);
-				joinip[sizeof(joinip)-1]=0;
-				joinipedited=1;
-				SDL_free(clip);
-			}
-		}
-		break;
+		addrinfo hints,*res=0;
+		memset(&hints,0,sizeof(hints));
+		hints.ai_family=AF_INET;
+		hints.ai_socktype=SOCK_DGRAM;
+		if(getaddrinfo(host,0,&hints,&res)!=0||!res)
+			return 0;
+		addr=((sockaddr_in *)res->ai_addr)->sin_addr.s_addr;
+		freeaddrinfo(res);
 	}
+	SOCKADDR_IN dest=MakeSockAddr(0,0,0,0,netsettings.infosendport);
+	dest.sin_addr.s_addr=addr;
+	SendInfoRequest(dest);
 	return 1;
 }
 
-void HandleJoinScreenText(const char *text)
+//sends the join request to a listed server. Returns 0 (and the reason) if it
+//can't be joined.
+int JoinNetConnect(int index,char *reason,int reasonsize)
 {
-	if(!joinscreen) return;
-	if(SDL_GetModState()&(KMOD_GUI|KMOD_CTRL)) return;
-	for(;*text;text++)
+	JoinGame *game=JoinGameAt(index);
+	if(!game) return 0;
+	if(!game->compatible)
 	{
-		char c=*text;
-		int len=strlen(joinip);
-		if(len>=(int)sizeof(joinip)-1) break;
-		if((c>='0'&&c<='9')||(c>='a'&&c<='z')||(c>='A'&&c<='Z')||c=='.'||c=='-')
-		{
-			joinip[len]=c;
-			joinip[len+1]=0;
-			joinipedited=1;
-		}
+		snprintf(reason,reasonsize,"%s",game->reason);
+		return 0;
 	}
+	datasock.ResetReliable();
+	infosock.dest=locallistaddr[index];
+	SendRequestEnter();
+	connected=0;
+	GetLocalPlayer()->playstate=1;
+	GetLocalPlayer()->timeout=curtime+2000;
+	ConsoleDisplayText("Sent connection request");
+	return 1;
 }
 
-void DrawJoinScreen()
+//debug aid (HK_MENU=joindemo): a fake entry in the server list
+void JoinNetDebugAdd(const char *name,const char *addr,const char *version,int protocol,int ping,int players,int mode)
 {
-	if(!joinscreen) return;
-	glDisable(GL_TEXTURE_2D);
-	glColor4f(0,0,0,.75f);
-	glBegin(GL_QUADS);
-	glVertex2f(-.1f,-.8f);
-	glVertex2f(.99f,-.8f);
-	glVertex2f(.99f,.6f);
-	glVertex2f(-.1f,.6f);
-	glEnd();
-	glEnable(GL_TEXTURE_2D);
-	glColor3f(1,1,1);
-	DrawText(-.05f,.5f,"Multiplayer Game");
-	DrawText(-.05f,.35f,"Internet game IP:");
-	char line[200];
-	snprintf(line,sizeof(line),"%s_",joinip);
-	glColor3f(1,1,.5f);
-	DrawText(-.05f,.27f,line);
-	glColor3f(1,1,1);
-	DrawText(-.05f,.12f,"Games found:");
-	if(numlocallistaddr==0)
+	if(numlocallistaddr>=MAXLOCALLIST) return;
+	JoinGame &game=joingames[numlocallistaddr];
+	memset(&locallistaddr[numlocallistaddr],0,sizeof(SOCKADDR_IN));
+	numlocallistaddr++;
+	memset(&game,0,sizeof(game));
+	strncpy(game.name,name,sizeof(game.name)-1);
+	strncpy(game.address,addr,sizeof(game.address)-1);
+	strncpy(game.version,version,sizeof(game.version)-1);
+	PeerVersion peer;
+	memset(&peer,0,sizeof(peer));
+	peer.present=protocol>1;
+	peer.protocol=protocol;
+	peer.layout=LayoutHash();
+	strncpy(peer.version,version,sizeof(peer.version)-1);
+	game.compatible=VersionCompatible(&peer,game.reason,sizeof(game.reason));
+	game.ping=ping;
+	game.players=players;
+	game.maxplayers=MAXPLAYERS;
+	game.gamemode=mode;
+	game.capturelimit=5;
+}
+
+//INFO answer: name, version, then (servers since 0.3.0) players, max players,
+//game mode, capture limit
+static void JoinNetAddGame(Info *info,int msglen,SOCKADDR_IN source)
+{
+	info->name[sizeof(info->name)-1]=0;
+	int namelen=(unsigned char)info->namelen;
+	if(namelen>99) namelen=99;
+	const char *trailer=(const char *)info+2+namelen+1;
+	int trailerlen=msglen-(2+namelen+1);
+	PeerVersion peer;
+	ReadVersionTrailer(trailer,trailerlen,&peer);
+
+	int i;
+	for(i=0;i<numlocallistaddr;i++)
+		if(locallistaddr[i].sin_addr.s_addr==source.sin_addr.s_addr&&locallistaddr[i].sin_port==source.sin_port)
+			break;
+	if(i==MAXLOCALLIST) return;
+	if(i==numlocallistaddr) numlocallistaddr++;
+	locallistaddr[i]=source;
+	JoinGame &game=joingames[i];
+	memset(&game,0,sizeof(game));
+	strncpy(game.name,info->name,sizeof(game.name)-1);
+	strcpy(game.version,peer.version);
+	strncpy(game.address,inet_ntoa(source.sin_addr),sizeof(game.address)-1);
+	game.compatible=VersionCompatible(&peer,game.reason,sizeof(game.reason));
+	game.ping=GetTickCount()-lastinfoquery;
+	game.players=game.maxplayers=-1;
+	if(peer.present)
 	{
-		glColor3f(.6f,.6f,.6f);
-		DrawText(-.05f,.04f,"(searching...)");
-	}
-	for(int i=0;i<numlocallistaddr&&i<8;i++)
-	{
-		const JoinGame &game=joingames[i];
-		float dim=game.compatible?1:.5f;
-		if(i==joinselected) glColor3f(dim,dim,.5f*dim);
-		else glColor3f(.8f*dim,.8f*dim,.8f*dim);
-		char name[17];
-		strncpy(name,game.name,16);
-		name[16]=0;
-		snprintf(line,sizeof(line),"%s %s v%s",i==joinselected?">":" ",name,game.version);
-		DrawText(-.05f,.04f-i*.08f,line);
-	}
-	if(joinstatus[0])
-	{
-		//one line per '\r'
-		glColor3f(1,.55f,.45f);
-		char status[200];
-		strcpy(status,joinstatus);
-		float y=-.4f;
-		for(char *part=status;part;y-=.07f)
+		int extra=11+(unsigned char)trailer[10];
+		if(trailerlen>=extra+4)
 		{
-			char *next=strchr(part,'\r');
-			if(next) *next++=0;
-			DrawText(-.05f,y,part);
-			part=next;
+			game.players=(unsigned char)trailer[extra];
+			game.maxplayers=(unsigned char)trailer[extra+1];
+			game.gamemode=(unsigned char)trailer[extra+2];
+			game.capturelimit=(unsigned char)trailer[extra+3];
 		}
 	}
-	glColor3f(.5f,.5f,.5f);
-	snprintf(line,sizeof(line),"You: v%s (protocol %d)",EDIFICE_VERSION_STRING,EDIFICE_PROTOCOL_VERSION);
-	DrawText(-.05f,-.76f,line);
-	glColor3f(.6f,.6f,.6f);
-	DrawText(-.05f,-.6f,"Enter: look up / join");
-	DrawText(-.05f,-.68f,"F5: LAN    Esc: back");
-	glColor3f(1,1,1);
 }
 
 #endif // HK_WIN32_NATIVE

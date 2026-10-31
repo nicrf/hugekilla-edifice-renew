@@ -265,6 +265,11 @@ static void HandleEvent(const SDL_Event &ev)
 		if (ev.button.button == SDL_BUTTON_LEFT)
 		{
 			HKSetKeyDown(VK_LBUTTON, 1);
+			if (IsJoinScreenOpen())
+			{
+				JoinScreenClick(ev.button.clicks);
+				break;
+			}
 			if (IsBuildMenuOpen())
 			{
 				BuildMenuClick();
@@ -472,6 +477,17 @@ int main(int argc, char **argv)
 		if (!strcmp(m, "options2")) { OpenOptions(); mousepos = Vector(-.2f, .72f, 0); OptionsClick(); }
 		if (!strcmp(m, "credits")) { mousepos = Vector(0, -.92f, 0); MenuMouseDown(); }
 		if (!strcmp(m, "join")) OpenJoinScreen();
+		if (!strcmp(m, "joindemo"))
+		{
+			OpenJoinScreen();
+			JoinNetDebugAdd("Nicolas's fort", "192.168.1.20", EDIFICE_VERSION_STRING, EDIFICE_PROTOCOL_VERSION, 12, 5, 0);
+			JoinNetDebugAdd("Sandbox builders", "192.168.1.31", EDIFICE_VERSION_STRING, EDIFICE_PROTOCOL_VERSION, 38, 2, 1);
+			JoinNetDebugAdd("Old school server", "82.64.10.7", "old", 1, 95, -1, 0);
+			JoinNetDebugAdd("Edifice EU #1", "51.15.200.12", EDIFICE_VERSION_STRING, EDIFICE_PROTOCOL_VERSION, 140, 11, 0);
+			JoinNetDebugAdd("Future server", "203.0.113.5", "0.4.0", EDIFICE_PROTOCOL_VERSION + 1, 260, 3, 0);
+			mousepos = Vector(0, .3f, 0);
+			JoinScreenClick(1);
+		}
 		if (!strcmp(m, "server")) OpenServerSetup();
 		if (!strcmp(m, "build")) { StartServer(); OpenBuildMenu(); }
 		if (!strcmp(m, "scores")) { StartServer(); GetLocalPlayer()->scores = 1; }
