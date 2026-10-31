@@ -1332,7 +1332,7 @@ int TextToKey(char *text)
 void LoadControls()
 {
 	CfgFile controlini;
-	controlini.Load("control.ini");
+	controlini.Load(UserFile("control.ini"));
 	controls.mousereverse=controlini.GetValuei("mousereverse");
 	controls.mousesensitivity=controlini.GetValuef("mousesensitivity");
 	if(controls.mousesensitivity<=0) controls.mousesensitivity=1;

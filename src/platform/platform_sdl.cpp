@@ -313,6 +313,45 @@ static void HandleEvent(const SDL_Event &ev)
 
 // Game data (ini files, textures, sounds) is loaded with relative paths, so
 // run from the game data folder (data/ in the source tree).
+static char userdir[1024];
+
+// Settings the game rewrites (control.ini, net.ini, sv.ini) and screenshots live
+// in the per-user folder (SDL_GetPrefPath), never in the data folder: that keeps
+// the signed .app intact and survives updates. Defaults come from data/.
+static void InitUserDir()
+{
+	char *pref = SDL_GetPrefPath("", "Edifice");
+	if (!pref)
+		return;                       // fall back to the data folder
+	snprintf(userdir, sizeof(userdir), "%s", pref);
+	SDL_free(pref);
+	const char *defaults[3] = {"control.ini", "net.ini", "sv.ini"};
+	for (int i = 0; i < 3; i++)
+	{
+		char dst[1200];
+		snprintf(dst, sizeof(dst), "%s%s", userdir, defaults[i]);
+		if (access(dst, R_OK) == 0) continue;
+		FILE *in = fopen(defaults[i], "rb");
+		FILE *out = in ? fopen(dst, "wb") : 0;
+		char buf[4096];
+		size_t n;
+		while (in && out && (n = fread(buf, 1, sizeof(buf), in)) > 0)
+			fwrite(buf, 1, n, out);
+		if (in) fclose(in);
+		if (out) fclose(out);
+	}
+}
+
+const char *UserFile(const char *name)
+{
+	static char paths[4][1200];
+	static int next;
+	if (!userdir[0]) return name;     // no user folder: data folder (working directory)
+	char *p = paths[next++ & 3];
+	snprintf(p, sizeof(paths[0]), "%s%s", userdir, name);
+	return p;
+}
+
 static void EnterDataDir(int argc, char **argv)
 {
 	const char *candidates[4] = {0, 0, 0, 0};
@@ -350,9 +389,10 @@ int main(int argc, char **argv)
 		fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
 		return 1;
 	}
+	InitUserDir();
 
 	CfgFile controls;
-	controls.Load("control.ini");
+	controls.Load(UserFile("control.ini"));
 	fullscreen = controls.GetValuei("changeres") != 0;
 	int width = controls.GetValuei("screenwidth");
 	int height = controls.GetValuei("screenheight");

@@ -104,7 +104,7 @@ void ReceiveChatMessage(Message *msg);
 void LoadNetSettings()
 {
 	CfgFile netsetfile;
-	netsetfile.Load("net.ini");
+	netsetfile.Load(UserFile("net.ini"));
 	netsettings.infosendport=htons(netsetfile.GetValuei("infosendport"));
 	netsettings.datasendport=htons(netsetfile.GetValuei("datasendport"));
 	char *servername;

@@ -410,7 +410,7 @@ void InitConsole()
 	AddConsoleVar(&sv.timelimit,"timelimit",1);
 	AddConsoleVar(&sv.capturelimit,"capturelimit",1);
 	CfgFile svini;
-	svini.Load("sv.ini");
+	svini.Load(UserFile("sv.ini"));
 	for(int i=0;i<numconsolevar;i++)
 	{
 		switch(consolevartype[i])
