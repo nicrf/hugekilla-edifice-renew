@@ -167,7 +167,7 @@ static int Order(int *order)
 		{
 			JoinGame *x=JoinGameAt(order[b-1]),*y=JoinGameAt(order[b]);
 			int swap=0;
-			if(sortmode==SORT_NAME) swap=strcasecmp(x->name,y->name)>0;
+			if(sortmode==SORT_NAME) swap=stricmp(x->name,y->name)>0;
 			if(sortmode==SORT_PLAYERS) swap=x->players<y->players;
 			if(sortmode==SORT_PING) swap=x->ping>y->ping;
 			if(!swap) break;
