@@ -43,6 +43,25 @@ if(TARGET SDL2::SDL2main)
   list(PREPEND HK_SDL_LIBS SDL2::SDL2main)
 endif()
 
+# ---- Opus (voice chat codec, BSD license) -----------------------------------
+# Built statically from the official xiph release, like SDL2.
+include(FetchContent)
+set(OPUS_BUILD_SHARED_LIBRARY OFF CACHE BOOL "" FORCE)
+set(OPUS_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+set(OPUS_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
+set(OPUS_INSTALL_PKG_CONFIG_MODULE OFF CACHE BOOL "" FORCE)
+set(OPUS_INSTALL_CMAKE_CONFIG_MODULE OFF CACHE BOOL "" FORCE)
+set(OPUS_STATIC_RUNTIME ON CACHE BOOL "" FORCE)   # MSVC: same static CRT as the game
+list(LENGTH CMAKE_OSX_ARCHITECTURES HK_NUM_OSX_ARCHS)
+if(HK_NUM_OSX_ARCHS GREATER 1)
+  # universal macOS build: opus picks SSE or NEON sources for the host CPU only
+  set(OPUS_DISABLE_INTRINSICS ON CACHE BOOL "" FORCE)
+endif()
+FetchContent_Declare(opus
+  URL https://downloads.xiph.org/releases/opus/opus-1.5.2.tar.gz
+  URL_HASH SHA256=65c1d2f78b9f2fb20082c38cbe47c951ad5839345876e46941612ee87f9a7ce1)
+FetchContent_MakeAvailable(opus)
+
 find_package(OpenGL REQUIRED)
 
 # ---- Sources -----------------------------------------------------------------
@@ -71,6 +90,7 @@ set(SOURCES
   src/ui/chat.cpp
   src/ui/joinscreen.cpp
   src/audio/sound_sdl.cpp
+  src/audio/voice.cpp
   src/platform/platform_sdl.cpp
   src/compat/win32compat.cpp
 )
@@ -100,7 +120,9 @@ if(APPLE)
     MACOSX_BUNDLE_BUNDLE_NAME Edifice
     MACOSX_BUNDLE_GUI_IDENTIFIER net.sourceforge.hugekilla.edifice
     MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION}
-    MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION})
+    MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
+    # CMake's default template plus NSMicrophoneUsageDescription (voice chat)
+    MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/cmake/MacOSXBundleInfo.plist.in)
   # Bundle any non-system dylib (only with EDIFICE_SYSTEM_SDL2) and ad-hoc sign
   # the whole bundle so that `codesign -v --deep` passes.
   add_custom_command(TARGET Edifice POST_BUILD
@@ -162,7 +184,7 @@ else()
   endif()
 endif()
 
-target_link_libraries(Edifice PRIVATE ${HK_SDL_LIBS} OpenGL::GL)
+target_link_libraries(Edifice PRIVATE ${HK_SDL_LIBS} Opus::opus OpenGL::GL)
 if(APPLE)
   target_link_libraries(Edifice PRIVATE "-framework OpenGL")
 elseif(WIN32)
@@ -184,6 +206,10 @@ add_test(NAME worldrandom COMMAND worldrandom_test)
 add_executable(wire_test tests/wire_test.cpp)
 target_include_directories(wire_test PRIVATE ${SRC}/net)
 add_test(NAME wire COMMAND wire_test)
+add_executable(voice_test tests/voice_test.cpp)
+target_include_directories(voice_test PRIVATE ${SRC}/net ${SRC}/audio)
+target_link_libraries(voice_test PRIVATE Opus::opus)
+add_test(NAME voice COMMAND voice_test)
 
 # ---- GameNetworkingSockets (experimental, roadmap M7) --------------------------
 # Encrypted connections and P2P. Off by default: configure with the vcpkg

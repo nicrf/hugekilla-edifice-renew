@@ -11,6 +11,7 @@
 #include "mmsystem.h" 
 #include "multiplay.h"
 #include "sound.h"
+#include "voice.h"
 
 
 char menutext[5000];
@@ -1378,6 +1379,8 @@ void LoadControls()
 	controls.duck=TextToKey(controlini.GetValues("duck"));
 	controls.hangglide=TextToKey(controlini.GetValues("hangglide"));
 	controls.seemoney=TextToKey(controlini.GetValues("seemoney"));
+	controls.pushtotalk=TextToKey(controlini.GetValues("pushtotalk"));
+	if(!controls.pushtotalk) controls.pushtotalk='T';   //control.ini from before voice chat
 }
 
 //general keyboard input handler
@@ -1396,6 +1399,9 @@ void HandleKey(DWORD key,DWORD flags)
 	}
 	if(HandleTalkKey(key,flags)) return;
 	if(flags&(1<<30)) return;
+#ifndef HK_WIN32_NATIVE
+	if(key==controls.pushtotalk) VoicePushToTalk(1);
+#endif
 	//placing a structure: left click (fire) builds it, right click cancels
 	if(menu==BUILDING&&key==controls.fire)
 	{
@@ -1487,6 +1493,9 @@ void HandleKeyUp(DWORD key,DWORD flags)
 	if(key==controls.jetpack) GetLocalPlayer()->jetpack=0;
 	if(key==controls.hangglide) GetLocalPlayer()->hangglide=0;	
 	if(key==controls.seemoney) GetLocalPlayer()->seemoney=0;
+#ifndef HK_WIN32_NATIVE
+	if(key==controls.pushtotalk) VoicePushToTalk(0);
+#endif
 }
 
 //called to switch weapons (when the mouse wheel is scrolled etc.)

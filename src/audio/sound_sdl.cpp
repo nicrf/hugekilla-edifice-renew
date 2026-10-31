@@ -8,9 +8,12 @@
 #include "vector.h"
 #include "sound.h"
 #include "gameplay.h"
+#include "voice.h"
 #include <SDL.h>
 
 #define MAXSOUNDS 3000
+#define MAXVOICESTREAMS 32          //one per player (MAXPLAYERS)
+#define VOICEBUFSAMPLES 9600        //200 ms queued at most per voice
 
 struct SoundSlot
 {
@@ -25,6 +28,17 @@ struct SoundSlot
 };
 
 static SoundSlot sound[MAXSOUNDS];
+
+//voice chat (voice.cpp): decoded speech queued by the main thread, read by the callback
+struct VoiceStream
+{
+	float buf[VOICEBUFSAMPLES];   //ring
+	int read,count;
+	Vector position;
+	float gain;                   //distance and voice volume, from voice.cpp
+	float lastleft,lastright;     //ramped from, so gain changes don't click
+};
+static VoiceStream voicestream[MAXVOICESTREAMS];
 static SDL_AudioDeviceID device;
 static SDL_AudioSpec devicespec;
 
@@ -45,17 +59,12 @@ static Vector Cross(const Vector &a,const Vector &b)
 	return Vector(a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b.y-a.y*b.x);
 }
 
-//computes left/right gains for a 3d slot (DirectSound inverse distance model)
+//constant power pan of a source against the listener; returns its distance
 
-static void Spatialize(const SoundSlot &s,float &left,float &right)
+static float Pan(const Vector &position,float &left,float &right)
 {
-	Vector d(s.position.x-listenerpos.x,s.position.y-listenerpos.y,s.position.z-listenerpos.z);
+	Vector d(position.x-listenerpos.x,position.y-listenerpos.y,position.z-listenerpos.z);
 	float dist=sqrtf(Dot(d,d));
-	float meters=dist*distancefactor;
-	const float mindistance=1;
-	float att=1;
-	if(meters>mindistance)
-		att=mindistance/(mindistance+rollofffactor*(meters-mindistance));
 	float pan=0;
 	if(dist>0.0001f)
 	{
@@ -64,10 +73,51 @@ static void Spatialize(const SoundSlot &s,float &left,float &right)
 		if(len>0.0001f)
 			pan=Dot(d,rightv)/(len*dist);
 	}
-	//constant power pan
 	float angle=(pan+1)*(float)M_PI/4;
-	left=att*cosf(angle)*1.4142f;
-	right=att*sinf(angle)*1.4142f;
+	left=cosf(angle)*1.4142f;
+	right=sinf(angle)*1.4142f;
+	return dist;
+}
+
+//computes left/right gains for a 3d slot (DirectSound inverse distance model)
+
+static void Spatialize(const SoundSlot &s,float &left,float &right)
+{
+	float dist=Pan(s.position,left,right);
+	float meters=dist*distancefactor;
+	const float mindistance=1;
+	float att=1;
+	if(meters>mindistance)
+		att=mindistance/(mindistance+rollofffactor*(meters-mindistance));
+	left*=att;
+	right*=att;
+}
+
+//adds the queued voices: panned from the speaker, attenuated by voice.cpp
+
+static void MixVoices(float *out,int frames)
+{
+	for(int i=0;i<MAXVOICESTREAMS;i++)
+	{
+		VoiceStream &v=voicestream[i];
+		if(!v.count) continue;
+		float left,right;
+		Pan(v.position,left,right);
+		left*=v.gain;
+		right*=v.gain;
+		int n=v.count<frames?v.count:frames;
+		for(int f=0;f<n;f++)
+		{
+			float t=(float)f/frames;
+			float s=v.buf[v.read];
+			v.read=(v.read+1)%VOICEBUFSAMPLES;
+			out[f*2]+=s*(v.lastleft+(left-v.lastleft)*t);
+			out[f*2+1]+=s*(v.lastright+(right-v.lastright)*t);
+		}
+		v.count-=n;
+		v.lastleft=left;
+		v.lastright=right;
+	}
 }
 
 static void AudioCallback(void *,Uint8 *stream,int len)
@@ -103,6 +153,7 @@ static void AudioCallback(void *,Uint8 *stream,int len)
 			out[f*2+1]+=v*right;
 		}
 	}
+	MixVoices(out,frames);
 	for(int f=0;f<frames*2;f++)
 	{
 		out[f]*=mastervolume;
@@ -118,7 +169,7 @@ int InitSound(HWND)
 #endif
 	SDL_AudioSpec want;
 	SDL_zero(want);
-	want.freq=44100;
+	want.freq=VOICE_RATE;   //48 kHz: decoded voice needs no resampling (wav sounds are converted)
 	want.format=AUDIO_F32SYS;
 	want.channels=2;
 	want.samples=1024;
@@ -245,6 +296,52 @@ void SetMasterVolume(float volume)
 	if(!device) return;
 	SDL_LockAudioDevice(device);
 	mastervolume=volume;
+	SDL_UnlockAudioDevice(device);
+}
+
+//voice streams (voice.cpp): queue decoded mono samples, at VOICE_RATE, for a player
+
+void SoundVoicePush(int stream,const float *pcm,int n)
+{
+	if(!device||stream<0||stream>=MAXVOICESTREAMS) return;
+	SDL_LockAudioDevice(device);
+	VoiceStream &v=voicestream[stream];
+	if(v.count==0)
+	{
+		v.lastleft=0;   //a new talk spurt fades in
+		v.lastright=0;
+	}
+	for(int i=0;i<n&&v.count<VOICEBUFSAMPLES;i++)
+	{
+		v.buf[(v.read+v.count)%VOICEBUFSAMPLES]=pcm[i];
+		v.count++;
+	}
+	SDL_UnlockAudioDevice(device);
+}
+
+int SoundVoiceQueued(int stream)
+{
+	if(!device||stream<0||stream>=MAXVOICESTREAMS) return 0;
+	SDL_LockAudioDevice(device);
+	int n=voicestream[stream].count;
+	SDL_UnlockAudioDevice(device);
+	return n;
+}
+
+void SoundVoiceSource(int stream,Vector pos,float gain)
+{
+	if(!device||stream<0||stream>=MAXVOICESTREAMS) return;
+	SDL_LockAudioDevice(device);
+	voicestream[stream].position=pos;
+	voicestream[stream].gain=gain;
+	SDL_UnlockAudioDevice(device);
+}
+
+void SoundVoiceClear(int stream)
+{
+	if(!device||stream<0||stream>=MAXVOICESTREAMS) return;
+	SDL_LockAudioDevice(device);
+	voicestream[stream].count=0;
 	SDL_UnlockAudioDevice(device);
 }
 

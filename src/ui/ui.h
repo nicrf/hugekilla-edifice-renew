@@ -7,6 +7,7 @@ void ChatAddLine(const char *name,int team,int teamonly,const char *text);
 void ChatOpened(int key);
 void ChatHandleText(const char *utf8);
 void DrawChat();
+void DrawVoiceHUD();
 int IsBuildMenuOpen();
 void OpenBuildMenu();
 void BuildMenuClick();

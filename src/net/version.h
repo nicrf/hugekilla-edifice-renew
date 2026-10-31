@@ -7,7 +7,9 @@
 //    in multiplay.cpp or sock.cpp), or of a ServerVars field;
 //  - land/scenery generation or its random numbers (both sides must build the
 //    same world from the same LandDefs);
-//  - quantization, tick rate, transport.
+//  - quantization, tick rate, transport;
+//  - a new message type (an older build would ignore it, or log "Unknown
+//    message received" for every packet), e.g. VOICE in protocol 5.
 // Both sides must have the same protocol version; there is no negotiation.
 // EDIFICE_VERSION_STRING (the release, from CMakeLists.txt) is informative only.
 
@@ -17,9 +19,10 @@
 #ifndef EDIFICE_VERSION_STRING
 #define EDIFICE_VERSION_STRING "dev"
 #endif
-#define EDIFICE_PROTOCOL_VERSION 4   // 1 = original game, no version sent
+#define EDIFICE_PROTOCOL_VERSION 5   // 1 = original game, no version sent
                                      // 2 = version handshake; 3 = PCG32 world (worldrandom.h)
                                      // 4 = explicit serialization (wire.h), no raw structs
+                                     // 5 = VOICE message (proximity voice chat, voicemsg.h)
 #define EDIFICE_NET_MAGIC 0x31564445u // "EDV1", start of the version trailer
 // Layout field of the trailer. Up to protocol 3 it was a hash of the sizes of the
 // structs sent raw; since 4 nothing is sent raw, so it is this constant and is
