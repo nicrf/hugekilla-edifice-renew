@@ -19,7 +19,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          - os: macos-latest
             name: macos
           - os: ubuntu-22.04      # older glibc: the binary runs on more distributions
             name: linux
