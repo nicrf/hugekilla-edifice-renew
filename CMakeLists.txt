@@ -197,5 +197,11 @@ if(EDIFICE_GNS)
   endif()
   add_executable(gns_loopback_test tests/gns_loopback_test.cpp)
   target_link_libraries(gns_loopback_test PRIVATE ${HK_GNS_LIB})
+  if(MSVC)
+    # On Windows GameNetworkingSockets comes as a DLL (vcpkg x64-windows, like
+    # Valve ships it): link the shared C++ runtime here. The static vcpkg
+    # triplet builds it importing protobuf from a DLL that isn't there.
+    set_property(TARGET gns_loopback_test PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+  endif()
   add_test(NAME gns_loopback COMMAND gns_loopback_test)
 endif()

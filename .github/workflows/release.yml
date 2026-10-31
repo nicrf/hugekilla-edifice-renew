@@ -142,7 +142,7 @@ jobs:
         shell: bash
         run: |
           extra=""
-          if [ "$RUNNER_OS" = Windows ]; then extra="-DVCPKG_TARGET_TRIPLET=x64-windows-static -A x64"; else extra="-G Ninja"; fi
+          if [ "$RUNNER_OS" = Windows ]; then extra="-DVCPKG_TARGET_TRIPLET=x64-windows -A x64"; else extra="-G Ninja"; fi
           cmake -S . -B build/gns $extra -DCMAKE_BUILD_TYPE=Release -DEDIFICE_GNS=ON -DVCPKG_MANIFEST_FEATURES=gns \
             -DCMAKE_TOOLCHAIN_FILE="$RUNNER_TEMP/vcpkg/scripts/buildsystems/vcpkg.cmake"
 
