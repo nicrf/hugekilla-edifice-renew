@@ -481,12 +481,11 @@ void TickObjects(float sf)
 void Play();
 
 
-//zoom key: a short press toggles a x3 zoom (eased); holding it and moving the mouse
-//up/down sets the zoom precisely, as in the original game
-#define QUICKZOOM 12        //fzoom for the short press: 1.1^12 = x3.1
-#define QUICKZOOMPRESS 350  //ms: a press shorter than this, without mouse movement, toggles
-static DWORD zoompressedtime;
-static int zoomadjusted;
+//zoom key: pressing it toggles a x3 zoom right away (eased); holding it and moving
+//the mouse clearly up/down sets the zoom precisely, as in the original game
+#define QUICKZOOM 12        //fzoom of the quick zoom: 1.1^12 = x3.1
+#define ZOOMADJUST 30       //mouse counts moved while held before it adjusts the zoom
+static int zoommoved;       //mouse movement since the zoom key went down
 static float zoomtarget=-1; //-1: no eased zoom running
 
 //called once per frame, calls Play a number of times according to how much time has passed
@@ -553,11 +552,10 @@ void Play()
 		if(controls.mousereverse) mychange=-mychange;
 		if(cur->zoom)
 		{
-			if(mychange)
-			{
-				zoomadjusted=1;
-				zoomtarget=-1;
-			}
+			//a little mouse jitter while pressing the key must not cancel the quick zoom
+			zoommoved+=abs(mychange);
+			if(zoommoved<ZOOMADJUST) mychange=0;
+			else zoomtarget=-1;
 			cur->fzoom-=(float)mychange/10;
 			if(cur->fzoom<0)cur->fzoom=0;
 			if(cur->fzoom>40)cur->fzoom=40;
@@ -1475,8 +1473,10 @@ void HandleKey(DWORD key,DWORD flags)
 	if(key==controls.zoom)
 	{
 		GetLocalPlayer()->zoom=1;
-		zoompressedtime=curtime;
-		zoomadjusted=0;
+		zoommoved=0;
+		float current=zoomtarget>=0?zoomtarget:GetLocalPlayer()->fzoom;
+		zoomtarget=current>1?0:QUICKZOOM;
+		if(getenv("HK_KEYLOG")) fprintf(stderr,"zoom key: fzoom %.1f -> target %.0f\n",GetLocalPlayer()->fzoom,zoomtarget);
 	}
 	if(key==controls.jump) GetLocalPlayer()->jump=1;
 	if(key==controls.jetpack) GetLocalPlayer()->jetpack=1;
@@ -1517,12 +1517,7 @@ void HandleKeyUp(DWORD key,DWORD flags)
 	if(key==controls.back) GetLocalPlayer()->down=0;
 	if(key==controls.showscores) GetLocalPlayer()->scores=0;
 	if(key==controls.fire) GetLocalPlayer()->firing=0;
-	if(key==controls.zoom&&GetLocalPlayer()->zoom)
-	{
-		GetLocalPlayer()->zoom=0;
-		if(!zoomadjusted&&curtime-zoompressedtime<QUICKZOOMPRESS)
-			zoomtarget=GetLocalPlayer()->fzoom>1?0:QUICKZOOM;
-	}
+	if(key==controls.zoom) GetLocalPlayer()->zoom=0;
 	if(key==controls.jump) GetLocalPlayer()->jump=0;	
 	if(key==controls.jetpack) GetLocalPlayer()->jetpack=0;
 	if(key==controls.hangglide) GetLocalPlayer()->hangglide=0;	

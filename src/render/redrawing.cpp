@@ -1618,7 +1618,13 @@ void Draw(float offset)
 	RECT winrect;
 	glLoadIdentity();
 	
-	glMatrixMode(GL_PROJECTION); gluPerspective(70,1.2,.4,1700); 
+	//the zoom narrows the field of view. Redraw multiplied it into the projection
+	//before calling Draw, but the glLoadIdentity above (projection is the current
+	//matrix here) wiped it: the camera never zoomed, even in the original game.
+	glMatrixMode(GL_PROJECTION);
+	float zoom=powf(1.1f,cur->fzoom);
+	glScalef(zoom,zoom,1);
+	gluPerspective(70,1.2,.4,1700); 
 	glMatrixMode(GL_MODELVIEW);
 	glRotatef(GetLocalPlayer()->roll*2,0,0,1);
 	camup=GetRight(VectMult(cur->tilt,cur->fwd,Vector(0,1,0),CrossProduct(cur->dir,Vector(0,1,0))),Vector(0,1,0));
@@ -1707,6 +1713,7 @@ void Draw(float offset)
 	
 	glMatrixMode(GL_PROJECTION);
 	glLoadIdentity();
+	glScalef(zoom,zoom,1);   //same zoom as the sky projection above
 	gluPerspective(70,1.2,.15,fogend);
 	glMatrixMode(GL_MODELVIEW);
 	glLoadIdentity();
