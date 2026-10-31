@@ -65,7 +65,7 @@ Le code Win32 natif d'origine (WinMain, DirectSound, boîtes de dialogue) reste 
 
 `EnterDataDir` (`src/platform/platform_sdl.cpp`) cherche `control.ini`, dans l'ordre : premier argument, `HUGEKILLA_DATA`, `<dossier de l'exécutable>/data` (= `Contents/Resources/data` dans le bundle), puis `data/` du dépôt (builds Debug seulement).
 
-À chaque build, `data/` est recopié à côté de l'exécutable (Windows, Linux), sauf `control.ini` et `net.ini` que le jeu réécrit : ils ne sont copiés que s'ils manquent.
+Les réglages que le jeu réécrit (`control.ini`, `net.ini`, `sv.ini`) et les captures d'écran (`screenshot-*.bmp`) sont dans le dossier utilisateur, copiés depuis `data/` au premier lancement : `~/Library/Application Support/Edifice` (macOS), `%APPDATA%\Edifice` (Windows), `~/.local/share/Edifice` (Linux). Le dossier de données (et le `.app` signé) n'est jamais modifié ; supprimez un fichier du dossier utilisateur pour revenir aux valeurs par défaut.
 
 Les données viennent de Windows (insensible à la casse) : hors Windows, `HKPath` retrouve un chemin sans tenir compte de la casse. Les `.ini` et `Structures/*.txt` sont en CRLF et le code s'appuie sur le `\r` : `.gitattributes` marque `data/**` en `-text`.
 

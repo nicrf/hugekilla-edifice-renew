@@ -32,6 +32,7 @@
 #endif
 
 // Local Header Files
+const char *UserFile(const char *name);	// per-user settings folder (platform_sdl.cpp)
 #include "math.h"
 
 #include "cfgfile.h"

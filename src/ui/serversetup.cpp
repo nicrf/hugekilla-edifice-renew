@@ -113,7 +113,7 @@ void OpenServerSetup()
 	LoadSkyNames();
 	CfgFile net;
 	servername[0]=0;
-	if(net.Load("net.ini"))
+	if(net.Load(UserFile("net.ini")))
 	{
 		if(net.GetValues("servername"))
 			CopyIniString(servername,net.GetValues("servername"),sizeof(servername));
@@ -147,10 +147,10 @@ static void SaveSetup()
 	sprintf(timelimit,"%d",sv.timelimit);
 	const char *netkeys[4]={"servername","serversky","serverterrain","serverscenery"};
 	const char *netvalues[4]={servername,sky,terrain,scenery};
-	SetIniValues("net.ini",netkeys,netvalues,4);
+	SetIniValues(UserFile("net.ini"),netkeys,netvalues,4);
 	const char *svkeys[3]={"gamemode","capturelimit","timelimit"};
 	const char *svvalues[3]={mode,captures,timelimit};
-	SetIniValues("sv.ini",svkeys,svvalues,3);
+	SetIniValues(UserFile("sv.ini"),svkeys,svvalues,3);
 }
 
 //picks a value for every "Random" choice, then starts the server

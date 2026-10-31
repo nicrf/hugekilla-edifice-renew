@@ -213,13 +213,13 @@ static void SaveOptions()
 		values[n]=numbers[i];
 		n++;
 	}
-	SetIniValues("control.ini",keys,values,n);
+	SetIniValues(UserFile("control.ini"),keys,values,n);
 	for(int i=0;i<firstnumber;i++)
 		free((void *)values[i]);
 
 	const char *netkeys[1]={"name"};
 	const char *netvalues[1]={playername};
-	SetIniValues("net.ini",netkeys,netvalues,1);
+	SetIniValues(UserFile("net.ini"),netkeys,netvalues,1);
 }
 
 //reads the settings LoadControls doesn't know about (called at startup)
@@ -227,7 +227,7 @@ static void SaveOptions()
 void LoadOptions()
 {
 	CfgFile ini;
-	if(!ini.Load("control.ini")) return;
+	if(!ini.Load(UserFile("control.ini"))) return;
 	float dd=ini.GetValuef("drawdistance");
 	if(dd>0) graphicsprefs.drawdistance=dd;
 	if(ini.GetValues("vsync")) HKSetVSync(ini.GetValuei("vsync"));
@@ -242,7 +242,7 @@ void OpenOptions()
 	editingname=0;
 	CfgFile net;
 	playername[0]=0;
-	if(net.Load("net.ini")&&net.GetValues("name"))
+	if(net.Load(UserFile("net.ini"))&&net.GetValues("name"))
 		CopyIniString(playername,net.GetValues("name"),sizeof(playername));
 	if(!playername[0]) strcpy(playername,"Player");
 }
