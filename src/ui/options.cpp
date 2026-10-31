@@ -8,6 +8,7 @@
 #include "playing.h"
 #include "sound.h"
 #include "ui.h"
+#include "voice.h"
 
 extern Controls controls;
 extern GraphicsPrefs graphicsprefs;
@@ -48,14 +49,16 @@ static Binding bindings[]=
 	{"Scores","showscores",&controls.showscores},
 	{"Talk","talk",&controls.talk},
 	{"Team talk","talkteam",&controls.talkteam},
+	{"Push to talk","pushtotalk",&controls.pushtotalk},
 	{"Screenshot","screenshot",&controls.screenshot},
 };
 #define NUMBINDINGS (int)(sizeof(bindings)/sizeof(bindings[0]))
 
-#define NUMSETTINGS 6
+#define NUMSETTINGS 8
 static const char *settinglabels[NUMSETTINGS]=
 {
-	"Fullscreen","VSync","Draw distance","Mouse sensitivity","Invert mouse","Volume"
+	"Fullscreen","VSync","Draw distance","Mouse sensitivity","Invert mouse","Volume",
+	"Voice volume","Microphone"
 };
 
 //layout, in screen units (-1..1)
@@ -187,9 +190,9 @@ void SetIniValues(const char *filename,const char *keys[],const char *values[],i
 
 static void SaveOptions()
 {
-	const char *keys[NUMBINDINGS+6];
-	const char *values[NUMBINDINGS+6];
-	char numbers[6][32];
+	const char *keys[NUMBINDINGS+8];
+	const char *values[NUMBINDINGS+8];
+	char numbers[8][32];
 	int n=0;
 	for(int i=0;i<NUMBINDINGS;i++)
 	{
@@ -206,8 +209,11 @@ static void SaveOptions()
 	sprintf(numbers[3],"%g",controls.mousesensitivity);
 	sprintf(numbers[4],"%d",(int)controls.mousereverse);
 	sprintf(numbers[5],"%d",(int)(volume*100+.5f));
-	const char *numberkeys[6]={"changeres","vsync","drawdistance","mousesensitivity","mousereverse","volume"};
-	for(int i=0;i<6;i++)
+	sprintf(numbers[6],"%d",(int)(VoiceGetVolume()*100+.5f));
+	sprintf(numbers[7],"%d",VoiceGetMic());
+	const char *numberkeys[8]={"changeres","vsync","drawdistance","mousesensitivity","mousereverse","volume",
+		"voicevolume","voicemic"};
+	for(int i=0;i<8;i++)
 	{
 		keys[n]=numberkeys[i];
 		values[n]=numbers[i];
@@ -233,6 +239,8 @@ void LoadOptions()
 	if(ini.GetValues("vsync")) HKSetVSync(ini.GetValuei("vsync"));
 	if(ini.GetValues("volume")) volume=ini.GetValuei("volume")/100.0f;
 	SetMasterVolume(volume);
+	if(ini.GetValues("voicevolume")) VoiceSetVolume(ini.GetValuei("voicevolume")/100.0f);
+	if(ini.GetValues("voicemic")) VoiceSetMic(ini.GetValuei("voicemic"));
 }
 
 void OpenOptions()
@@ -313,12 +321,14 @@ static void ChangeSetting(int row,int dir)
 		if(volume>1) volume=1;
 		SetMasterVolume(volume);
 		break;
+	case 6: VoiceSetVolume(VoiceGetVolume()+dir*.1f); break;
+	case 7: VoiceSetMic(!VoiceGetMic()); break;
 	}
 }
 
 static int IsStepper(int row)
 {
-	return row==2||row==3||row==5;
+	return row==2||row==3||row==5||row==6;
 }
 
 static void SettingText(int row,char *text)
@@ -331,6 +341,8 @@ static void SettingText(int row,char *text)
 	case 3: sprintf(text,"< %.2f >",controls.mousesensitivity); break;
 	case 4: strcpy(text,controls.mousereverse?"On":"Off"); break;
 	case 5: sprintf(text,"< %d%% >",(int)(volume*100+.5f)); break;
+	case 6: sprintf(text,"< %d%% >",(int)(VoiceGetVolume()*100+.5f)); break;
+	case 7: strcpy(text,VoiceGetMic()?"On":"Off"); break;
 	}
 }
 

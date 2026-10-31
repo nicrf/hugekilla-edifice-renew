@@ -12,6 +12,7 @@
 #include "multiplay.h"
 #include "sound.h"
 #include "ui.h"
+#include "voice.h"
 #include <SDL.h>
 
 extern GraphicsPrefs graphicsprefs;
@@ -222,6 +223,8 @@ static void HandleEvent(const SDL_Event &ev)
 	case SDL_WINDOWEVENT:
 		if (ev.window.event == SDL_WINDOWEVENT_SIZE_CHANGED)
 			UpdateViewport();
+		if (ev.window.event == SDL_WINDOWEVENT_FOCUS_LOST)
+			VoicePushToTalk(0);   // its key-up would go to another window
 		if (ev.window.event == SDL_WINDOWEVENT_FOCUS_LOST && lockedcursor == 1 && !getenv("HK_SHOT"))
 			LockCursor(0);
 		break;
@@ -449,6 +452,7 @@ int main(int argc, char **argv)
 
 	consolevisible = 1;
 	InitSound(hWnd);
+	VoiceInit();
 	LoadSounds();
 	LoadHighTextures();
 
@@ -583,6 +587,7 @@ int main(int argc, char **argv)
 	}
 
 	CloseSocks();
+	VoiceShutdown();
 	UnInitSound();
 	SDL_GL_DeleteContext(glcontext);
 	SDL_DestroyWindow(window);

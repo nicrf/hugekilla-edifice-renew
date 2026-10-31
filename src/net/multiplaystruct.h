@@ -15,6 +15,7 @@
 #define SERVEROBJECTSNAPSHOT 13
 #define KILLEDPOSITION 14
 #define REMOTEGAMEDATA 15
+#include "voicemsg.h"    //VOICE 16 (5 is SIMPLE, sock.h)
 
 
 //simple messages

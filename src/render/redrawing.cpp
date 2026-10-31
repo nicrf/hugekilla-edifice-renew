@@ -1362,6 +1362,7 @@ void Redraw()
 	}
 #else
 	DrawChat();   //src/ui/chat.cpp
+	DrawVoiceHUD();
 #endif
 	
 	itoa(cursendrate,tmptext,10);

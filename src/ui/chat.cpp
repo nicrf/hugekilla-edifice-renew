@@ -7,6 +7,7 @@
 #include "playing.h"
 #include "multiplay.h"
 #include "ui.h"
+#include "voice.h"
 #include <ctype.h>
 
 extern char talktext[1000];
@@ -257,4 +258,38 @@ void DrawChat()
 	}
 	glPopAttrib();
 	glColor3f(1,1,1);
+}
+
+//voice chat (src/audio/voice.cpp): "Mic on" while transmitting, and who is heard
+#define VOICEHUDX .4f
+#define VOICEHUDY .62f
+
+void DrawVoiceHUD()
+{
+	int transmitting=VoiceTransmitting();
+	int speakers=0;
+	for(int i=0;i<GetNumPlayers()&&i<MAXPLAYERS;i++)
+		if(VoiceIsSpeaking(i)&&i!=GetLocalNum()) speakers++;
+	if(!transmitting&&!speakers) return;
+	glPushAttrib(GL_ENABLE_BIT|GL_CURRENT_BIT|GL_COLOR_BUFFER_BIT);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+	glEnable(GL_TEXTURE_2D);
+	float y=VOICEHUDY;
+	if(transmitting)
+	{
+		glColor4f(.4f,1,.4f,1);
+		ChatText(VOICEHUDX,y,"Mic on");
+		y-=LINEH;
+	}
+	for(int i=0;i<GetNumPlayers()&&i<MAXPLAYERS;i++)
+	{
+		if(!VoiceIsSpeaking(i)||i==GetLocalNum()) continue;
+		glColor4f(1,1,1,1);
+		float x=ChatText(VOICEHUDX,y,"Speaking: ");
+		TeamColor(GetPlayer(i)->team,1);
+		ChatText(x,y,GetPlayer(i)->name);
+		y-=LINEH;
+	}
+	glPopAttrib();
 }

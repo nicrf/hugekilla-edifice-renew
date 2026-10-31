@@ -12,3 +12,8 @@ int UnInitSound();
 int InitSound(HWND hwnd);
 void SetRolloff(float rolloff);
 void SetMasterVolume(float volume);
+//voice chat streams (voice.cpp), one per player: mono samples at VOICE_RATE
+void SoundVoicePush(int stream,const float *pcm,int n);
+int SoundVoiceQueued(int stream);
+void SoundVoiceSource(int stream,Vector pos,float gain);
+void SoundVoiceClear(int stream);
