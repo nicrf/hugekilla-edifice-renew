@@ -776,6 +776,11 @@ void Play()
 		{
 			cur->hanggliding=1;
 		}
+		//the glider folds when its key is released (it stayed out, and the jetpack
+		//sharing that key did nothing, until landing). Other players' gliding state
+		//comes from the network, so only the local player.
+		if(cur==GetLocalPlayer()&&!cur->hangglide)
+			cur->hanggliding=0;
 		float roll;
 		roll=0;
 		if(cur->hanggliding)
