@@ -246,6 +246,7 @@ static void HandleEvent(const SDL_Event &ev)
 		HandleJoinScreenText(ev.text.text);
 		OptionsHandleText(ev.text.text);
 		ServerSetupHandleText(ev.text.text);
+		ChatHandleText(ev.text.text);
 		break;
 	case SDL_MOUSEMOTION:
 	{
@@ -474,6 +475,15 @@ int main(int argc, char **argv)
 		if (!strcmp(m, "server")) OpenServerSetup();
 		if (!strcmp(m, "build")) { StartServer(); OpenBuildMenu(); }
 		if (!strcmp(m, "scores")) { StartServer(); GetLocalPlayer()->scores = 1; }
+		if (!strcmp(m, "chat"))
+		{
+			StartServer();
+			ChatAddLine("Nicolas", 1, 0, "salut tout le monde, on fait une partie ?");
+			ChatAddLine("Bob", 2, 0, "ok mais je construis d'abord un fort pres du drapeau bleu, couvrez-moi pendant ce temps svp");
+			ChatAddLine("Alice", 2, 1, "je prends le jetpack, rdv a la tour");
+			GetLocalPlayer()->talking = 2;
+			ChatHandleText("Ca marche, j'arrive \xc3\xa0 la tour");
+		}
 		if (!strcmp(m, "serverstart")) { OpenServerSetup(); ServerSetupHandleKey(VK_RETURN); }
 		if (!strcmp(m, "player")) { OpenOptions(); mousepos = Vector(.4f, .72f, 0); OptionsClick(); }
 	}

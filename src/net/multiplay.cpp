@@ -19,6 +19,7 @@
 #include "gameplay.h"
 #include "sock.h"
 #include "version.h"
+#include "ui.h"
 #define MAXLOCALLIST 128
 #ifndef HK_WIN32_NATIVE
 #ifndef _WIN32
@@ -1868,8 +1869,13 @@ void ReceiveChatMessage(Message *msg,int msglen)
 	if(dest==CMSG_BROADCAST||dest==CMSG_TEAM)
 	{
 		int sender=(unsigned char)msg->buf[1];
+#ifdef HK_WIN32_NATIVE
 		snprintf(message,sizeof(message),"%.31s: %s",ValidPlayer(sender)?GetPlayer(sender)->name:"?",chatmessage);
 		ConsoleDisplayText(message);
+#else
+		ChatAddLine(ValidPlayer(sender)?GetPlayer(sender)->name:"?",ValidPlayer(sender)?GetPlayer(sender)->team:0,
+			dest==CMSG_TEAM,chatmessage);
+#endif
 	}
 	if(dest==CMSG_SCORE)
 	{

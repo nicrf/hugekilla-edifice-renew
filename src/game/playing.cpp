@@ -1227,11 +1227,23 @@ int HandleTalkKey(DWORD key,DWORD flags)
 		char text[2000];
 		strcpy(text,l33tify(talktext));
 	
-		SendChatMessage(text,GetLocalPlayer()->talking-1);
+		if(text[0]) SendChatMessage(text,GetLocalPlayer()->talking-1);
 		talktext[0]=0;
 		
 		GetLocalPlayer()->talking=0;
+		return 1;
 	}
+#ifndef HK_WIN32_NATIVE
+	if(key==VK_TAB)   //switch between everyone and team
+	{
+		GetLocalPlayer()->talking=GetLocalPlayer()->talking==1?2:1;
+		return 1;
+	}
+	//characters arrive as text input (ChatHandleText, keyboard layout aware);
+	//the keys are still swallowed so typing doesn't move the player
+	if(GetRealKey(key,flags)) return 1;
+	return key==VK_BACK;
+#endif
 	char realkey=GetRealKey(key,flags);
 	if(realkey)
 	{
@@ -1398,10 +1410,18 @@ void HandleKey(DWORD key,DWORD flags)
 	if(key==controls.talk)
 	{
 		GetLocalPlayer()->talking=1;
+#ifndef HK_WIN32_NATIVE
+		ChatOpened(key);
+		return;
+#endif
 	}
 	if(key==controls.talkteam)
 	{
 		GetLocalPlayer()->talking=2;
+#ifndef HK_WIN32_NATIVE
+		ChatOpened(key);
+		return;
+#endif
 	}
 	if(key==VK_F1) LoadGuns();
 	if(key==VK_F2) LoadRandom("textures\\ground\\",1);
