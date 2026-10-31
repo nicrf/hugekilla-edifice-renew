@@ -193,6 +193,9 @@ static int KeyToVK(const SDL_Keysym &ks)
 static void KeyDown(int vk, int repeat)
 {
 	DWORD flags = repeat ? (1u << 30) : 0;
+	// Debug aid: HK_KEYLOG=1 prints every key the game receives (Windows VK code)
+	if (getenv("HK_KEYLOG") && !repeat)
+		fprintf(stderr, "key down: vk %d ('%c')\n", vk, vk >= 32 && vk < 127 ? vk : '?');
 	if (OptionsHandleKey(vk) || ServerSetupHandleKey(vk) || BuildMenuHandleKey(vk))
 		return;
 	if (vk == VK_ESCAPE && CloseCredits())
@@ -412,7 +415,8 @@ int main(int argc, char **argv)
 	}
 	graphicsprefs.stereoseparation = controls.GetValuef("stereoseparation");
 
-	srand((unsigned)time(NULL));
+	// Debug aid: HK_SEED=N makes the world (land, sky, spawn) the same every run
+	srand(getenv("HK_SEED") ? (unsigned)atoi(getenv("HK_SEED")) : (unsigned)time(NULL));
 
 	// Legacy (compatibility) profile: the renderer uses fixed-function GL.
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
@@ -474,6 +478,27 @@ int main(int argc, char **argv)
 
 	// Debug aid: HK_AUTOSTART=1 starts a local server right away.
 	if (getenv("HK_AUTOSTART")) StartServer();
+	// Debug aid: HK_ZOOM_TEST=1 queues real SDL events: Q down, a little mouse
+	// jitter, Q up, through the same path as the keyboard (quick x3 zoom).
+	if (getenv("HK_ZOOM_TEST"))
+	{
+		SDL_Event e;
+		SDL_zero(e);
+		e.type = SDL_KEYDOWN;
+		e.key.state = SDL_PRESSED;
+		e.key.keysym.sym = SDLK_q;
+		e.key.keysym.scancode = SDL_SCANCODE_Q;
+		SDL_PushEvent(&e);
+		SDL_Event m;
+		SDL_zero(m);
+		m.type = SDL_MOUSEMOTION;
+		m.motion.xrel = 2;
+		m.motion.yrel = -3;
+		SDL_PushEvent(&m);
+		e.type = SDL_KEYUP;
+		e.key.state = SDL_RELEASED;
+		SDL_PushEvent(&e);
+	}
 	// Debug aid: HK_JOIN=<host> joins that server as soon as it answers (a game
 	// client against a local HK_AUTOSTART server).
 	int autojoin = 0;

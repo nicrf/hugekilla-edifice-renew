@@ -376,7 +376,8 @@ SkySettings *GetSkySettings()
 
 void RandomLand(LandDefs &ldfs)
 {
-	srand( (unsigned)time( NULL ) );
+	//debug aid HK_SEED=N: the same world every run (comparing screenshots)
+	srand(getenv("HK_SEED")?(unsigned)atoi(getenv("HK_SEED")):(unsigned)time( NULL ));
 	LandSettings ls;
 	LoadLandSettings(&ls);
 	ls.hrmin*=hkreliefscale;

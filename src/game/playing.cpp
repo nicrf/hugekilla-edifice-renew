@@ -481,6 +481,13 @@ void TickObjects(float sf)
 void Play();
 
 
+//zoom key: pressing it toggles a x3 zoom right away (eased); holding it and moving
+//the mouse clearly up/down sets the zoom precisely, as in the original game
+#define QUICKZOOM 12        //fzoom of the quick zoom: 1.1^12 = x3.1
+#define ZOOMADJUST 30       //mouse counts moved while held before it adjusts the zoom
+static int zoommoved;       //mouse movement since the zoom key went down
+static float zoomtarget=-1; //-1: no eased zoom running
+
 //called once per frame, calls Play a number of times according to how much time has passed
 
 void Playloop()
@@ -545,11 +552,26 @@ void Play()
 		if(controls.mousereverse) mychange=-mychange;
 		if(cur->zoom)
 		{
+			//a little mouse jitter while pressing the key must not cancel the quick zoom
+			zoommoved+=abs(mychange);
+			if(zoommoved<ZOOMADJUST) mychange=0;
+			else zoomtarget=-1;
 			cur->fzoom-=(float)mychange/10;
 			if(cur->fzoom<0)cur->fzoom=0;
 			if(cur->fzoom>40)cur->fzoom=40;
 			mychange=0;
 			mxchange=0; 
+		}
+		if(zoomtarget>=0)
+		{
+			float step=.25f*sf;
+			if(step>1) step=1;
+			cur->fzoom+=(zoomtarget-cur->fzoom)*step;
+			if(fabs(zoomtarget-cur->fzoom)<.05f)
+			{
+				cur->fzoom=zoomtarget;
+				zoomtarget=-1;
+			}
 		}
 		mspeed*=controls.mousesensitivity;
 		mspeed/=powf(1.05,cur->fzoom);
@@ -1448,7 +1470,14 @@ void HandleKey(DWORD key,DWORD flags)
 	if(key==controls.lstrafe) GetLocalPlayer()->lstrafe=1;
 	if(key==controls.rstrafe) GetLocalPlayer()->rstrafe=1;
 	if(key==controls.fire) GetLocalPlayer()->firing=1;
-	if(key==controls.zoom) GetLocalPlayer()->zoom=1;
+	if(key==controls.zoom)
+	{
+		GetLocalPlayer()->zoom=1;
+		zoommoved=0;
+		float current=zoomtarget>=0?zoomtarget:GetLocalPlayer()->fzoom;
+		zoomtarget=current>1?0:QUICKZOOM;
+		if(getenv("HK_KEYLOG")) fprintf(stderr,"zoom key: fzoom %.1f -> target %.0f\n",GetLocalPlayer()->fzoom,zoomtarget);
+	}
 	if(key==controls.jump) GetLocalPlayer()->jump=1;
 	if(key==controls.jetpack) GetLocalPlayer()->jetpack=1;
 	if(key==controls.hangglide) GetLocalPlayer()->hangglide=1;
