@@ -474,6 +474,13 @@ int main(int argc, char **argv)
 
 	// Debug aid: HK_AUTOSTART=1 starts a local server right away.
 	if (getenv("HK_AUTOSTART")) StartServer();
+	// Debug aid: HK_ZOOM_TEST=1 taps the zoom key once (quick x3 zoom).
+	if (getenv("HK_ZOOM_TEST"))
+	{
+		extern Controls controls;
+		HandleKey(controls.zoom, 0);
+		HandleKeyUp(controls.zoom, 0);
+	}
 	// Debug aid: HK_JOIN=<host> joins that server as soon as it answers (a game
 	// client against a local HK_AUTOSTART server).
 	int autojoin = 0;

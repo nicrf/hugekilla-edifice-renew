@@ -1362,6 +1362,16 @@ void Redraw()
 	}
 #else
 	DrawChat();   //src/ui/chat.cpp
+	if(GetLocalPlayer()->fzoom>.5f&&GetLocalPlayer()->playstate>=10)
+	{
+		char zoomtext[32];
+		snprintf(zoomtext,sizeof(zoomtext),"Zoom x%.1f",powf(1.1f,GetLocalPlayer()->fzoom));
+		glColor3f(0,0,0);   //shadow: readable on snow too
+		DrawText(.555f,-.905f,zoomtext);
+		glColor3f(1,1,.6f);
+		DrawText(.55f,-.9f,zoomtext);
+		glColor3f(1,1,1);
+	}
 	DrawVoiceHUD();
 #endif
 	

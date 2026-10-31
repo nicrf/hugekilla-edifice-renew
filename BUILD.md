@@ -109,6 +109,7 @@ Les lettres suivent la disposition du clavier : sur AZERTY, remappez Avancer/Gau
 ## Aides au debug
 
 - `HK_AUTOSTART=1` démarre un serveur local directement.
+- `HK_ZOOM_TEST=1` simule un appui bref sur la touche de zoom (zoom ×3).
 - `HK_MENU=options|options2|player|credits|join|server|serverstart` ouvre cet écran au démarrage.
 - `HK_SHOT=fichier.ppm` (et `HK_SHOT_FRAME=N`) enregistre l'image rendue N.
 - Chat vocal : `HK_VOICE_TEST_TONE=1` émet une tonalité à la place du micro, `HK_VOICE_AUTOTALK=1` émet en permanence (sans touche), `HK_VOICE_LOOPBACK=1` fait entendre sa propre voix par le chemin de réception, `HK_VOICE_LOG=1` affiche sur stderr chaque début de prise de parole entendue.
