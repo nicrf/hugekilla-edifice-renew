@@ -523,7 +523,9 @@ void CreateLand(LandDefs &ldfs)
 	LoadLandSettings(&ls);
 	FlattenLand(0);
 	
-	if(GetLocalPlayer()->playstate==1)LoadTexture("textures\\startup.bmp",1);
+	//splash while the land builds (texture 800, replaced by the first ground texture below).
+	//It went to texture 1, which the land is drawn with: joined clients saw a darker world.
+	if(GetLocalPlayer()->playstate==1)LoadTexture("textures\\startup.bmp",800);
 	int x;
 	for(x=0;x<BLOCKGRIDSIZE;x++)
 	for(int y=0;y<BLOCKGRIDHEIGHT;y++)

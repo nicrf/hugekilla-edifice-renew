@@ -488,11 +488,16 @@ void Playloop()
 	LARGE_INTEGER time;
 	LARGE_INTEGER freq;
 	DWORD targtime;
-	static DWORD targlasttime=lasttime;
+	static DWORD targlasttime=0;
 	QueryPerformanceFrequency(&freq);
 	QueryPerformanceCounter(&time);
 	
 	targtime=((double)time.QuadPart)/(double)freq.QuadPart*1000;
+	//first call (leaving the menu to join a game) or a long pause: start from now.
+	//Interpolating from 0 set curtime to 0 for a frame, and a join request answered
+	//within that frame got a timeout based on it, then "server timed out" at once.
+	if(!targlasttime||(int)(targtime-targlasttime)>2000)
+		targlasttime=targtime;
 	
 	
 	sf=(float)(targtime-targlasttime)/40;

@@ -544,11 +544,11 @@ void StartServer()
 #endif
 
 	ConsoleDisplayText("Started server");
-	RedrawSplash(1,"Loading Textures");
+	RedrawSplash(800,"Loading Textures");
 	LoadTextures();
-	RedrawSplash(1,"Loading Sky");
+	RedrawSplash(800,"Loading Sky");
 	LoadSky();
-	RedrawSplash(1,"Creating Land");
+	RedrawSplash(800,"Creating Land");
 	RandomLand(ldfs);
 	CreateLand(ldfs);
 
@@ -1196,10 +1196,18 @@ void ClientLoop()
 					SanitizeNetFileName(ss->misttex,sizeof(ss->misttex));
 					SanitizeNetFileName(ss->sound,sizeof(ss->sound));
 					CopyMemory(GetDefs(),&linfo->ldfs,sizeof(linfo->ldfs));
-					RedrawSplash(1,"Loading Textures");
+					RedrawSplash(800,"Loading Textures");
 					LoadTextures();
-					RedrawSplash(1,"Loading Sky");
+					RedrawSplash(800,"Loading Sky");
 					CopyMemory(GetSkySettings(),&linfo->skysets,sizeof(SkySettings));
+					//the sky's ambient sound, as LoadSky does on the server
+					if(strlen(GetSkySettings()->sound))
+					{
+						char soundname[200];
+						snprintf(soundname,sizeof(soundname),"sound\\%s",GetSkySettings()->sound);
+						LoadSound(soundname,0,0);
+						PlaySound(0,1);
+					}
 					char fullfilename[400];
 					if(strlen(GetSkySettings()->cloudtex))
 					{
@@ -1213,7 +1221,7 @@ void ClientLoop()
 						strcat(fullfilename,GetSkySettings()->misttex);
 						LoadTexture(fullfilename,6);
 					}
-					RedrawSplash(1,"Creating Land");
+					RedrawSplash(800,"Creating Land");
 					CreateLand(*GetDefs());
 					for(int i=0;i<numplayers;i++)
 					{
