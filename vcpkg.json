@@ -1,0 +1,12 @@
+{
+  "name": "edifice",
+  "version-string": "0.3.0",
+  "description": "Edifice (HugeKilla) - optional dependencies, installed by vcpkg only when their feature is enabled",
+  "dependencies": [],
+  "features": {
+    "gns": {
+      "description": "GameNetworkingSockets: encrypted UDP connections and P2P (CMake option EDIFICE_GNS)",
+      "dependencies": ["gamenetworkingsockets"]
+    }
+  }
+}

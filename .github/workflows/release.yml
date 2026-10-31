@@ -100,6 +100,58 @@ jobs:
           name: netplay-logs
           path: netplay-logs
 
+  gns:
+    # Experimental (roadmap M7): GameNetworkingSockets built through vcpkg, and an
+    # encrypted loopback connection test. Not required for releases yet.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-22.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    env:
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/vcpkg-cache
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build tools (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build pkg-config libglu1-mesa-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev \
+            libxkbcommon-dev libwayland-dev libasound2-dev libpulse-dev
+
+      - name: Build tools (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja pkg-config
+
+      - name: vcpkg
+        shell: bash
+        run: |
+          mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
+          git clone --depth 1 https://github.com/microsoft/vcpkg "$RUNNER_TEMP/vcpkg"
+          if [ "$RUNNER_OS" = Windows ]; then "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.bat" -disableMetrics; else "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.sh" -disableMetrics; fi
+
+      - uses: actions/cache@v4
+        with:
+          path: vcpkg-cache
+          key: gns-${{ matrix.os }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: gns-${{ matrix.os }}-
+
+      - name: Configure with GameNetworkingSockets
+        shell: bash
+        run: |
+          extra=""
+          if [ "$RUNNER_OS" = Windows ]; then extra="-DVCPKG_TARGET_TRIPLET=x64-windows-static -A x64"; else extra="-G Ninja"; fi
+          cmake -S . -B build/gns $extra -DCMAKE_BUILD_TYPE=Release -DEDIFICE_GNS=ON -DVCPKG_MANIFEST_FEATURES=gns \
+            -DCMAKE_TOOLCHAIN_FILE="$RUNNER_TEMP/vcpkg/scripts/buildsystems/vcpkg.cmake"
+
+      - name: Build and run the loopback test
+        shell: bash
+        run: |
+          cmake --build build/gns --config Release --target gns_loopback_test
+          ctest --test-dir build/gns -C Release -R gns_loopback --output-on-failure
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [build, netplay-tests]
