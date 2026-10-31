@@ -4,4 +4,6 @@ dist/
 .DS_Store
 CMakeUserPresets.json
 .claude/
+vcpkg_installed/
+
 server/.env

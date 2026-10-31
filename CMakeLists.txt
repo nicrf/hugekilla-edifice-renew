@@ -210,3 +210,27 @@ add_executable(voice_test tests/voice_test.cpp)
 target_include_directories(voice_test PRIVATE ${SRC}/net ${SRC}/audio)
 target_link_libraries(voice_test PRIVATE Opus::opus)
 add_test(NAME voice COMMAND voice_test)
+
+# ---- GameNetworkingSockets (experimental, roadmap M7) --------------------------
+# Encrypted connections and P2P. Off by default: configure with the vcpkg
+# toolchain and the "gns" feature of vcpkg.json, e.g.
+#   cmake -B build/gns -DEDIFICE_GNS=ON -DVCPKG_MANIFEST_FEATURES=gns \
+#     -DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake
+option(EDIFICE_GNS "Build with GameNetworkingSockets (needs vcpkg)" OFF)
+if(EDIFICE_GNS)
+  find_package(GameNetworkingSockets CONFIG REQUIRED)
+  if(TARGET GameNetworkingSockets::static)
+    set(HK_GNS_LIB GameNetworkingSockets::static)
+  else()
+    set(HK_GNS_LIB GameNetworkingSockets::shared)
+  endif()
+  add_executable(gns_loopback_test tests/gns_loopback_test.cpp)
+  target_link_libraries(gns_loopback_test PRIVATE ${HK_GNS_LIB})
+  if(MSVC)
+    # On Windows GameNetworkingSockets comes as a DLL (vcpkg x64-windows, like
+    # Valve ships it): link the shared C++ runtime here. The static vcpkg
+    # triplet builds it importing protobuf from a DLL that isn't there.
+    set_property(TARGET gns_loopback_test PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+  endif()
+  add_test(NAME gns_loopback COMMAND gns_loopback_test)
+endif()
