@@ -1,0 +1,699 @@
+[
+ {
+  "track": "Restructuration du code",
+  "plan": {
+   "summary": "J'ai vérifié le brouillon ligne par ligne. Le fond est juste : il n'y a aucune version dans le protocole, les structs partent brutes par memcpy, le décor est rejoué par rand() chez chaque client, et les paquets entrants ne sont pas validés. Plusieurs chiffres et constats sont faux en revanche. On compte 95 `extern` dans les .cpp, pas 242, et 39 glBegin dans redrawing.cpp, pas 77. La build macOS existe maintenant (build/Edifice.app/Contents/MacOS/Edifice). Le padding est en pratique identique entre MSVC Release et clang, puisque DWORD vaut uint32_t dans le shim. Le vrai piège, c'est la config Debug|Win32 du .vcproj compilée en /Zp1 (StructMemberAlignment=\"1\"), donc une build Debug Windows est déjà incompatible avec toutes les autres. Le brouillon oubliait aussi que Blotchify consomme le même flux rand() que le décor, que Sock::Receive ne renvoie pas la taille du paquet (sa détection de taille est donc irréalisable en l'état), et qu'ajouter des champs en tête de RequestEnter casserait les vieux serveurs. Surtout, il faisait attendre la gestion de version demandée par l'utilisateur derrière toute l'unification CMake. Le plan corrigé la place juste après la stabilisation du port. Elle est rétrocompatible, avec des champs ajoutés en fin de paquet et un `version.h` versionné utilisable aussi par le .sln.",
+   "findings": [
+    {
+     "severity": "critique",
+     "where": "multiplaystruct.h:47-58, multiplay.cpp:125, multiplay.cpp:399-415, multiplay.cpp:876-879, multiplay.cpp:999-1002, multiplay.cpp:1075-1078",
+     "issue": "Le netplay n'a aucune version. RequestEnter{type,namelen,name[32]} et Info{type,namelen,name[100]} ne portent ni version de jeu ni version de protocole. Le seul 'version' du code réseau est MAKEWORD(2,2) de Winsock (multiplay.cpp:125). Il n'existe pas non plus de canal de refus : SERVERFULL est construit puis abandonné (`SimpleMessage serverfull=MakeSimple(SERVERFULL,numplayers,0); break;`, multiplay.cpp:414) et n'est jamais envoyé. REQUESTENTER est construit à trois endroits copiés-collés : la boucle de retry (876), le dialogue Win32 (999) et l'écran de join SDL du port (1075). Il faut les factoriser avant d'y ajouter la version."
+    },
+    {
+     "severity": "critique",
+     "where": "hugekilla.vcproj:113-152 (Debug|Win32, StructMemberAlignment=\"1\"), multiplaystruct.h:89-94, playing.h:130-138, land.h:39-44",
+     "issue": "Le build Debug Windows est compilé en /Zp1 (structs packées), alors que Release et clang macOS utilisent l'alignement naturel. UpdateServerObject{char type; int num; ServerObject}, ServerObject{char type; Vector...}, LandDeformation{char type; int sx...} et LandDefs n'ont donc pas le même layout. Un serveur Debug Windows et un client Release ou Mac s'échangent des données décalées sans le moindre signal d'erreur. Le commentaire de compat/win32compat.h:32-33 parle de 'packed structs', mais aucun #pragma pack n'existe dans le dépôt. Il faut une empreinte de layout (sizeof des structs réseau) dans le handshake de version, ou retirer /Zp1."
+    },
+    {
+     "severity": "critique",
+     "where": "land.cpp:18, land.cpp:635-664, land.cpp:474-495, land.cpp:667",
+     "issue": "Chaque client rejoue le décor via srand(ldfs.randomseed) suivi de RND=(float)rand()/RAND_MAX. Le même flux rand() alimente ensuite Blotchify (land.cpp:667 puis 488-495), donc les textures de sol divergent elles aussi, pas seulement le décor. rand() et RAND_MAX diffèrent entre la CRT MSVC (15 bits) et libc macOS (31 bits). Autre point : le nombre de tirages dépend de tests flottants sur la hauteur du terrain (`goto reposition`, land.cpp:655-658). Un PRNG maison ne suffit donc que si le calcul du terrain est lui aussi bit-identique (powf/sqrt de la libm, land.cpp:49). La parade robuste : un PRNG indexé (hash(seed,i)) ou l'envoi des positions par le serveur."
+    },
+    {
+     "severity": "haute",
+     "where": "multiplay.cpp:788, multiplay.cpp:1804, multiplay.cpp:746-756, multiplaystruct.h:59-64",
+     "issue": "Le protocole envoie des structs C++ brutes par memcpy : `CopyMemory(&sv,msg.buf,sizeof(sv))` pour ServerVars, LandInfo{LandDefs,SkySettings} et UpdateServerObject. ServerObject::timeout est commenté '//not sent' (playing.h:137) mais fait bien partie du sizeof envoyé. Entre MSVC Release x86 et clang arm64, ces layouts coïncident aujourd'hui (int, float, char et DWORD=uint32_t via win32compat.h:34). Le risque est donc moins immédiat que ne le disait le brouillon, mais tout ajout de champ casse le format sans détection."
+    },
+    {
+     "severity": "haute",
+     "where": "multiplay.cpp:1351, multiplay.cpp:857-859, playing.cpp:106-109, multiplay.cpp:404, multiplay.cpp:748-756",
+     "issue": "Les paquets entrants ne sont pas validés. GetPlayer(pos->pnum) et GetPlayer(kp->killed) indexent player[] sans borne. pnum est un char signé (-fsigned-char, CMakeLists.txt:59), donc des index négatifs sont possibles, en plus des dépassements de MAXPLAYERS=32 (multiplay.h:15). `strcpy(message,req->name)` copie un nom non terminé par NUL. Dans LANDINFO, cloudtex et misttex reçus du serveur passent par strcat dans un chemin de fichier : débordement de buffer possible, et le serveur choisit le fichier lu."
+    },
+    {
+     "severity": "haute",
+     "where": "sock.h:76, sock.cpp:59, sock.cpp:88",
+     "issue": "Sock::Receive(void*,SOCKADDR_IN*) renvoie 1/0 et jette la taille reçue (recvbufsize, sock.cpp:88). Aucun code appelant ne peut savoir combien d'octets valides il a reçus. C'est bloquant pour une négociation de version rétrocompatible fondée sur la longueur du paquet, et pour toute validation."
+    },
+    {
+     "severity": "haute",
+     "where": "multiplay.cpp:30 vs redrawing.cpp:40",
+     "issue": "Violation de l'ODR : multiplay.cpp déclare `extern AseObj projectile[20];` alors que la définition est `AseObj projectile[10];`. Seuls projectile[0] et [2] sont utilisés (multiplay.cpp:1635-1638), donc pas de crash aujourd'hui, mais c'est un comportement indéfini qui montre l'absence de header commun."
+    },
+    {
+     "severity": "moyenne",
+     "where": "sock.cpp:158, sock.cpp:162-163, sock.cpp:260, sock.cpp:354-364, multiplay.cpp:249",
+     "issue": "Type-punning par casts non alignés : `*(DWORD *)recvbuf.data`, `*(WORD*)&recvbuf.data[4]`, `*(int *)&buf[bufpos]`, et le checksum XOR renvoyé via `*(DWORD *)checksum`. Ces casts supposent du little-endian (vrai sur x86 et arm64) et tolèrent l'accès non aligné. -fno-strict-aliasing (CMakeLists.txt:59) évite les mauvaises optimisations. Il faut des memcpy et un ordre d'octets explicite."
+    },
+    {
+     "severity": "moyenne",
+     "where": "StdAfx.h:17-37, redrawing.cpp:25-46, GamePlay.cpp, console.cpp, textures.cpp",
+     "issue": "Aucun header ne déclare les globales : on compte 95 `extern` dans les .cpp (34 dans redrawing.cpp, 10 dans GamePlay.cpp et console.cpp, 7 dans multiplay.cpp, playing.cpp et textures.cpp), et non 242. StdAfx.h inclut windows.h, winuser.h, gl/gl.h et tous les headers du jeu. Le couplage est total, ce qui empêche des tests unitaires isolés."
+    },
+    {
+     "severity": "moyenne",
+     "where": "textures.cpp:44, hugekilla.cpp:119-120, redrawing.cpp:199/392/785/809/953, ase.cpp:528, ui.cpp:80",
+     "issue": "Les IDs de textures GL sont codés en dur (1, 2, 4, 6, 300, 400+i, 600, 800, 1300+tex) et passés à glBindTexture sans glGenTextures. C'est toléré en GL 2.1 compat mais interdit en core profile. Le mode immédiat est partout : 39 glBegin dans redrawing.cpp, plus ui.cpp, ase.cpp et multiplay.cpp (1)."
+    },
+    {
+     "severity": "moyenne",
+     "where": "hugekilla.cpp:119-120, land.cpp:618, textures.cpp:38/133/193/206, structures.cpp:26/296, playing.cpp:1384, multiplay.cpp:752",
+     "issue": "Les chemins en dur utilisent des backslashes (122 lignes avec '\\\\'). Ils vivent dans des buffers char[] fixes manipulés par strcpy/strcat, et le chargement passe par FindFirstFile et LoadImage émulés dans compat/. La normalisation des chemins dépend donc du shim."
+    },
+    {
+     "severity": "moyenne",
+     "where": "CMakeLists.txt:4-5, CMakeLists.txt:7, CMakeLists.txt:59-62, hugekilla.sln, hugekilla.vcproj",
+     "issue": "Il y a deux builds parallèles. La CMake ne vise que POSIX ('Windows keeps using hugekilla.sln'), en C++11, avec de nombreux warnings coupés (-Wno-return-type, -Wno-c++11-narrowing, -Wno-address-of-temporary) et -fwrapv. Il n'y a aucune cible de test. Toute version de jeu générée par CMake (configure_file) serait absente de la build .sln."
+    },
+    {
+     "severity": "basse",
+     "where": "hugekilla.cpp:714-742",
+     "issue": "Save et Load font un WriteFile/ReadFile brut de SkySettings, ldfs, blocks et nextblock. La signature 'edifice' est lue mais jamais vérifiée, et il n'y a pas de version de format. Le .sav ne stocke que randomseed : changer le PRNG (ou le layout de LandDefs, cf. /Zp1) change le décor des cartes déjà sauvegardées. OPEN_ALWAYS sans troncature est peu grave ici, la taille écrite étant fixe."
+    },
+    {
+     "severity": "basse",
+     "where": "multiplay.cpp:610-640, multiplay.cpp:864-868, multiplay.cpp:871-881",
+     "issue": "Il faut en tenir compte pour la rétrocompatibilité. Un vieux client ignore silencieusement un message simple inconnu : HandleSimpleClient n'a pas de default. Il continuerait donc à renvoyer REQUESTENTER toutes les 2 s sans rien afficher. Un futur refus VERSIONMISMATCH ne sera lisible que par les nouveaux clients. Pour les anciens, il faut un CONSOLEMESSAGE texte en plus."
+    },
+    {
+     "severity": "basse",
+     "where": "compat/win32compat.h:32-61, compat/include/*.h, multiplay.cpp:623",
+     "issue": "Le shim réimplémente Win32 (types, CreateFile, WSASocket utilisé directement multiplay.cpp:623, LARGE_INTEGER...). Ça marche pour porter vite, mais c'est une dette : chaque appel Win32 reste dans le code du jeu."
+    },
+    {
+     "severity": "info",
+     "where": "build/Edifice.app/Contents/MacOS/Edifice, hugekilla.cpp:31, multiplay.cpp:22/733/915/1235",
+     "issue": "Correction du brouillon : la build macOS existe désormais (l'exécutable est présent). Le port sépare les chemins par #ifdef _WIN32 (hugekilla.cpp:31, multiplay.cpp:733). La logique réseau est commune aux deux chemins, donc un changement de protocole doit être fait une seule fois, dans le code partagé."
+    }
+   ],
+   "steps": [
+    {
+     "title": "0. Geler une référence jouable et coordonner avec le port",
+     "detail": "Attendre que l'agent du port déclare multiplay.cpp, platform_sdl.cpp et compat/ stables, puis copier ou taguer cet état comme baseline. Écrire un scénario de recette manuel : solo, host et join LAN Mac↔Mac et Win Release↔Mac, sauvegarde et chargement. Relever les sizeof des structs réseau sur chaque build (y compris Win Debug /Zp1) pour documenter l'incompatibilité actuelle. Ne modifier aucun fichier du port pendant cette phase.",
+     "effort": "S"
+    },
+    {
+     "title": "1. Gestion de version netplay (demande utilisateur), rétrocompatible",
+     "detail": "(a) Ajouter `version.h`, versionné dans le dépôt et non généré, pour que la build .sln l'ait aussi : EDIFICE_VERSION_STRING (\"1.x.y\"), kProtocolVersion (uint16, incrémenté à chaque changement de format réseau ou de génération du terrain) et kLayoutHash (constexpr combinant sizeof(ServerVars), sizeof(LandDefs), sizeof(SkySettings), sizeof(ServerObject), sizeof(UpdateServerObject), etc.). kLayoutHash détecte automatiquement le /Zp1 et tout ajout de champ. (b) Faire renvoyer la taille reçue par Sock::Receive via un paramètre optionnel `int *len=nullptr` (sock.h:76, sock.cpp:59/88), sans casser les appelants existants. (c) Factoriser les trois envois de REQUESTENTER (multiplay.cpp:876, 999, 1075) dans SendRequestEnter(). (d) Format : ne rien insérer en tête. Ajouter après le NUL du nom un trailer {uint32 magic 'EDV1'; uint16 protocol; uint32 layoutHash; char version[16]}, sérialisé octet par octet en little-endian, dans RequestEnter et dans Info (multiplay.cpp:229-237). Les anciens pairs ignorent ces octets de fin, puisqu'ils lisent name à l'offset 2 et s'arrêtent au NUL. (e) Côté serveur (multiplay.cpp:399) : pas de trailer, ou une version ou un layout différent, entraînent un refus. Le refus consiste à envoyer réellement un SimpleMessage, le SERVERFULL oublié (multiplay.cpp:414) ou un nouveau VERSIONMISMATCH(protocol), suivi d'un CONSOLEMESSAGE texte lisible par les vieux clients. Dans tous les cas, ne pas ajouter le joueur. (f) Côté client (HandleSimpleClient, multiplay.cpp:610) : afficher 'serveur en version X, vous êtes en Y' et arrêter la boucle de retry (871-881). Dans l'écran de join (JoinScreenAddGame, multiplay.cpp:1118) et dans la listbox Win32 (733), afficher la version de chaque serveur LAN et marquer les incompatibles. (g) Afficher la version dans la console au démarrage. Écrire la négociation comme une fonction pure CheckPeerVersion(buf,len), testable plus tard. À coordonner avec l'agent du port, qui touche le même fichier.",
+     "effort": "M",
+     "depends_on": [
+      "0. Geler une référence jouable et coordonner avec le port"
+     ]
+    },
+    {
+     "title": "2. Validation minimale des paquets entrants",
+     "detail": "Petit patch à faire tout de suite, avant la grosse sérialisation. Borner pnum et killed à [0,numplayers) en les castant en unsigned char (ReceivePosition multiplay.cpp:1351, KILLEDPOSITION 857-859). Forcer le NUL sur req->name, info->name, cloudtex et misttex avant tout strcpy/strcat (multiplay.cpp:404, 746-756). Refuser les noms de fichiers reçus contenant '..' ou un séparateur. Rejeter les paquets plus courts que leur struct grâce à la taille de l'étape 1. Pas de changement de protocole, donc pas d'incrément de version.",
+     "effort": "S",
+     "depends_on": [
+      "1. Gestion de version netplay (demande utilisateur), rétrocompatible"
+     ]
+    },
+    {
+     "title": "3. Génération déterministe du décor partagé",
+     "detail": "Remplacer RND et rand() dans la génération reproduite chez les clients, c'est-à-dire le décor (land.cpp:635-664) et Blotchify (land.cpp:474-495, appelé ligne 667), par un PRNG maison (PCG32) dans `rng.h`. Choisir de préférence un tirage indexé (hash(seed,i,k)) pour que des différences flottantes dans les branches `goto reposition` ne décalent pas tout le flux. RandomLand côté serveur (land.cpp:367-387) peut garder rand(), ses résultats étant envoyés. Les rand() cosmétiques restent. Incrémenter kProtocolVersion. Les .sav existants verront leur décor changer : acceptable ou chemin legacy, à décider. Un test golden viendra à l'étape 5.",
+     "effort": "S",
+     "depends_on": [
+      "1. Gestion de version netplay (demande utilisateur), rétrocompatible"
+     ]
+    },
+    {
+     "title": "4. CMake unique (Windows/macOS/Linux) avec bibliothèque core",
+     "detail": "Étendre CMakeLists.txt à MSVC et Linux. Sous Windows, choisir explicitement le chemin SDL (platform_sdl.cpp) ou garder un temps l'option Win32 natif (hugekilla.cpp:31). Séparer en `edifice_core` (statique) et `Edifice`. Ajouter `EDIFICE_VERSION` dans project(VERSION), vérifié contre version.h. Mettre en place la CI GitHub Actions 3 OS et ASan/UBSan en Debug. Passer à C++17 seulement après une build verte. Ne retirer le .sln/.vcproj (et donc le /Zp1) qu'après plusieurs semaines de build MSVC CMake verte et une recette Windows réussie. Réactiver les warnings progressivement (CMakeLists.txt:59-62).",
+     "effort": "L",
+     "depends_on": [
+      "0. Geler une référence jouable et coordonner avec le port"
+     ]
+    },
+    {
+     "title": "5. Socle de tests",
+     "detail": "Ajouter doctest via FetchContent et une cible `edifice_tests` liée à edifice_core. Premiers tests possibles sans toucher aux globales : CheckPeerVersion (étape 1), le golden du PRNG et du décor pour une seed donnée (étape 3), cfgfile, et static_assert/tests des sizeof des structs réseau contre kLayoutHash.",
+     "effort": "M",
+     "depends_on": [
+      "4. CMake unique (Windows/macOS/Linux) avec bibliothèque core"
+     ]
+    },
+    {
+     "title": "6. Sérialisation explicite du protocole et des sauvegardes",
+     "detail": "Créer `net/wire.h` avec ByteWriter/ByteReader : little-endian explicite, bornes vérifiées, chaînes avec longueur. Migrer un message à la fois (PlayerPosition, SimpleMessage, ServerVars multiplay.cpp:788/1804, LandInfo, UpdateServerObject, KilledPosition, PLAYERNAMES multiplay.cpp:245-255) et retirer les casts `*(int*)&buf[...]`, ainsi que ceux de Sock (sock.cpp:158/162-163/260/364). Incrémenter kProtocolVersion à chaque lot livré et garder kLayoutHash tant que des structs brutes subsistent. Sauvegardes : en-tête 'edifice' + uint32 formatVersion, signature vérifiée (hugekilla.cpp:731), CREATE_ALWAYS, lecture legacy des anciens .sav en supposant le layout Release /Zp8. Ajouter des tests aller-retour par message et un fuzz libFuzzer (Linux/macOS) sur le parseur.",
+     "effort": "L",
+     "depends_on": [
+      "2. Validation minimale des paquets entrants",
+      "5. Socle de tests"
+     ]
+    },
+    {
+     "title": "7. Arborescence cible et découpage physique",
+     "detail": "Déplacer les fichiers sans changer la logique : src/platform, src/render, src/net (sock, protocole, serveur, client), src/game, src/ui (ui, console, écran de join extrait de multiplay.cpp:1024-1130), src/assets, tests/, data/ (ex-HugeKilla/, à faire suivre dans le bundling CMakeLists.txt:37-45). Remplacer StdAfx.h par des includes explicites. Une target CMake par module, avec des dépendances déclarées. À faire uniquement quand le port est terminé, pour éviter les conflits de merge.",
+     "status": "partiel : arborescence src/{game,render,net,ui,audio,platform,compat}, win32/ et data/ (ex-HugeKilla/) faits, simple déplacement sans changer la logique. Restent : remplacer StdAfx.h par des includes explicites, une cible CMake par module, src/assets, tests/, extraction de l'écran de join. Les chemins cités dans ce plan (compat/..., HugeKilla/..., multiplay.cpp à la racine) désignent l'ancienne arborescence.",
+     "effort": "M",
+     "depends_on": [
+      "4. CMake unique (Windows/macOS/Linux) avec bibliothèque core",
+      "6. Sérialisation explicite du protocole et des sauvegardes"
+     ]
+    },
+    {
+     "title": "8. Résorber les globales, incrémentalement",
+     "detail": "Phase a : un header par module déclarant ses globales et suppression des 95 `extern` locaux. On corrige au passage projectile[20]/[10] (multiplay.cpp:30 vs redrawing.cpp:40). Phase b : structs de contexte (World, NetState, RenderState), d'abord en instance globale unique puis passées en paramètre. Phase c : les tests instancient leur propre World, ce qui ouvre un test d'intégration serveur+client in-process. Une PR par module, recette rejouée à chaque fois.",
+     "effort": "XL",
+     "depends_on": [
+      "7. Arborescence cible et découpage physique"
+     ]
+    },
+    {
+     "title": "9. Abstractions plateforme à la place des shims Win32",
+     "detail": "Clock, FileSystem (SDL_GetBasePath, SDL_GetPrefPath pour les .sav et la config), SDL_ShowSimpleMessageBox, socket UDP fine (POSIX/Winsock, sans WSASocket multiplay.cpp:623), Audio (sound_sdl seul, sound.cpp DirectSound retiré). DWORD/WORD deviennent uint32_t/uint16_t dans le code du jeu. Main SDL sur toutes les plateformes, WinMain/WndProc (hugekilla.cpp:74/402) retirés. Supprimer compat/include/* un header à la fois. La build MSVC doit rester verte en CI à chaque PR.",
+     "effort": "L",
+     "depends_on": [
+      "8. Résorber les globales, incrémentalement"
+     ]
+    },
+    {
+     "title": "10. Chemins et chargement d'assets",
+     "detail": "API assets::Path(\"textures/clouds/landcloud.bmp\"). Supprimer les 122 lignes avec '\\\\' (hugekilla.cpp:119, land.cpp:618, textures.cpp, structures.cpp, playing.cpp:1384, multiplay.cpp:752). Passer les buffers char[] et strcpy à std::string. FindFirstFile (textures.cpp:133/193/206, structures.cpp:26/296) est remplacé par std::filesystem, et LoadImage (textures.cpp:38, land.cpp:618) par stb_image ou un loader BMP. Ajouter un test vérifiant que tous les assets référencés existent.",
+     "effort": "M",
+     "depends_on": [
+      "9. Abstractions plateforme à la place des shims Win32"
+     ]
+    },
+    {
+     "title": "11. Isoler le renderer GL fixe derrière une interface",
+     "detail": "render/IRenderer avec handles TextureId opaques. GL21FixedRenderer reprend le code de redrawing.cpp tel quel, validé par un pixel-diff de captures. Sortir les glBegin de ui.cpp, ase.cpp et multiplay.cpp. Remplacer les IDs en dur (1, 2, 4, 6, 300, 400+i, 600, 800, 1300+) par glGenTextures et une table de noms. GL 3.3 core, MoltenVK ou bgfx restent optionnels, après stabilisation de l'interface.",
+     "effort": "XL",
+     "depends_on": [
+      "8. Résorber les globales, incrémentalement"
+     ]
+    },
+    {
+     "title": "12. UB et durcissement final",
+     "detail": "Lancer ASan/UBSan sur la recette. Corriger les retours manquants masqués par -Wno-return-type, les narrowing et le `(long)info->name` (multiplay.cpp:734, côté Win32). Retirer -fwrapv et -fno-strict-aliasing une fois propre. Passer en -Werror en CI.",
+     "effort": "M",
+     "depends_on": [
+      "6. Sérialisation explicite du protocole et des sauvegardes",
+      "4. CMake unique (Windows/macOS/Linux) avec bibliothèque core"
+     ]
+    }
+   ],
+   "risks": [
+    "Conflit direct avec l'agent du port : l'étape 1 (version netplay) touche multiplay.cpp, que le port modifie en ce moment (écran de join multiplay.cpp:1087-1130). Il faut attendre son feu vert ou se coordonner explicitement. Le déplacement de fichiers (étape 7) doit attendre la fin du port.",
+    "Ajouter des champs en tête de RequestEnter ou Info, comme le proposait le brouillon, casserait les anciens serveurs et clients, qui lisent name à l'offset 2. Il faut s'en tenir au trailer après le NUL.",
+    "Les anciens clients ignorent silencieusement les messages simples inconnus (HandleSimpleClient sans default). Sans CONSOLEMESSAGE texte en plus, ils boucleront sur REQUESTENTER toutes les 2 s sans explication.",
+    "Une version de jeu générée uniquement par CMake n'existerait pas dans la build .sln Windows. version.h doit donc être versionné dans le dépôt tant que le .vcproj existe.",
+    "Le build Debug Windows en /Zp1 (hugekilla.vcproj:152) est déjà incompatible avec toutes les autres builds. kLayoutHash le refusera, ce qui est voulu, mais les testeurs Windows en Debug doivent en être prévenus.",
+    "Le PRNG déterministe ne garantit pas un décor identique si le terrain flottant diverge entre compilateurs (branches goto reposition, land.cpp:655-658). Un golden test cross-OS est indispensable, et l'envoi des positions par le serveur reste le repli.",
+    "Changer le PRNG ou le format modifie le décor ou casse les .sav existants. Il faut un chargement legacy ou une rupture assumée et annoncée.",
+    "Chaque changement de protocole (étapes 3 et 6) impose d'incrémenter kProtocolVersion et de livrer Windows et macOS en même temps.",
+    "La suppression des globales et des shims touche presque tous les fichiers. Il faut de petites PR, avec la recette rejouée à chaque fois, et la CI MSVC verte en permanence."
+   ],
+   "recommendation": "La gestion de version netplay demandée par l'utilisateur doit passer en premier, juste après le feu vert de l'agent du port, au lieu d'attendre l'unification CMake. Elle est petite (M) et ne demande aucune infrastructure nouvelle. Elle comprend : un `version.h` versionné (EDIFICE_VERSION_STRING, kProtocolVersion, kLayoutHash qui attrape le /Zp1 du Debug Windows), Sock::Receive qui renvoie la taille, un trailer de version ajouté après le nom dans RequestEnter et Info, un refus serveur réellement envoyé (SERVERFULL ou VERSIONMISMATCH plus un message texte), et l'affichage des versions dans l'écran de join et la console. Viennent ensuite le correctif de validation des paquets (S) et le PRNG déterministe du décor et des blotches (S). On peut alors faire CMake unique + CI, le socle de tests, la sérialisation explicite, puis seulement la restructuration lourde (arborescence, globales, shims, renderer), par petites PR jouables. Fichiers clés : /Users/nicolasfournier/Développement/hugekilla/multiplaystruct.h, /Users/nicolasfournier/Développement/hugekilla/multiplay.cpp, /Users/nicolasfournier/Développement/hugekilla/sock.cpp, /Users/nicolasfournier/Développement/hugekilla/sock.h, /Users/nicolasfournier/Développement/hugekilla/land.cpp, /Users/nicolasfournier/Développement/hugekilla/hugekilla.vcproj, /Users/nicolasfournier/Développement/hugekilla/CMakeLists.txt, /Users/nicolasfournier/Développement/hugekilla/compat/win32compat.h."
+  }
+ },
+ {
+  "track": "Netplay meilleur et sûr",
+  "plan": {
+   "summary": "J'ai revérifié le brouillon contre le code actuel, en lecture seule. Sur le fond, l'essentiel tient : aucune entrée venant du réseau n'est validée (tailles, indices, chaînes) dans sock.cpp et multiplay.cpp, le serveur croit le client sur à peu près tout, et il n'existe aucune version, ni dans le code ni dans le protocole. J'ai corrigé plusieurs points. Les numéros de ligne de multiplay.cpp ont glissé de 1 à 4, parce que l'autre agent édite le fichier. L'index de son n'est exploitable que sous Windows : sound_sdl.cpp:225 borne déjà l'index. Le « kill attribué à n'importe qui » ne marche qu'en mourant soi-même, ou en tuant l'hôte via infosock. Le brouillon oubliait ReceiveKillMessage, qui n'est pas borné côté serveur, ainsi que les callbacks RECEIVED* qui peuvent être rejoués par le réseau. Surtout, deux corrections du brouillon casseraient le jeu : supprimer la réécriture de dest (sock.cpp:156) casse les clients derrière un NAT, et réactiver le filtre de ClientLoop (multiplay.cpp:717) casse la découverte LAN en broadcast. Pour la version que l'utilisateur demande, je propose un version.h versionné dans le dépôt, sans configure_file ni git describe : le dossier n'est pas un dépôt git et le .vcproj ne passe pas par CMake. Les versions passent par de nouveaux types de messages plutôt que par un préfixe ajouté aux messages legacy. On ajoute une empreinte de layout (les sizeof des structs réseau), pour détecter le mélange Debug /Zp1 et Release/macOS tant que la sérialisation explicite n'existe pas. Un ancien client refusé reçoit un CHATMESSAGE CMSG_INFO, qu'il sait déjà afficher.",
+   "findings": [
+    {
+     "severity": "critique",
+     "where": "multiplay.cpp:403-410",
+     "issue": "REQUESTENTER sur infosock, avant toute connexion : strcpy(message[1000], req->name) suivi de 3 strcat. Le nom n'est ni borné ni forcément terminé par un zéro. msg est un static Message de 50001 octets (multiplay.cpp:389, sock.h:10-14) qui garde les octets des paquets précédents, et le canal reliable d'infosock accepte jusqu'à 50000 octets. Un seul paquet UDP suffit donc pour déborder la pile du serveur. Vérifié."
+    },
+    {
+     "severity": "critique",
+     "where": "multiplay.cpp:418",
+     "issue": "strcpy(GetPlayer(addplayer)->name, req->name) copie une longueur choisie par l'attaquant dans Player::name[32] (playing.h:110) et écrase la suite du tableau global player[MAXPLAYERS] (playing.cpp:36). Le test numplayers>=MAXPLAYERS (412) arrive après le strcpy dans message[1000], qui déborde donc même quand le serveur est plein. Vérifié."
+    },
+    {
+     "severity": "critique",
+     "where": "multiplay.cpp:1554-1572",
+     "issue": "ReceiveChatMessage : WORD len=*(WORD*)&buf[2] (jusqu'à 65535), puis CopyMemory(chatmessage[1000], ..., len) et chatmessage[len]=0 : débordement de pile. Côté serveur, le chemin est ouvert à tout client et, faute de filtre d'adresse, à tout tiers (multiplay.cpp:508-511). Côté client, il est ouvert au serveur ou à quiconque usurpe son adresse. S'y ajoutent strcpy+strcat dans message[1000] et strcpy dans les globales curscore/curobjective. Comme le test de dest est commenté (1557), un client peut aussi réécrire le score et l'objectif affichés sur le serveur."
+    },
+    {
+     "severity": "critique",
+     "where": "sock.cpp:200-205",
+     "issue": "Paquets groupés : wsize est lu dans le paquet sans vérifier recvbufpos+2+wsize<=recvbufsize. On obtient une lecture hors limites de recvbuf (1001 octets) et une écriture de jusqu'à 65535 octets dans data, alors que Message ne fait que 50001 octets (sock.h:10-14). Les static Message msg de ServerLoop et ClientLoop débordent en mémoire globale. Vérifié."
+    },
+    {
+     "severity": "critique",
+     "where": "sock.cpp:179-180",
+     "issue": "Reliable : rbufpos = num*RELIABLEPACKETSIZE(450) (sock.cpp:17), avec num (WORD) pris dans le paquet, puis CopyMemory(&reliablerecvdata[rbufpos]) dans un tableau de BIGBUFSIZE=50000 (sock.h:64). C'est une écriture hors limites jusqu'à environ 29 Mo au-delà de l'objet Sock global. Le seul obstacle est le checksum XOR (sock.cpp:350-364), que n'importe qui sait calculer."
+    },
+    {
+     "severity": "critique",
+     "where": "sock.cpp:62-68, 181-188",
+     "issue": "dwsize est lu dans reliablerecvdata, donc fourni par l'attaquant, puis CopyMemory(data, ..., dwsize) est fait sans borne. reliablerecvbufsize=rbufpos+recvbufsize-8 peut être énorme : les appels suivants de Receive (62-68) itèrent alors sur des données arbitraires, avec un nouveau dwsize à chaque fois."
+    },
+    {
+     "severity": "critique",
+     "where": "sock.cpp:154-180",
+     "issue": "Aucune longueur minimale n'est vérifiée. Avec un RELIABLE de 5 à 8 octets, recvbufsize-4 et recvbufsize-8 deviennent négatifs : CopyMemory reçoit une taille négative, convertie en size_t énorme, d'où un crash. Les octets data[4..7] lus sont des restes du paquet précédent."
+    },
+    {
+     "severity": "critique",
+     "where": "multiplay.cpp:1478-1520",
+     "issue": "ReceiveBlockBuffer : numblocks (DWORD) vient du paquet et la boucle lit 9*numblocks octets sans tenir compte de la taille reçue, ce qui finit en lecture hors limites puis en crash. Le serveur rediffuse ensuite SendReliable(buf, pos) avec un pos énorme : new char[size] puis CopyMemory hors limites (sock.cpp:299-305). Les coordonnées x/y/z (char signés) partent sans borne dans AddBlock/DeleteBlock. Un seul client fait tomber le serveur et tous les autres."
+    },
+    {
+     "severity": "critique",
+     "where": "multiplay.cpp:1748-1760 (appelé depuis 365, 549, 680, 885)",
+     "issue": "Absent du brouillon. ReceiveKillMessage(killed, killer) ne borne pas killer : GetPlayer(killer)->kills++ (1751) incrémente hors de player[]. Ensuite, sprintf(cmsg[300], \"%s killed %s\", ...) (1760) lit des noms qui sont hors limites ou non terminés, d'où un débordement de pile possible. Côté serveur, killer vient de msg2 (KILLED, 365) ou de kp->killer (KILLEDPOSITION, 549), tous deux envoyés par n'importe quel client."
+    },
+    {
+     "severity": "critique",
+     "where": "multiplay.cpp:690-697",
+     "issue": "Client, CREDITS : GetLocalPlayer()->credits[credit]=number avec credit=msg (int), et seul credit<0 est filtré, alors que credits[10] (playing.h:115). Cela donne l'écriture d'un octet à un décalage positif choisi jusqu'à environ 2 Go après player[localnum]. L'attaquant peut être un serveur malveillant ou un tiers qui usurpe son adresse : aucun filtre côté client, la ligne 717 est commentée."
+    },
+    {
+     "severity": "critique",
+     "where": "multiplay.cpp:1890-1894",
+     "issue": "ReceiveUpdateServerObject : CopyMemory(&sobject[update->num], ...) avec num (int, signé) pris dans le paquet et sans borne (MAXSERVEROBJS=100, playing.h:175). Côté client, cela écrit environ 44 octets à un décalage arbitraire, positif ou négatif."
+    },
+    {
+     "severity": "haute",
+     "where": "multiplay.cpp:791-821",
+     "issue": "PLAYERNAMES côté client : playernum vient d'un char signé (-128..127) et sert sans borne d'index dans player[32]. namelen est aussi un char signé : une valeur négative donne une taille de copie énorme et name[namelen]=0 écrit avant le tableau, une valeur jusqu'à 127 déborde dans name[32]. numplayers=playernum+1 n'est pas borné, ce qui fait déborder tous les for(i<numplayers) qui suivent. bufpos n'est jamais comparé à la taille reçue."
+    },
+    {
+     "severity": "haute",
+     "where": "multiplay.cpp:643-688 ; sound.cpp:174-180",
+     "issue": "Côté client, aucun indice de joueur venant du réseau n'est vérifié : JOINGAME, DELETEPLAYER (un DELETEPLAYER usurpé portant msg==localnum déconnecte la victime, 1270-1275), PINGINFO, PAIN, KILLED, CHANGETEAM, KILLEDPOSITION (kp->killed, 883-886) et FIREGUN (firegun->pnum, HandleFireGun 1650-1690). Tous passent dans GetPlayer(), qui ne fait que &player[num] (playing.cpp:106-109). Correction par rapport au brouillon : l'index de son (PAIN msg2, HandleFireGun soundnum=weapon*4+2) n'est exploitable que dans le build Windows, où sound.cpp:176 déréférence sound[num] sans borne avant un appel virtuel. Le build macOS borne déjà l'index (sound_sdl.cpp:225)."
+    },
+    {
+     "severity": "haute",
+     "where": "multiplay.cpp:1353-1374, 1704-1708",
+     "issue": "ReceivePosition côté serveur : pnum est pris dans le paquet au lieu d'être forcé à l'index i de l'émetteur (appel à la ligne 516). Un client peut déplacer n'importe quel joueur et changer son playstate (1372-1373) et son weapon. weapon (char signé) n'est pas borné, alors que TryFireGun fait ammoingun[weapon]-- (1708, ammoingun[20], playing.h:75) : écriture hors limites côté serveur."
+    },
+    {
+     "severity": "haute",
+     "where": "multiplay.cpp:296-332 ; sock.cpp:118-133",
+     "issue": "Absent du brouillon. RECEIVEDPLAYERNAMES, RECEIVEDLANDINFO et RECEIVEDBLOCKINFO sont prévus comme des callbacks locaux, générés par Sock::Receive quand l'ACK reliable arrive (sock.cpp:128-133). Or ils passent par le même switch que les SIMPLE reçus du réseau (multiplay.cpp:517-521). Un client, ou un tiers grâce aux ACK forgeables, peut donc les rejouer à volonté. RECEIVEDLANDINFO renvoie tout le monde (blocs par lots de 50 Ko, sobject, sv), et RECEIVEDBLOCKINFO relance GPlayerEnterGame+ResetPlayer (respawn ou soin à volonté) et rediffuse JOINGAME."
+    },
+    {
+     "severity": "haute",
+     "where": "sock.cpp:156",
+     "issue": "Tout RELIABLE fait CopyMemory(&dest, source) avant même de vérifier le checksum. Un tiers qui connaît le port (ports séquentiels prévisibles, multiplay.cpp:420-434) détourne la session : tout le trafic du joueur part vers lui. Attention cependant : cette réécriture est aussi ce qui fait marcher le NAT aujourd'hui. Le serveur adresse le client à (ip, port alloué) (multiplay.cpp:419, 440), et c'est le PORTACK reliable du client (632-636) qui corrige dest vers le port NATé. La supprimer purement et simplement casse le jeu sur Internet."
+    },
+    {
+     "severity": "haute",
+     "where": "multiplay.cpp:496-500",
+     "issue": "Sur infosock (port public, sans authentification), un SIMPLE est traité par HandleSimpleServer avec pnum=0, c'est-à-dire en se faisant passer pour l'hôte. N'importe qui peut ainsi envoyer KILLED (tue l'hôte et attribue le kill à un msg2 non borné), CHANGETEAM, CLAIMOBJECT ou PAIN au nom du joueur 0, ou déclencher PORTACK/RECEIVED* sur clientsock[0], qui n'a pas de socket."
+    },
+    {
+     "severity": "haute",
+     "where": "multiplay.cpp:508-511, 714-717, 613-640",
+     "issue": "Les adresses source ne sont jamais vérifiées. Le serveur attribue au joueur i tout paquet arrivé sur son port et prolonge son timeout (511). Côté client, le contrôle de la ligne 717 est commenté, mais le rétablir tel quel casserait la découverte LAN, puisque infosock.dest vaut alors 255.255.255.255 (1026). ENTER est accepté de n'importe quel hôte : SetLocalNum(msg2) n'est pas borné (619), et tous les GetLocalPlayer() suivants lisent hors limites."
+    },
+    {
+     "severity": "haute",
+     "where": "multiplay.cpp:280-306 ; sock.cpp:94-98, 156, 315-328",
+     "issue": "Amplification : un RELIABLE usurpé avec l'adresse de la victime fixe dest, puis un SIMPLE RECEIVEDLANDINFO de quelques octets, ou un ACK forgé qui déclenche le même callback, fait envoyer le monde entier à la victime. Ces envois sont réémis sans fin (CheckReliableResend sans abandon), et des paquets usurpés gardent le slot en vie (511)."
+    },
+    {
+     "severity": "haute",
+     "where": "multiplay.cpp:362-372, 544-553 ; playing.cpp:385, 460",
+     "issue": "La mort est décidée par la victime : playing.cpp appelle Killed() seulement si cur==GetLocalPlayer() (380-385, 455-460). On devient donc invulnérable en n'envoyant jamais KILLED. Correction par rapport au brouillon : côté serveur, killed est forcé à l'émetteur (pnum ou i). On peut donner des kills à n'importe quel joueur, mais seulement en mourant soi-même, sauf via infosock où pnum vaut 0. KILLEDPOSITION écrase aussi la position (546)."
+    },
+    {
+     "severity": "haute",
+     "where": "multiplay.cpp:551",
+     "issue": "Le serveur rediffuse SendReliable(&kp, sizeof(kp)), où kp est un pointeur : il envoie l'adresse de la variable locale (8 octets de pile sous macOS 64 bits), pas la struct. C'est une fuite qui aide à contourner l'ASLR, et la fonctionnalité est cassée : chaque client reçoit un message de type aléatoire."
+    },
+    {
+     "severity": "haute",
+     "where": "multiplay.cpp:1478-1484 ; 1426-1430",
+     "issue": "Construction : un seul crédit est débité par buffer, alors que numblocks n'a pas de limite. del, x/y/z et type ne sont contrôlés ni en distance, ni par équipe, ni par coût : un client peut construire ou raser toute la carte. La limite blockbufferpos+30>BIGBUFSIZE n'existe que côté émetteur."
+    },
+    {
+     "severity": "haute",
+     "where": "hugekilla.vcproj:114,152 ; multiplaystruct.h ; sock.h:16-22",
+     "issue": "La config Debug|Win32 force StructMemberAlignment=1 (/Zp1). La Release|Win32 et le build CMake macOS n'ont ni /Zp ni #pragma pack (aucune occurrence dans le dépôt). sizeof(SimpleMessage) vaut donc 10 dans un cas et 12 dans l'autre, et PlayerPosition (WORD après 7 char), FireGunDirection, UpdateServerObject (int après char), KilledPosition, LandInfo (LandDeformation commence par un char suivi d'int) et ServerObject changent aussi de disposition. Un Windows Debug ne comprend ni un Windows Release ni un macOS, sans aucun message d'erreur. DWORD fait bien 32 bits sous macOS (compat/win32compat.h:34) et les deux cibles sont little-endian : le seul vrai problème est donc l'alignement."
+    },
+    {
+     "severity": "haute",
+     "where": "land.cpp:18, 488-495, 635-667 ; redrawing.h:5",
+     "issue": "La génération fait srand(ldfs.randomseed) (635) puis rand() pour le décor (641-664) et pour Blotchify (appelé en 667, 488-495). rand() et RAND_MAX diffèrent entre MSVCRT (LCG 15 bits) et la libc de macOS : décor et taches ne sont pas les mêmes des deux côtés. Par ailleurs, quand rand()==RAND_MAX, x=RND*LANDTEXGRIDSIZE vaut exactement LANDTEXGRIDSIZE et landtex[x][y] (495) écrit hors limites, sur les deux plateformes."
+    },
+    {
+     "severity": "haute",
+     "where": "land.cpp:504-505, 522, 255-270",
+     "issue": "Précision ajoutée. CreateLand recharge LandSettings depuis le Land.ini local (LoadLandSettings) et passe &ls à AddRidge : le relief dépend donc du fichier ini du client, pas seulement du LANDINFO reçu. Le plus robuste n'est pas de hasher ce fichier mais de faire transporter les LandSettings utiles par LANDINFO. Le hash des données ne sert alors qu'aux autres fichiers de gameplay."
+    },
+    {
+     "severity": "haute",
+     "where": "land.cpp:520-522, 610-615 ; multiplay.cpp:741-768",
+     "issue": "LANDINFO venant d'un serveur malveillant : numdefs n'est pas borné (NUMDEF=160, land.h:16), et AddRidge(&ldfs.df[i]) lit hors limites. numgroundtex n'est pas borné non plus et sert dans groundtex[i] et LoadTexture(800+i). numblotch énorme donne un DoS, voire une boucle sans fin (goto reposition). cloudtex/misttex/groundtex ne sont pas terminés par un zéro et passent par strcat dans fullfilename[400] ; ils permettent aussi une traversée de chemin vers n'importe quel .bmp ou .pxr local."
+    },
+    {
+     "severity": "moyenne",
+     "where": "sock.cpp:169, 173-176",
+     "issue": "lastreliableid est un WORD, mais lastreliableid+1 est évalué en int. À 65535, la comparaison se fait avec 65536, qu'un WORD ne vaut jamais : le canal reliable reste bloqué définitivement après 65535 messages reçus (cas d'un serveur HKDS qui tourne longtemps). Les id partent de 1 et sont prévisibles."
+    },
+    {
+     "severity": "moyenne",
+     "where": "sock.cpp:94-98",
+     "issue": "Les ACK sont acceptés de n'importe quelle source, sans checksum ni vérification de taille. Avec des id/num prévisibles, un tiers peut acquitter à la place du destinataire, ce qui fait perdre des messages reliable et déclenche des callbacks serveur (voir RECEIVED*)."
+    },
+    {
+     "severity": "moyenne",
+     "where": "sock.cpp:286-312",
+     "issue": "La file reliablesenddata n'a pas de limite (new par message) et un seul message est en vol à la fois (blocage en tête de file). Un client qui n'acquitte pas, ou un spam de chat relayé à tous (multiplay.cpp:1583-1588), fait grossir la mémoire du serveur pendant les 70 s du timeout."
+    },
+    {
+     "severity": "moyenne",
+     "where": "sock.cpp:267, 322-327 ; playing.cpp:495-503",
+     "issue": "Le délai de renvoi se compte en appels (10 puis 40), pas en temps : il dépend du framerate et n'a ni backoff ni abandon. Point d'attention pour la correction : curtime est une horloge de jeu interpolée par sous-pas (playing.cpp:501), pas une horloge réelle. Le renvoi doit utiliser GetTickCount/SDL_GetTicks."
+    },
+    {
+     "severity": "moyenne",
+     "where": "multiplay.cpp:1704-1730, 1925-1960",
+     "issue": "Le serveur ne contrôle pas les tirs : munitions vérifiées seulement pour le joueur local (1706), cadence libre, pos et dir fournis par le client (540-542). ClaimObject s'appuie sur la position déclarée (téléportation près d'un drapeau). Positions et vitesses ne sont jamais validées."
+    },
+    {
+     "severity": "moyenne",
+     "where": "multiplay.cpp:412-446, 866-878",
+     "issue": "Slots : aucune déduplication par adresse. Le client renvoie REQUESTENTER toutes les 2 s tant qu'il n'a pas reçu ENTER, donc un ENTER perdu crée un joueur fantôme pendant 70 s. 31 paquets usurpés suffisent à remplir le serveur. SERVERFULL est construit mais jamais envoyé (415). La boucle de collision compare sin_port (ordre réseau) à curport (ordre hôte, 420-431). Le retour de bind() est ignoré (445), et 26 ports seulement sont disponibles pour MAXPLAYERS=32."
+    },
+    {
+     "severity": "moyenne",
+     "where": "sock.cpp:350-364",
+     "issue": "Le checksum XOR sur 4 voies, appliqué uniquement au reliable, ne protège ni l'intégrité ni l'authenticité. Les paquets unreliable n'ont aucune protection. Il n'existe ni jeton de session ni cookie anti-usurpation."
+    },
+    {
+     "severity": "moyenne",
+     "where": "multiplay.cpp:1296-1304",
+     "issue": "DeletePlayer décale player[] et clientsock[] d'un cran : les indices changent alors que des messages sont encore en vol. Le CopyMemory d'objets Sock duplique les pointeurs reliablesenddata, ce qui fonctionne aujourd'hui uniquement parce que le dernier slot est mis à zéro, et la file du joueur supprimé fuit. Côté client, num vient du réseau sans borne."
+    },
+    {
+     "severity": "basse",
+     "where": "multiplay.cpp:229-238, 719-738",
+     "issue": "INFO répond à n'importe quelle source, y compris usurpée (environ 7x d'amplification). Le client accepte jusqu'à 128 INFO de n'importe qui, ce qui permet de polluer la liste. JoinScreenAddGame borne correctement à 99 (1118-1122), mais strcpy(info.name, servername) côté serveur n'est pas borné (232, config locale)."
+    },
+    {
+     "severity": "basse",
+     "where": "sock.cpp:27 ; multiplay.cpp:80-91",
+     "issue": "ZeroMemory(this, sizeof(this)) n'efface que 8 octets. C'est sans effet pour les globales, mais ce serait un bug sur pile ou sur tas. MakeSockAddr ne remet à zéro ni sin_zero ni sin_len sous macOS : c'est sans conséquence pour bind sur INADDR_ANY, mais à corriger."
+    },
+    {
+     "severity": "basse",
+     "where": "multiplay.cpp:1938-1959 ; GamePlay.cpp:164-166",
+     "issue": "candidate n'est pas initialisé (lu seulement si leastmag<2.4, donc sans danger aujourd'hui). &sobject[i] est calculé avant le test i>=0."
+    },
+    {
+     "severity": "info",
+     "where": "multiplaystruct.h:47-58 ; CMakeLists.txt:2 ; hugekilla.rc",
+     "issue": "Il n'y a aucune version : ni dans REQUESTENTER, ni dans INFO, ni dans project(Edifice CXX), ni dans le .rc (aucun VERSIONINFO). La seule mention est « beta version » dans HugeKilla/Instructions.txt:1. Le dossier n'est pas un dépôt git : un git describe échouerait. Un client incompatible se connecte et désynchronise, ou corrompt la mémoire, sans le moindre message."
+    }
+   ],
+   "steps": [
+    {
+     "title": "P0 : Version du jeu et du protocole (demande de l'utilisateur)",
+     "detail": "Ajouter version.h au dépôt, utilisable tel quel par hugekilla.vcproj et par CMake. Il définit HK_GAME_VERSION \"0.2.0\" (affiché seulement), HK_PROTOCOL_VERSION 2 (le protocole legacy compte comme la version 1) et HK_NET_MAGIC 'EDFC'. Il prévoit #ifndef HK_BUILD_ID / #define HK_BUILD_ID \"dev\", que CMake pourra surcharger plus tard par target_compile_definitions s'il trouve git ; ne pas utiliser configure_file, que le .vcproj ne saurait pas exploiter, et le dossier n'est pas un dépôt git. Y ajouter HK_LAYOUT_ID, calculé à la compilation à partir de sizeof(SimpleMessage), sizeof(PlayerPosition), sizeof(FireGunDirection), sizeof(LandInfo), sizeof(ServerObject), sizeof(ServerVars), sizeof(UpdateServerObject) et sizeof(KilledPosition). C'est ce qui détecte le mélange Windows Debug /Zp1 avec Release ou macOS tant que P2.1 n'est pas fait. Créer de nouveaux types de message sans modifier les anciens : HELLO_INFO=16 (remplace REQUESTINFO), INFO2=17, HELLO_ENTER=18 (remplace REQUESTENTER) et REJECT=19. Ne pas réutiliser 0xFD..0xFF, déjà pris par RELIABLE/LASTRELIABLE/ACK (sock.cpp:13-15). Leur en-tête est sérialisé octet par octet en little-endian : magic(4), proto(2), layout(4), gamever(len+str), puis le nom borné. Le parseur vérifie la taille reçue avant chaque lecture. Le serveur compare proto et layout ; en cas d'écart, il renvoie REJECT {code, proto serveur, gamever serveur, texte} et n'alloue aucun slot. Rétrocompatibilité dans les deux sens. Un vieux client qui envoie SIMPLE/REQUESTINFO reçoit un INFO legacy dont le nom vaut « [v0.2 requise] <nom> ». Un vieux client qui envoie REQUESTENTER reçoit un CHATMESSAGE CMSG_INFO au format octet par octet (dest, pnum, WORD len, texte, multiplay.cpp:1592-1600), que les anciens binaires affichent déjà dans la console, du type « Serveur Edifice 0.2.0 (protocole 2) : mettez le jeu à jour ». Il ne reçoit aucun ENTER. Un nouveau client qui interroge un vieux serveur reçoit un INFO legacy et le marque « ancienne version ». Côté client, REJECT affiche « Serveur en 0.3.0 (protocole 3), vous avez 0.2.0 (protocole 2) » dans la console et sur l'écran Join. Il faut gérer les deux chemins d'UI : la boîte de dialogue Win32 (multiplay.cpp:917-1012, listbox IDC_LOCALGAMES) et l'écran Join SDL (1017-1230). Afficher HK_GAME_VERSION en tête de console et dans DrawMenu (ui.cpp:122).",
+     "effort": "M"
+    },
+    {
+     "title": "P0.1 : Version visible dans la liste des serveurs",
+     "detail": "Remplacer localgamenames[MAXLOCALLIST][100] (multiplay.cpp:1022) par une struct {name, gamever, proto, compatible, legacy}, et adapter JoinScreenAddGame (1118) et DrawJoinScreen (1226), qui affiche « nom  v0.2.0 » et grise les serveurs incompatibles en indiquant la raison. JoinScreenJoin (1069) refuse un serveur incompatible ou legacy et affiche le message, sans envoyer de REQUESTENTER. Faire de même dans la listbox Win32 (735, 993). Le nombre de joueurs (n/32) peut entrer dans INFO2 à ce moment-là. Tout ce travail touche les fonctions JoinScreen* que l'autre agent écrit : à coordonner avec lui.",
+     "effort": "S",
+     "depends_on": [
+      "P0 : Version du jeu et du protocole (demande de l'utilisateur)"
+     ]
+    },
+    {
+     "title": "P1.1 : Lecteur borné dans Sock::Receive",
+     "detail": "sock.cpp:62-68, 154-205. Ajouter un maxsize à Receive(void*, int maxsize, SOCKADDR_IN*) ; les deux appelants passent sizeof(Message). Groupé : exiger recvbufpos+2+wsize<=recvbufsize et wsize<=maxsize, sinon jeter le reste du paquet. Reliable : exiger recvbufsize>=8 (12 si num==0), num*450+(recvbufsize-8)<=BIGBUFSIZE et dwsize<=maxsize, et dwsize<=reliablerecvbufsize-pos. ACK : recvbufsize>=4. Faire retourner un indicateur séparé pour les callbacks locaux d'ACK (sock.cpp:118-133), par exemple un type CALLBACK interne distinct de SIMPLE, pour que les RECEIVED* ne soient plus acceptés depuis le réseau. Ne PAS supprimer la réécriture de dest (156) : on en a besoin pour le NAT. Il faut la déplacer après le checksum et ne l'autoriser que si l'IP source est celle de dest, la mise à jour du port n'étant permise que pendant le handshake (avant RECEIVEDBLOCKINFO). Ce patch ne touche que sock.cpp, et sock.cpp est commun aux builds Windows et macOS.",
+     "effort": "S"
+    },
+    {
+     "title": "P1.2 : Validation centralisée des indices",
+     "detail": "Ajouter ValidPlayer(n) (0<=n<numplayers, n<MAXPLAYERS) et ValidSObj(n). L'appliquer à tous les indices venant du réseau : multiplay.cpp:619 (ENTER msg2), 645, 653, 662, 668, 680 (KILLED), 684, 694 (credit<10), 799 (playernum), 884 (kp->killed/killer), 1356 (pos->pnum), 1650 (firegun->pnum), 1751 (ReceiveKillMessage killer), 1893 (update->num). Borner weapon à 0..6 dans ReceivePosition (1371) avant ammoingun[weapon]. Dans sound.cpp:176 (Windows), ajouter la même borne que sound_sdl.cpp:225. Ne pas changer GetPlayer() (playing.cpp:106) pour qu'il renvoie silencieusement un faux joueur, car cela masquerait des bugs locaux : valider à la frontière réseau et seulement loguer dans GetPlayer en debug.",
+     "effort": "S"
+    },
+    {
+     "title": "P1.3 : Chaînes et longueurs sûres",
+     "detail": "Remplacer strcpy/strcat/sprintf par snprintf ou un strlcpy maison dans multiplay.cpp:405-410, 418, 457, 815, 1281, 1563-1575 et 1760. Chat : len=min(len, taille_reçue-5, 255). PLAYERNAMES : namelen non signé et <=31, numnames<=MAXPLAYERS, et bufpos comparé à la taille reçue. LANDINFO : forcer le zéro terminal sur cloudtex/misttex/sound/groundtex[i][59], et borner numdefs<=NUMDEF, numgroundtex dans 0..9, numblotch et numscenery à des plafonds raisonnables. Refuser '..', '/', '\\\\' et ':' dans les noms de texture. Corriger land.cpp:488-495 (x=min(x, LANDTEXGRIDSIZE-1)).",
+     "effort": "S",
+     "depends_on": [
+      "P1.1 : Lecteur borné dans Sock::Receive"
+     ]
+    },
+    {
+     "title": "P1.4 : Le serveur force l'identité de l'émetteur",
+     "detail": "Côté serveur, ReceivePosition reçoit l'index de l'émetteur : pos->pnum=i à l'appel (multiplay.cpp:516), et state est limité aux valeurs autorisées (1372). Sur infosock (496-500), n'accepter que REQUESTINFO/HELLO_INFO et ne jamais passer pnum=0. Les SIMPLE réseau de type RECEIVED* sont refusés, puisque P1.1 les sépare des callbacks. Sur clientsock[i] (510), le filtre porte sur l'IP source==dest.sin_addr, pas sur le port, à cause du NAT. Côté client, filtrer datasock sur l'IP du serveur, sans rétablir tel quel le test de la ligne 717 qui casse le broadcast LAN. N'accepter ENTER que de l'IP à laquelle on a envoyé REQUESTENTER (613). Dédupliquer REQUESTENTER par ip:port source (réutiliser le slot existant et renvoyer ENTER), et envoyer réellement SERVERFULL (415).",
+     "effort": "S",
+     "depends_on": [
+      "P1.1 : Lecteur borné dans Sock::Receive",
+      "P1.2 : Validation centralisée des indices"
+     ]
+    },
+    {
+     "title": "P1.5 : Corriger les bugs logiques réseau",
+     "detail": "multiplay.cpp:551 : envoyer kp, sizeof(*kp). sock.cpp:169 : comparer à (WORD)(lastreliableid+1). sock.cpp:27 : sizeof(*this). multiplay.cpp:420-431 : comparer en ordre hôte, vérifier le retour de bind (445) et essayer le port suivant en cas d'échec. Borner la file reliable (environ 256 messages ou 1 Mo par client, au-delà déconnexion). Renvoyer selon une horloge réelle (GetTickCount sous Windows, SDL_GetTicks via compat), pas selon curtime, qui est interpolé (playing.cpp:501), avec backoff et abandon après N essais. ReceiveBlockBuffer : numblocks<=(taille_reçue-5)/9, plafond par crédit, x/y/z dans la grille, et rediffuser seulement les octets reçus. candidate=-1 (1940). Côté serveur, ignorer les CHATMESSAGE CMSG_SCORE/OBJECTIVE venant d'un client (rétablir le test de 1557 sur le serveur).",
+     "effort": "M",
+     "depends_on": [
+      "P1.1 : Lecteur borné dans Sock::Receive"
+     ]
+    },
+    {
+     "title": "P1.6 : Anti-triche minimal côté serveur",
+     "detail": "Limiter le débit de KILLED/KILLEDPOSITION par joueur et exiger un killer valide. Le serveur tient les munitions et la cadence (nextfiretime) pour tous les joueurs dans TryFireGun (1704-1708). Refuser les sauts de position supérieurs à vitesse_max*dt dans ReceivePosition, avec une tolérance pour le respawn (ResetPlayer remet pos à 0, 1793), le jetpack et le deltaplane : commencer par loguer seulement, puis activer le refus. Imposer une distance maximale de construction et de suppression autour du joueur pour BLOCKS, et limiter le débit de REQUESTINFO/REQUESTENTER par IP. L'invulnérabilité (mort décidée côté client) ne se règle pas ici : elle attend P2.4.",
+     "effort": "M",
+     "depends_on": [
+      "P1.4 : Le serveur force l'identité de l'émetteur"
+     ]
+    },
+    {
+     "title": "P1.7 : Terrain identique partout : PRNG maison et LandSettings transmis",
+     "detail": "Remplacer rand()/RND dans land.cpp (18, 488-495, 635-675) par un PRNG maison (PCG32), seedé par ldfs.randomseed et propre à la génération. Ne pas toucher au RND utilisé pour les effets visuels de playing.cpp. Faire transporter par LANDINFO les champs de LandSettings utilisés par AddRidge (land.cpp:255-270, 504-505), au lieu de relire le Land.ini du client. Les deux changements modifient le format et le terrain : on incrémente HK_PROTOCOL_VERSION dans le même commit. Vérifier en comparant un hash du heightmap et du décor généré sous Windows et sous macOS avec le même seed.",
+     "effort": "M",
+     "depends_on": [
+      "P0 : Version du jeu et du protocole (demande de l'utilisateur)"
+     ]
+    },
+    {
+     "title": "P1.8 : Hash des données de gameplay dans le handshake",
+     "detail": "Calculer un FNV-1a 64 sur les fichiers de HugeKilla/ qui influencent la simulation et qui ne sont pas déjà transmis : Structures/, Object.ini et la liste indexée des sons et textures. Exclure sv.ini (envoyé via SERVERVARS) et Land.ini (transmis à partir de P1.7). Normaliser les fins de ligne et trier les noms de fichiers. Le chemin diffère entre Windows et le bundle macOS (Contents/Resources/HugeKilla, CMakeLists.txt) : hasher des chemins relatifs. Ajouter le champ data_hash à HELLO_ENTER : un écart déclenche REJECT, avec un code distinct de celui d'une version différente.",
+     "effort": "S",
+     "depends_on": [
+      "P0 : Version du jeu et du protocole (demande de l'utilisateur)",
+      "P1.7 : Terrain identique partout : PRNG maison et LandSettings transmis"
+     ]
+    },
+    {
+     "title": "P2.1 : Sérialisation explicite et versionnée",
+     "detail": "Supprimer tous les memcpy et casts de structs réseau, dont multiplay.cpp:304, 744-748, 788, 827, 847, 883, 1312-1313, 1890-1893, SendServerVars (1800) et SimpleMessage partout. Les remplacer par un ByteWriter/ByteReader little-endian borné, avec une fonction par message, qui marque le paquet invalide en cas de dépassement. Ne plus envoyer ServerObject::timeout. Une fois P2.1 fait, HK_LAYOUT_ID n'a plus de raison d'être : on bumpe le protocole. Ajouter des static_assert sur les tailles en attendant.",
+     "effort": "L",
+     "depends_on": [
+      "P1.1 : Lecteur borné dans Sock::Receive",
+      "P0 : Version du jeu et du protocole (demande de l'utilisateur)"
+     ]
+    },
+    {
+     "title": "P2.2 : Transport : adopter ENet",
+     "detail": "Remplacer Sock et le port unique par client (multiplay.cpp:420-446) par un ENetHost serveur sur un seul port. Canal 0 reliable pour l'état, le chat et les blocs, canal 1 unreliable séquencé pour les positions, canal 2 reliable pour le chargement du monde. enet_host_connect(..., data=HK_PROTOCOL_VERSION) et enet_peer_disconnect(peer, code REJECT) portent la version et le motif de refus. Le NAT fonctionne nativement (un seul port, réponse à la source). Garder infosock en UDP brut uniquement pour la découverte LAN (HELLO_INFO/INFO2), avec limitation de débit. Il faut vendoriser ENet dans le dépôt et l'ajouter à la fois au .vcproj et à CMakeLists.txt (fichier de l'autre agent, à coordonner). Supprime sock.cpp et PING/PINGREPLY.",
+     "effort": "L",
+     "depends_on": [
+      "P2.1 : Sérialisation explicite et versionnée"
+     ]
+    },
+    {
+     "title": "P2.3 : Handshake avec challenge et jeton de session",
+     "detail": "Séquence : CONNECT_REQUEST {magic, proto, gamever, datahash}, puis CHALLENGE {cookie=HMAC(secret, ip:port:ts)} sans allouer de slot, puis CONNECT_RESPONSE {cookie}, puis ACCEPT {player_id, token} ou REJECT. Le gros transfert initial ne démarre qu'après ACCEPT, ce qui supprime l'amplification. Sous ENet, le connectID couvre déjà l'usurpation à l'aveugle ; le cookie protège surtout la découverte et la saturation des slots.",
+     "effort": "M",
+     "depends_on": [
+      "P2.2 : Transport : adopter ENet"
+     ]
+    },
+    {
+     "title": "P2.4 : Serveur autoritaire et snapshots",
+     "detail": "Le client envoie des commandes d'entrée numérotées. Le serveur simule à un tick fixe découplé du rendu, avec un accumulateur sur une horloge réelle (aujourd'hui, Play() est sous-échantillonné sur curtime, playing.cpp:495-503). Il fait le raycast des tirs avec lag-compensation et décide des dégâts et des morts, ce qui remplace Killed() côté victime (playing.cpp:385, 460), ainsi que des crédits, drapeaux et constructions. Il envoie des snapshots delta. Le client fait de la prédiction avec réconciliation et interpole les autres joueurs. Les slots deviennent stables, sans le décalage de DeletePlayer (multiplay.cpp:1296).",
+     "effort": "XL",
+     "depends_on": [
+      "P2.3 : Handshake avec challenge et jeton de session"
+     ]
+    },
+    {
+     "title": "P2.5 : Politique de compatibilité et tests",
+     "detail": "Documenter dans version.h les règles de bump de HK_PROTOCOL_VERSION : format ou ID de message, sémantique d'un champ, ordre des ServerVars, terrain ou PRNG, quantification, tick rate. HK_GAME_VERSION est informatif et ne motive jamais seul un refus. Le protocole doit correspondre exactement, sans négociation. Ajouter un fuzzer libFuzzer (clang macOS) sur Sock::Receive et sur chaque parseur de message, plus un test croisé Windows Release/macOS : handshake, comparaison du hash du terrain, une partie de 2 minutes.",
+     "effort": "M",
+     "depends_on": [
+      "P0 : Version du jeu et du protocole (demande de l'utilisateur)",
+      "P2.1 : Sérialisation explicite et versionnée"
+     ]
+    }
+   ],
+   "risks": [
+    "Supprimer la réécriture de dest (sock.cpp:156) ou filtrer exactement ip:port casse les clients derrière un NAT : le serveur adresse le client au port qu'il lui alloue (multiplay.cpp:419, 440), et seul le PORTACK reliable corrige vers le port NATé. Il faut filtrer par IP et fixer le port pendant le handshake.",
+    "Rétablir tel quel le filtre de multiplay.cpp:717 casse la découverte LAN, puisque infosock.dest vaut alors 255.255.255.255 (1026).",
+    "Le nouveau protocole casse volontairement la compatibilité avec les anciens binaires. P0 rend ce refus visible des deux côtés : INFO legacy marqué et CHATMESSAGE CMSG_INFO pour les vieux clients, marquage « ancienne version » pour les vieux serveurs. Un vieux client continuera tout de même à envoyer « retrying » toutes les 2 s (multiplay.cpp:866-878) après avoir affiché le message.",
+    "L'autre agent modifie en ce moment multiplay.cpp (JoinScreen*, ClientLoop), CMakeLists.txt et compat/. Les numéros de ligne ont déjà glissé pendant l'audit. P0, P0.1 et P1.4 touchent ces mêmes fonctions : il faut passer après lui, ou se coordonner, et ne pas utiliser configure_file dans CMakeLists sans son accord.",
+    "Tant que P2.1 n'est pas fait, HK_LAYOUT_ID ne fait que détecter l'incompatibilité Debug /Zp1 contre Release/macOS, sans la résoudre : un Windows Debug restera refusé par les autres builds.",
+    "P1.7 (PRNG maison, LandSettings transmis) change les cartes à seed égal : bump de protocole obligatoire, et les seeds partagés ne redonneront plus le même terrain.",
+    "Le contrôle anti-téléportation de P1.6 risque des faux positifs (respawn à pos=0, jetpack, deltaplane, perte de paquets) : il faut le mettre d'abord en mode log seulement.",
+    "ENet n'apporte aucun chiffrement. Pour des serveurs publics, il faudra plus tard libsodium ou GameNetworkingSockets. ENet doit aussi être ajouté à deux systèmes de build (.vcproj et CMake).",
+    "P2.4 touche en profondeur playing.cpp, dont la physique est couplée au rendu : c'est le plus gros risque de régression du gameplay. À faire derrière un flag.",
+    "Le hash des données peut refuser des installations qui ne diffèrent que cosmétiquement : normaliser CRLF/LF et limiter la liste aux fichiers de gameplay."
+   ],
+   "recommendation": "D'abord, P0 et P0.1, la gestion de version que l'utilisateur a demandée. Le travail est petit et isolé et ne dépend pas des correctifs de sécurité. On ajoute un version.h versionné dans le dépôt (HK_GAME_VERSION, HK_PROTOCOL_VERSION=2, magic 'EDFC', HK_LAYOUT_ID calculé à partir des sizeof des structs réseau). On crée de nouveaux messages HELLO_INFO, INFO2, HELLO_ENTER et REJECT, sérialisés octet par octet, sans toucher au format des messages legacy. Le refus est lisible dans les deux sens : REJECT pour les nouveaux clients, INFO marqué et CHATMESSAGE CMSG_INFO pour les anciens, que ceux-ci affichent déjà. La version et la compatibilité apparaissent dans l'écran Join SDL et dans la boîte de dialogue Win32. Pas de configure_file ni de git describe : le dossier n'est pas un dépôt git et le .vcproj ne passe pas par CMake. Juste après, P1.1 à P1.5, de petits patchs localisés qui ferment les corruptions mémoire distantes, critiques des deux côtés. Pour P1.1 et P1.4 en particulier, la réécriture de dest doit être conservée (elle fait marcher le NAT) mais sécurisée, et le filtre de la découverte LAN ne doit pas être rétabli tel quel. Ensuite P1.7 et P1.8 : PRNG maison et LandSettings transmis dans LANDINFO, plutôt qu'un hash de Land.ini, pour que Windows et macOS génèrent le même terrain ; puis hash des autres données de gameplay. P1.6 vient en dernier dans la phase 1, en mode log d'abord. Phase 2 : sérialisation explicite (P2.1), puis ENet (P2.2), qui règle aussi le NAT et le port par client, puis handshake avec cookie (P2.3), puis serveur autoritaire (P2.4). Tout ce qui touche multiplay.cpp (JoinScreen*, ClientLoop) et CMakeLists.txt doit être coordonné avec l'agent qui fait le portage macOS."
+  }
+ },
+ {
+  "track": "Support Steam pour rejoindre une partie",
+  "plan": {
+   "summary": "J'ai relu tout le brouillon dans le code. Le diagnostic général tient : un port UDP par client (multiplay.cpp:419-444, 619-626), la séquence de handshake pilotée par les callbacks de SendReliable (sock.cpp:130-150), et aucun numéro de version échangé (multiplaystruct.h:46-57). Mais le M0 du brouillon ne marcherait pas tel quel. RequestEnter et Info sont envoyés avec la longueur 2+namelen+1 (multiplay.cpp:236, 880, 1003, 1079), donc des champs ajoutés à la fin de ces structs ne partiraient jamais sur le réseau. Il faut placer la version en « trailer » après le zéro final du nom, et lire la longueur que renvoie Receive (multiplay.cpp:395, où elle est ignorée aujourd'hui). Le risque de layout est surestimé : les structs envoyées ne contiennent que des char, int, float et DWORD (compat/win32compat.h:34 donne uint32_t), ce qui donne le même agencement en MSVC x86 et en clang arm64. Les static_assert restent un garde-fou utile, mais ce n'est pas un bug actuel. L'ordre des étapes est corrigé : M4 connectait le transport Steam avant qu'il existe (M5). Enfin, M1 remplaçait les callbacks par des ACK explicites, ce qui change le protocole et touche beaucoup de multiplay.cpp pendant le portage macOS. Il vaut mieux émuler ces callbacks dans chaque backend.",
+   "findings": [
+    {
+     "severity": "haute",
+     "where": "multiplaystruct.h:46-57",
+     "issue": "Gestion de version (demandée par l'utilisateur) : aucune version de jeu ni de protocole n'est échangée. RequestEnter ne contient que {type, namelen, name[32]} et Info que {type, namelen, name[100]}. Le seul 'version' du code (hugekilla.cpp:310) est celui du PIXELFORMATDESCRIPTOR, sans rapport. Un build d'une autre version (Windows d'origine, portage macOS, build Steam) se connecte donc sans aucun contrôle."
+    },
+    {
+     "severity": "haute",
+     "where": "multiplay.cpp:236",
+     "issue": "Correction du brouillon : INFO est envoyé avec la longueur 2+info.namelen+1, et REQUESTENTER aussi (multiplay.cpp:880, 1003, 1079). Des champs ajoutés « à la fin » des structs (après name[32] ou name[100]) ne seraient jamais transmis. La version doit être sérialisée juste après le zéro final du nom, en trailer à l'offset 2+namelen+1, ou bien passer par un nouveau type de message."
+    },
+    {
+     "severity": "haute",
+     "where": "multiplay.cpp:395",
+     "issue": "La boucle `while(infosock.Receive(&msg,&source))` jette la taille reçue, que Sock::Receive renvoie pourtant (sock.cpp:59-68). Sans cette taille, le serveur ne peut pas distinguer un REQUESTENTER d'ancienne version (sans trailer) d'un nouveau, et le client ne peut pas savoir si un INFO contient la version. Il faut capturer cette valeur dans ServerLoop et dans ClientLoop (multiplay.cpp:713-715)."
+    },
+    {
+     "severity": "haute",
+     "where": "multiplay.cpp:399-418",
+     "issue": "Compatibilité entre versions : un ancien serveur ignore les octets en plus et fait strcpy(req->name) (multiplay.cpp:405, 417). Il acceptera donc un nouveau client. Le refus doit aussi se faire côté client : un INFO sans trailer équivaut à la version 1, et la partie est grisée ou refusée avant d'envoyer REQUESTENTER. Toutes les connexions passent déjà par INFO (JoinScreenJoin à multiplay.cpp:1068, IDC_JOINLOCAL à multiplay.cpp:991, IDC_JOININTERNET qui envoie REQUESTINFO à multiplay.cpp:972-988), ce point de contrôle suffit donc. Le retry de ClientLoop (multiplay.cpp:873-881) renvoie REQUESTENTER : il doit inclure le même trailer."
+    },
+    {
+     "severity": "moyenne",
+     "where": "multiplay.cpp:411-415",
+     "issue": "Quand le serveur est plein, il construit un SimpleMessage SERVERFULL mais ne l'envoie jamais (ni Send ni Flush avant le break). Le client ne traite d'ailleurs pas SERVERFULL dans HandleSimpleClient (multiplay.cpp:607) et se contente de réessayer en boucle. Le futur refus VERSIONMISMATCH doit être réellement envoyé via infosock.dest=source; Send; Flush, comme ENTER à multiplay.cpp:446-448, et traité côté client. Corriger SERVERFULL au passage."
+    },
+    {
+     "severity": "moyenne",
+     "where": "multiplay.cpp:880",
+     "issue": "Le REQUESTENTER est construit en trois endroits copiés-collés : le retry de ClientLoop à 876-880, le dialogue Win32 à 999-1003 et JoinScreenJoin à 1075-1079. strcpy(req.name, playername) n'est jamais borné à 32 octets, de même que strcpy(GetPlayer()->name, req->name) côté serveur (multiplay.cpp:417). Il faut factoriser un SendRequestEnter() qui ajoute le trailer de version et tronque le nom. C'est indispensable avant d'utiliser GetPersonaName (UTF-8, potentiellement plus de 32 octets)."
+    },
+    {
+     "severity": "moyenne",
+     "where": "sock.cpp:130-150",
+     "issue": "Le handshake repose sur les callbacks de SendReliable : à la réception de l'ACK, Receive fabrique localement un SimpleMessage{type2=callback}. C'est ce qui enchaîne PORTACK, RECEIVEDPLAYERNAMES, RECEIVEDLANDINFO puis RECEIVEDBLOCKINFO (multiplay.cpp:266, 271-276, 299). ISteamNetworkingSockets n'a pas d'ACK par message. Le plus simple est d'émuler ce mécanisme dans SteamTransport : le récepteur renvoie automatiquement un petit ACK applicatif quand le message porte un callback. On évite ainsi de toucher le protocole UDP et la logique de multiplay.cpp."
+    },
+    {
+     "severity": "moyenne",
+     "where": "multiplay.cpp:419-448",
+     "issue": "Le serveur alloue un port par client (datasendport+N, avec retour en boucle à +25) et l'envoie dans ENTER. Le client fait ensuite un bind sur ce même port et envoie vers l'IP source (multiplay.cpp:619-626). Il faut donc ouvrir 26 ports et la traversée de NAT est impossible. C'est l'argument pour SDR, plutôt que de garder l'UDP brut sous un matchmaking Steam."
+    },
+    {
+     "severity": "moyenne",
+     "where": "multiplay.cpp:42-51",
+     "issue": "(Le brouillon citait 739-744, ce qui est faux.) Les globales infosock, datasock, clientsock[MAXPLAYERS] et locallistaddr[MAXLOCALLIST] identifient les pairs par SOCKADDR_IN. La source SOCKADDR_IN est aussi passée à HandleSimpleServer et HandleSimpleClient (multiplay.cpp:225, 607). Un backend Steam a besoin d'un identifiant de pair abstrait."
+    },
+    {
+     "severity": "basse",
+     "where": "multiplaystruct.h:58-63",
+     "issue": "Le brouillon surestimait ce point. LandInfo (LandDefs à land.h:44-53, SkySettings à land.h:17-35), ServerObject (playing.h:130-138) et SimpleMessage (sock.h:16-22) ne contiennent que des char, int, float et DWORD, et DWORD vaut uint32_t côté compat (compat/win32compat.h:32-34). L'agencement est donc identique entre MSVC x86 et clang arm64/x64, en little-endian dans les deux cas. Des static_assert sur sizeof plus une empreinte NET_LAYOUT_HASH restent un garde-fou utile contre une régression future (un long, un bool ou un pointeur ajouté). Détail : le champ 'int timeout; //not sent' de ServerObject est en réalité envoyé (multiplay.cpp:303)."
+    },
+    {
+     "severity": "basse",
+     "where": "multiplay.cpp:102-118",
+     "issue": "LoadNetSettings ne lit pas maxplayers, alors que le champ existe (multiplay.h:62) et que net.ini le règle à 8. Le serveur utilise donc MAXPLAYERS=32 (multiplay.h:15). Le paramètre cMaxMembers du lobby Steam doit utiliser la vraie valeur, et la vérification de serveur plein (multiplay.cpp:411) devrait elle aussi l'appliquer."
+    },
+    {
+     "severity": "basse",
+     "where": "HugeKilla/Object.ini",
+     "issue": "Le contenu de jeu se trouve dans des fichiers de données (Object.ini, sv.ini, Structures/, Land.ini, skies.ini). Les noms de textures du terrain et du ciel sont envoyés par nom (LandDefs.groundtex, SkySettings.cloudtex, multiplay.cpp:752-760). Deux installations aux données différentes peuvent se désynchroniser même avec le même protocole. On peut, en option, ajouter au handshake une empreinte CRC32 des fichiers de gameplay, en avertissement plutôt qu'en refus."
+    },
+    {
+     "severity": "basse",
+     "where": "platform_sdl.cpp:279",
+     "issue": "EnterDataDir prend argv[1] comme dossier de données candidat. Un '+connect_lobby' échouerait au test access(control.ini) et la recherche passerait au candidat suivant, donc rien ne casse. Mais l'identifiant du lobby (argv[2]) n'est analysé nulle part. Le chdir vers le dossier de données (platform_sdl.cpp:297) a lieu avant tout le reste (platform_sdl.cpp:307), ce qui détermine l'emplacement de steam_appid.txt."
+    },
+    {
+     "severity": "basse",
+     "where": "hugekilla.cpp:76",
+     "issue": "lpCmdLine n'est jamais utilisé, alors qu'il faudra y lire '+connect_lobby <id>' sous Windows."
+    },
+    {
+     "severity": "info",
+     "where": "license.txt:1-3",
+     "issue": "Le code est sous LGPL-3.0, et l'auteur (Nelson Planting) se réserve le droit d'accorder des droits supplémentaires. Le SDK Steamworks est propriétaire : il faut le garder hors du dépôt, en dépendance optionnelle et liée dynamiquement, et faire valider le montage juridique (ceci n'est pas un avis juridique)."
+    },
+    {
+     "severity": "info",
+     "where": "CMakeLists.txt:4-5",
+     "issue": "Le CMake ne gère que macOS/POSIX : « Windows keeps using hugekilla.sln ». Il n'a aucune option. Le build Windows (hugekilla.vcproj) devra être mis à jour séparément pour HK_STEAM et pour les nouveaux fichiers (netversion.h, transports)."
+    }
+   ],
+   "steps": [
+    {
+     "title": "M0 - Version du netplay (prérequis, demandé par l'utilisateur)",
+     "detail": "1) Créer netversion.h avec NET_PROTOCOL_VERSION 2 (la version 1 désigne implicitement le protocole historique, sans trailer), GAME_VERSION_STR et NET_LAYOUT_HASH (combinaison des sizeof de LandDefs, SkySettings, ServerObject, PlayerPosition, SimpleMessage et UpdateServerObject), plus des static_assert sur ces sizeof. 2) Définir un trailer de version {char magic='V'; WORD protover; DWORD layouthash; char gamever[16]}, sérialisé octet par octet juste après le zéro final du nom. Ne pas ajouter de champs à la fin des structs : ils ne seraient jamais envoyés, à cause des longueurs 2+namelen+1 (multiplay.cpp:236, 880, 1003, 1079). 3) Factoriser SendRequestEnter() et SendInfo(), qui tronquent les noms à 31 et 99 octets et ajoutent le trailer, et les utiliser aux trois appels de REQUESTENTER et dans HandleSimpleServer REQUESTINFO (multiplay.cpp:229-238). 4) Capturer la taille renvoyée par Receive dans ServerLoop (multiplay.cpp:395) et ClientLoop (multiplay.cpp:713-715). Un message sans trailer correspond à la version 1. 5) Côté serveur, dans REQUESTENTER (multiplay.cpp:399) : si la version ne correspond pas, envoyer réellement un SimpleMessage VERSIONMISMATCH (nouvelle valeur type2 = 26, avec msg=protover du serveur) via infosock, puis faire break. Corriger SERVERFULL de la même façon (multiplay.cpp:411-415). 6) Côté client, dans INFO (multiplay.cpp:720-739) : stocker la version de chaque entrée de locallistaddr, afficher « (version X) » et refuser de rejoindre une partie incompatible, aussi bien dans JoinScreenJoin (multiplay.cpp:1068) que dans le dialogue Win32 IDC_JOINLOCAL (multiplay.cpp:991). C'est cette vérification qui protège d'un ancien serveur, qui accepterait le client. Traiter VERSIONMISMATCH et SERVERFULL dans HandleSimpleClient (multiplay.cpp:607) : afficher le message, puis Disconnect() et playstate=0 pour arrêter le retry de multiplay.cpp:873. 7) Option : ajouter au trailer un CRC32 des fichiers de gameplay (Object.ini, sv.ini, Structures/), qui ne donne qu'un avertissement. JoinScreenAddGame et le rendu de l'écran de connexion appartiennent au portage macOS en cours : coordonner, en ajoutant par exemple un paramètre de compatibilité à JoinScreenAddGame. Tester ancien contre nouveau dans les deux sens, en LAN, avant toute autre étape.",
+     "effort": "M"
+    },
+    {
+     "title": "M1 - Abstraction du transport (NetTransport) sans changer le protocole UDP",
+     "detail": "Introduire une interface INetTransport {Host(); Connect(target); Send(peer,data,len,reliable,callbackId); Poll(&peer,buf) → len; Close(peer); Flush(); CheckResend();} et un type NetPeer opaque. UdpTransport enveloppe Sock à l'identique : allocation de ports, callbacks de SendReliable, broadcast REQUESTINFO. Le format sur le réseau reste inchangé, donc la compatibilité avec la version 2 de M0 aussi. Ne pas remplacer les callbacks implicites par des ACK explicites dans multiplay.cpp : cela changerait le protocole et toucherait les lignes 266-308 et 611-638 pendant que le portage macOS modifie le même fichier. La sémantique des callbacks fait désormais partie du contrat de l'interface, et chaque backend la fournit. Faire migrer progressivement infosock, datasock, clientsock[] et locallistaddr[] (multiplay.cpp:42-51), ainsi que les paramètres SOCKADDR_IN source de HandleSimpleServer et HandleSimpleClient, vers NetPeer. À faire après la stabilisation du portage macOS de multiplay.cpp, ou en coordination étroite avec lui. Critère de sortie : une partie LAN, Windows contre macOS, se comporte exactement comme avant.",
+     "effort": "L",
+     "depends_on": [
+      "M0 - Version du netplay (prérequis, demandé par l'utilisateur)"
+     ]
+    },
+    {
+     "title": "M2 - Intégration du SDK Steamworks et du build",
+     "detail": "Dans CMake : option(HK_STEAM OFF), STEAMWORKS_SDK_DIR, find_path(steam/steam_api.h) et find_library (redistributable_bin/osx/libsteam_api.dylib). Avec HK_STEAM, compiler net_steam.cpp et définir HK_STEAM=1. Sans HK_STEAM, compiler net_steam_stub.cpp, où SteamAvailable() renvoie 0. Le SDK reste hors du dépôt, déclaré dans .gitignore et documenté dans le README. Windows : ajouter une configuration « Release Steam » à hugekilla.vcproj (inclusion du SDK, steam_api64.lib ou steam_api.lib selon que le build est 32 ou 64 bits). Le build Win32 d'origine est probablement x86 : il faut alors prendre la DLL steam_api.dll et non steam_api64.dll. L'autre option est de faire passer Windows sous CMake, mais ce chantier sort du périmètre.",
+     "effort": "M"
+    },
+    {
+     "title": "M3 - Initialisation de Steam et boucle des callbacks",
+     "detail": "macOS : dans main, après EnterDataDir (platform_sdl.cpp:307). Windows : dans WinMain (hugekilla.cpp:74-76), avant la boucle. En Release, appeler SteamAPI_RestartAppIfNecessary, puis SteamAPI_Init. En cas d'échec, continuer en mode non-Steam. Pour le développement, steam_appid.txt (480) doit se trouver dans le répertoire courant après le chdir, donc dans HugeKilla/, ou bien on définit la variable d'environnement SteamAppId. Il ne doit jamais être livré. Appeler SteamAPI_RunCallbacks() à côté de chaque SockLoop() (platform_sdl.cpp:418-433 et hugekilla.cpp:203-216). Il y a plusieurs appels : il vaut mieux l'appeler une seule fois, au début de SockLoop, côté Steam. SteamAPI_Shutdown() à la sortie. Prendre le nom du joueur par défaut dans GetPersonaName(), tronqué via le SendRequestEnter de M0. Ne pas ouvrir le transport Steam pour HKDS (hugekilla.cpp:146), qui nécessiterait SteamGameServer.",
+     "effort": "S",
+     "depends_on": [
+      "M2 - Intégration du SDK Steamworks et du build"
+     ]
+    },
+    {
+     "title": "M4 - SteamTransport : ISteamNetworkingSockets P2P avec relais SDR",
+     "detail": "Au démarrage, appeler InitRelayNetworkAccess(). Hôte : CreateListenSocketP2P(0) et un poll group. Client : ConnectP2P(identité de l'hôte, 0). Dans SteamNetConnectionStatusChangedCallback_t, appeler AcceptConnection et associer la HSteamNetConnection à un NetPeer. Correspondances : reliable vers k_nSteamNetworkingSend_Reliable (taille max 512 Ko, largement au-dessus des 50 000 octets de BIGBUFSIZE, sock.h:5), unreliable vers k_nSteamNetworkingSend_UnreliableNoNagle pour PlayerPosition. Émuler les callbacks : un en-tête de 2 octets {flags, callbackId} ; quand un message reliable porte un callback, le récepteur renvoie automatiquement un ACK reliable, et l'émetteur injecte en local le SimpleMessage{type2=callback}, exactement comme Sock::Receive (sock.cpp:130-150). Sous Steam, la séquence ENTER/port (multiplay.cpp:419-448, 611-638) se réduit à : la connexion acceptée, l'hôte envoie ENTER sans port. Isoler ce branchement dans le transport ou dans un if minimal. Le trailer de version de M0 continue de transiter dans REQUESTENTER. Tester d'abord en direct (en local, deux instances, deux comptes), puis avec les réglages de debug FakePacketLoss et FakePacketLag.",
+     "effort": "L",
+     "depends_on": [
+      "M1 - Abstraction du transport (NetTransport) sans changer le protocole UDP",
+      "M3 - Initialisation de Steam et boucle des callbacks"
+     ]
+    },
+    {
+     "title": "M5 - Lobbies ISteamMatchmaking, rich presence et « Rejoindre la partie »",
+     "detail": "À l'hébergement (StartServer, multiplay.cpp:132, appelé depuis ui.cpp:125-126) : CreateLobby (FriendsOnly ou Public) avec maxplayers lu dans net.ini, ce qui suppose de corriger LoadNetSettings (multiplay.cpp:102-118 et multiplay.h:62) et la vérification de serveur plein (multiplay.cpp:411). Sur LobbyCreated_t, appeler SetLobbyData pour game=edifice, name, proto=NET_PROTOCOL_VERSION, layout, gamever et host=SteamID64, puis SetRichPresence(\"connect\", \"+connect_lobby <id>\"). Pour la liste, filtrer avec AddRequestLobbyListStringFilter sur game et proto, puis RequestLobbyList, et alimenter un onglet Steam de l'écran de connexion (JoinScreenAddGame, multiplay.cpp:1118, en coordination avec le portage macOS). Gérer GameLobbyJoinRequested_t et GameRichPresenceJoinRequested_t, plus +connect_lobby au lancement (argv dans platform_sdl.cpp, à faire ignorer par EnterDataDir pour les arguments qui commencent par '+' ; lpCmdLine dans hugekilla.cpp:76). Sur LobbyEnter_t, comparer la version publiée dans le lobby à la sienne (refus explicite en cas d'écart), puis Connect() du SteamTransport de M4 vers l'hôte. Invitations : ActivateGameOverlayInviteDialog. Disconnect() (multiplay.cpp:176) appelle LeaveLobby.",
+     "effort": "L",
+     "depends_on": [
+      "M4 - SteamTransport : ISteamNetworkingSockets P2P avec relais SDR",
+      "M0 - Version du netplay (prérequis, demandé par l'utilisateur)"
+     ]
+    },
+    {
+     "title": "M6 - Packaging macOS et Windows",
+     "detail": "macOS : copier libsteam_api.dylib dans Edifice.app/Contents/Frameworks (ou MacOS) avec un INSTALL_RPATH adapté, et vérifier avec otool -L. Signer le dylib, puis l'application, en hardened runtime, sans --deep. Ajouter les entitlements disable-library-validation et allow-dyld-environment-variables, nécessaires à l'overlay. Notariser puis agrafer (staple). Pour un binaire universel, vérifier les architectures de la dylib. Windows : steam_api.dll ou steam_api64.dll (selon l'architecture de l'exe) à côté de l'exécutable. Ne livrer steam_appid.txt dans aucun des deux builds. Configurer les depots et les options de lancement dans Steamworks.",
+     "effort": "M",
+     "depends_on": [
+      "M5 - Lobbies ISteamMatchmaking, rich presence et « Rejoindre la partie »"
+     ]
+    },
+    {
+     "title": "M7 - Tests avec deux comptes et mise en production",
+     "detail": "Deux machines avec deux comptes amis, App ID 480. Scénarios : héberger puis rejoindre depuis la liste d'amis ; invitation depuis l'overlay ; lancement à froid avec +connect_lobby ; Windows contre macOS ; écart de version (incrémenter NET_PROTOCOL_VERSION sur un seul poste : lobby filtré, refus VERSIONMISMATCH, puis aussi ancien build sans trailer contre nouveau en LAN, dans les deux sens) ; serveur plein (SERVERFULL bien reçu) ; perte de paquets simulée ; départ de l'hôte. Non-régression : build non-Steam contre build non-Steam en LAN et par IP. Pour publier : obtenir un App ID (frais Steam Direct), remplacer 480 et localiser les tokens de rich presence.",
+     "effort": "M",
+     "depends_on": [
+      "M6 - Packaging macOS et Windows"
+     ]
+    }
+   ],
+   "risks": [
+    "Licence : le code LGPL-3.0 serait lié à un SDK Steamworks propriétaire. Le SDK doit rester hors du dépôt, en dépendance optionnelle et liée dynamiquement, avec un build non-Steam complet. Une exception explicite peut être demandée à l'auteur (license.txt:3). À faire valider par un juriste.",
+    "Conflit avec le portage macOS en cours : M0, M1 et M5 modifient multiplay.cpp, notamment ClientLoop, l'écran de connexion (multiplay.cpp:1010-1130) et le dialogue Win32, déjà modifiés par l'autre agent. M0 doit rester local (des helpers et un trailer), et M1 doit attendre que le portage se stabilise.",
+    "Compatibilité ascendante de la version : un ancien serveur accepte n'importe quel REQUESTENTER (multiplay.cpp:399-418). Seul le contrôle côté client, sur INFO, protège contre ce cas : il ne faut ouvrir aucun chemin de connexion qui contourne INFO.",
+    "Remplacer les callbacks de SendReliable par des ACK explicites changerait le protocole et casserait la compatibilité. Il faut donc les émuler dans chaque transport.",
+    "Les structs envoyées brutes (LandInfo, ServerObject, UpdateServerObject) sont aujourd'hui compatibles entre les plateformes, uniquement parce qu'elles ne contiennent que des types de 4 octets ou moins. Un ajout de champ non portable casse silencieusement le protocole, d'où les static_assert de M0.",
+    "Fichiers de données divergents (Object.ini, Structures/) : une désynchronisation reste possible même avec le même protocole, si on n'ajoute pas l'empreinte optionnelle des données.",
+    "macOS : la notarisation et le hardened runtime entrent en conflit avec l'injection de l'overlay Steam (il faut des entitlements). Le chdir de EnterDataDir conditionne l'emplacement de steam_appid.txt.",
+    "L'App ID 480 est partagé : il faut filtrer obligatoirement les lobbies par game=edifice et proto. Un App ID payant est nécessaire pour publier.",
+    "HKDS (hugekilla.cpp:146) n'est pas couvert par Steam (il faudrait SteamGameServer) : il reste en UDP."
+   ],
+   "recommendation": "Faire M0 tout de suite, indépendamment de Steam : un trailer de version après le zéro final du nom dans INFO et REQUESTENTER, la taille reçue enfin lue, un refus VERSIONMISMATCH réellement envoyé (et SERVERFULL corrigé), et un contrôle côté client sur INFO pour se protéger des anciens serveurs. C'est la demande explicite de l'utilisateur. M0 touche peu de code, reste compatible avec les anciens builds, et sert au LAN Windows/macOS du portage. Ne pas ajouter de champs à la fin des structs : ils ne seraient jamais envoyés. Ensuite, isoler le transport (M1) sans changer le protocole UDP, en gardant la sémantique des callbacks de SendReliable. Ajouter enfin SteamTransport en P2P avec relais SDR (M4), avant les lobbies et la rich presence (M5), qui ont besoin de ce transport pour connecter les joueurs. Tout ce qui touche à Steam reste derrière HK_STEAM, avec un stub, le SDK hors du dépôt et l'App ID 480 en développement."
+  }
+ }
+]

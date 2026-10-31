@@ -1,0 +1,59 @@
+ pxxxxxxp
+ xxxxxxxx
+ xxxxxxxx
+ xxxxxxxx
+ xxxxxxxx
+ xxxxxxxx
+ xxxxxxxx
+ xxxxxxxx
+ pxxxxxxp
+
+ xxxxxxxx
+ x      x
+ x      x
+ x      x
+ x      x
+ x      x
+ x      x
+rd      x
+ xxxxxxxx
+
+ xxxxxxxx
+ x      x
+ x      x
+ x      x
+ x      x
+ x      x
+ x      x
+ d      x
+ xxxxxxxx
+
+ xvvvvvvx
+ >      <
+ >      <
+ >      <
+ >      <
+ >      <
+ >      <
+ >      <
+ x^^^^^^x
+
+ x      x
+  xxxxxx
+  x    x
+  x    x
+  x    x
+  x    x
+  x    x
+  xxxxxx
+ x      x
+
+ x      x
+  xxxxxx
+  x    x
+  x    x
+  x    x
+  x    x
+  x    x
+  xxxxxx
+ x      x

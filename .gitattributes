@@ -1,0 +1,11 @@
+# Game data: stored byte for byte. The .ini and Structures/*.txt files are
+# CRLF and the loaders rely on '\r' (core.autocrlf=input would strip it).
+data/** -text
+data/**/*.bmp binary
+data/**/*.BMP binary
+data/**/*.wav binary
+data/**/*.cob binary
+data/**/*.pix binary
+data/**/*.PIX binary
+data/**/*.pxr binary
+*.ico binary

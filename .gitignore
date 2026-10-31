@@ -1,2 +1,5 @@
 .svn/
 build/
+dist/
+.DS_Store
+CMakeUserPresets.json

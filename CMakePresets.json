@@ -1,0 +1,41 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "unix-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "condition": { "type": "notEquals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+    },
+    { "name": "macos-debug",   "inherits": "unix-base", "displayName": "macOS Debug",   "binaryDir": "${sourceDir}/build/macos-debug",   "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" },   "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" } },
+    { "name": "macos-release", "inherits": "unix-base", "displayName": "macOS Release", "binaryDir": "${sourceDir}/build/macos-release", "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }, "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" } },
+    { "name": "linux-debug",   "inherits": "unix-base", "displayName": "Linux Debug",   "binaryDir": "${sourceDir}/build/linux-debug",   "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" },   "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" } },
+    { "name": "linux-release", "inherits": "unix-base", "displayName": "Linux Release", "binaryDir": "${sourceDir}/build/linux-release", "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }, "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" } },
+    {
+      "name": "windows-vs",
+      "displayName": "Windows (Visual Studio, Win32)",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "Win32",
+      "binaryDir": "${sourceDir}/build/windows-vs",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+    },
+    {
+      "name": "windows-vs2019",
+      "inherits": "windows-vs",
+      "displayName": "Windows (Visual Studio 2019, Win32)",
+      "generator": "Visual Studio 16 2019",
+      "binaryDir": "${sourceDir}/build/windows-vs2019"
+    }
+  ],
+  "buildPresets": [
+    { "name": "macos-debug",     "configurePreset": "macos-debug" },
+    { "name": "macos-release",   "configurePreset": "macos-release" },
+    { "name": "linux-debug",     "configurePreset": "linux-debug" },
+    { "name": "linux-release",   "configurePreset": "linux-release" },
+    { "name": "windows-debug",   "configurePreset": "windows-vs", "configuration": "Debug" },
+    { "name": "windows-release", "configurePreset": "windows-vs", "configuration": "Release" },
+    { "name": "windows-vs2019-debug",   "configurePreset": "windows-vs2019", "configuration": "Debug" },
+    { "name": "windows-vs2019-release", "configurePreset": "windows-vs2019", "configuration": "Release" }
+  ]
+}
