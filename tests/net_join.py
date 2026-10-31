@@ -4,8 +4,10 @@
 REQUESTENTER -> ENTER, reliable PORTACK on the per-client port, then PLAYERNAMES,
 LANDINFO, BLOCKS, SERVEROBJECTSNAPSHOT, SERVERVARS, REMOTEGAMEDATA and JOINGAME,
 each acknowledged like the game does. Checks sizes and decoded values, then sends
-truncated versions of the parsed messages and checks the server survives."""
-import math, socket, struct, sys, time
+truncated versions of the parsed messages and checks the server survives.
+NET_JOIN_DUMP=<dir> also saves every message and datagram received there
+(seeds for tests/fuzz, and what tests/net_map.py checks)."""
+import math, os, socket, struct, sys, time
 
 SERVER = ("127.0.0.1", 27020)
 REQUESTENTER, INFO, PLAYERPOSITION, LANDINFO, BLOCKS, CHATMESSAGE = 1, 2, 3, 4, 7, 8
@@ -98,6 +100,7 @@ body = struct.pack("<HHI", 1, 0, len(payload)) + payload
 s.sendto(bytes([LASTRELIABLE]) + checksum(body) + body, client)
 
 got = {}            # type -> list of messages
+raw = []            # datagrams, as received
 parts = {}
 lastid = 0
 end = time.time() + 15
@@ -106,6 +109,7 @@ while time.time() < end and not any(len(m) >= 12 and m[1] == JOINGAME and
     data, addr = recv(0.5)
     if not data:
         continue
+    raw.append(data)
     kind = data[0]
     if kind in (RELIABLE, LASTRELIABLE) and len(data) >= 9:
         body = data[5:]
@@ -133,6 +137,17 @@ while time.time() < end and not any(len(m) >= 12 and m[1] == JOINGAME and
                 if m[0] == SIMPLE and len(m) >= 12 and m[1] == PING:
                     (pid,) = struct.unpack_from("<I", m, 4)
                     s.sendto(packet(simple(13, pid, 0)), client)
+
+dump = os.environ.get("NET_JOIN_DUMP")
+if dump:
+    os.makedirs(dump, exist_ok=True)
+    for t, msgs in got.items():
+        for i, m in enumerate(msgs):
+            with open(os.path.join(dump, "msg-%d-%d.bin" % (t, i)), "wb") as f:
+                f.write(m)
+    for i, d in enumerate(raw):
+        with open(os.path.join(dump, "datagram-%d.bin" % i), "wb") as f:
+            f.write(d)
 
 ok = True
 

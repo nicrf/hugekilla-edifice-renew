@@ -14,6 +14,10 @@
 #include "ui.h"
 #include "voice.h"
 #include <SDL.h>
+#ifndef _WIN32
+#include <dirent.h>
+#include <sys/stat.h>
+#endif
 
 extern GraphicsPrefs graphicsprefs;
 extern DWORD curtime;
@@ -364,6 +368,73 @@ const char *UserFile(const char *name)
 	return p;
 }
 
+// Files of the user folder (maps) with UTF-8 paths: SDL_GetPrefPath is UTF-8,
+// which the ANSI file functions of Windows don't take.
+#ifdef _WIN32
+static int Utf8ToWide(const char *in, wchar_t *out, int outsize)
+{
+	return MultiByteToWideChar(CP_UTF8, 0, in, -1, out, outsize) > 0;
+}
+#endif
+
+FILE *HKFileOpen(const char *path, const char *mode)
+{
+#ifdef _WIN32
+	wchar_t wpath[1200], wmode[8];
+	if (!Utf8ToWide(path, wpath, 1200) || !Utf8ToWide(mode, wmode, 8)) return 0;
+	return _wfopen(wpath, wmode);
+#else
+	return fopen(path, mode);
+#endif
+}
+
+int HKMakeDir(const char *path)
+{
+#ifdef _WIN32
+	wchar_t wpath[1200];
+	if (!Utf8ToWide(path, wpath, 1200)) return 0;
+	DWORD attr = GetFileAttributesW(wpath);
+	if (attr != INVALID_FILE_ATTRIBUTES) return (attr & FILE_ATTRIBUTE_DIRECTORY) != 0;
+	return CreateDirectoryW(wpath, 0) != 0;
+#else
+	struct stat st;
+	if (stat(path, &st) == 0) return S_ISDIR(st.st_mode);
+	return mkdir(path, 0755) == 0;
+#endif
+}
+
+int HKListDir(const char *dir, char (*names)[64], int max)
+{
+	int n = 0;
+#ifdef _WIN32
+	char pattern[1200];
+	wchar_t wpattern[1200];
+	snprintf(pattern, sizeof(pattern), "%s\\*", dir);
+	if (!Utf8ToWide(pattern, wpattern, 1200)) return 0;
+	WIN32_FIND_DATAW fd;
+	HANDLE find = FindFirstFileW(wpattern, &fd);
+	if (find == INVALID_HANDLE_VALUE) return 0;
+	do
+	{
+		if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+		if (WideCharToMultiByte(CP_UTF8, 0, fd.cFileName, -1, names[n], 64, 0, 0) > 0) n++;
+	}
+	while (n < max && FindNextFileW(find, &fd));
+	FindClose(find);
+#else
+	DIR *d = opendir(dir);
+	if (!d) return 0;
+	while (struct dirent *ent = readdir(d))
+	{
+		if (n >= max) break;
+		if (ent->d_name[0] == '.' || strlen(ent->d_name) >= 64) continue;
+		strcpy(names[n++], ent->d_name);
+	}
+	closedir(d);
+#endif
+	return n;
+}
+
 static void EnterDataDir(int argc, char **argv)
 {
 	const char *candidates[4] = {0, 0, 0, 0};
@@ -477,7 +548,17 @@ int main(int argc, char **argv)
 	PlaySound(0, 1);
 
 	// Debug aid: HK_AUTOSTART=1 starts a local server right away.
-	if (getenv("HK_AUTOSTART")) StartServer();
+	if (getenv("HK_AUTOSTART"))
+	{
+		// HK_MAPFILE=<path to a .map>: the server starts with this map instead of a random land
+		char err[300];
+		const char *map = getenv("HK_MAPFILE");
+		if (!map || !LoadMapPath(map, err, sizeof(err)))
+		{
+			if (map) fprintf(stderr, "HK_MAPFILE: %s\n", err);
+			StartServer();
+		}
+	}
 	// Debug aid: HK_ZOOM_TEST=1 queues real SDL events: Q down, a little mouse
 	// jitter, Q up, through the same path as the keyboard (quick x3 zoom).
 	if (getenv("HK_ZOOM_TEST"))

@@ -4,7 +4,8 @@
 // Bump EDIFICE_PROTOCOL_VERSION in the same commit as any change that breaks
 // play between two builds:
 //  - format, id or meaning of a network message (its Sync*/Write*/Read* function
-//    in multiplay.cpp or sock.cpp), or of a ServerVars field;
+//    in netmsg.h, landwire.h or sock.cpp), or of a ServerVars field; the map files
+//    (src/game/mapfile.h) have their own format version;
 //  - land/scenery generation or its random numbers (both sides must build the
 //    same world from the same LandDefs);
 //  - quantization, tick rate, transport;

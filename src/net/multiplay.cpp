@@ -20,6 +20,7 @@
 #include "sock.h"
 #include "version.h"
 #include "wire.h"
+#include "netmsg.h"
 #include "ui.h"
 #include "voice.h"
 #define MAXLOCALLIST 128
@@ -94,56 +95,7 @@ SOCKADDR_IN MakeSockAddr(char a1,char a2,char a3,char a4,WORD port)
 	return addr;
 }
 
-//---- game/protocol version (src/net/version.h) ----
-
-int WriteVersionTrailer(char *buf)
-{
-	ByteWriter w(buf,VERSIONTRAILER_MAX);
-	w.U32(EDIFICE_NET_MAGIC);
-	w.U16(EDIFICE_PROTOCOL_VERSION);
-	w.U32(EDIFICE_NET_LAYOUT);   //fixed since protocol 4 (explicit serialization)
-	int n=strlen(EDIFICE_VERSION_STRING);
-	if(n>15) n=15;
-	w.U8(n);
-	w.Bytes(EDIFICE_VERSION_STRING,n);
-	return w.Size();
-}
-
-void ReadVersionTrailer(const char *buf,int len,PeerVersion *out)
-{
-	const unsigned char *p=(const unsigned char *)buf;
-	memset(out,0,sizeof(*out));
-	out->protocol=1;
-	strcpy(out->version,"old");
-	if(len<11) return;
-	unsigned int magic=p[0]|(p[1]<<8)|(p[2]<<16)|((unsigned int)p[3]<<24);
-	if(magic!=EDIFICE_NET_MAGIC) return;
-	out->present=1;
-	out->protocol=p[4]|(p[5]<<8);
-	out->layout=p[6]|(p[7]<<8)|(p[8]<<16)|((unsigned int)p[9]<<24);
-	int n=p[10];
-	if(n>15) n=15;
-	if(n>len-11) n=len-11;
-	for(int i=0;i<n;i++)
-		out->version[i]=(p[11+i]>=32&&p[11+i]<127)?p[11+i]:'?';
-	out->version[n]=0;
-}
-
-int VersionCompatible(const PeerVersion *peer,char *reason,int reasonsize)
-{
-	//the protocol alone decides: messages no longer depend on the struct layout,
-	//so peer->layout is informative (older protocols still differ by protocol)
-	if(peer->present&&peer->protocol==EDIFICE_PROTOCOL_VERSION)
-	{
-		if(reasonsize) reason[0]=0;
-		return 1;
-	}
-	if(!peer->present)
-		snprintf(reason,reasonsize,"original game (p1), you %s p%d",EDIFICE_VERSION_STRING,EDIFICE_PROTOCOL_VERSION);
-	else
-		snprintf(reason,reasonsize,"other %s p%d, you %s p%d",peer->version,peer->protocol,EDIFICE_VERSION_STRING,EDIFICE_PROTOCOL_VERSION);
-	return 0;
-}
+//---- game/protocol version: src/net/version.h, version.cpp ----
 
 //client asks infosock.dest to join, with its version
 static void SendRequestEnter()
@@ -220,235 +172,7 @@ static int ValidWeapon(int n)
 	return n>=0&&n<10;
 }
 
-//keeps a file name received from the network inside the textures folder
-static void SanitizeNetFileName(char *name,int size)
-{
-	name[size-1]=0;
-	if(strstr(name,"..")||strchr(name,'/')||strchr(name,'\\')||strchr(name,':'))
-		name[0]=0;
-}
-
-//---- wire format of each message (roadmap M6, src/net/wire.h) ----
-//No struct is copied onto or off the wire: Sync<msg> lists the fields once, in
-//order, and WIREPAIR makes Write<msg> (returns the size, 0 if it doesn't fit)
-//and Read<msg> (returns 0 for a short, malformed message) from it.
-//Little-endian, floats as IEEE 754 bits, no padding; the type byte comes first.
-
-template<class IO> static void SyncVec(IO &io,Vector &v)
-{
-	io.f32(v.x);
-	io.f32(v.y);
-	io.f32(v.z);
-}
-
-#define WIREPAIR(name,T) \
-static int Write##name(void *buf,int size,T *s) { ByteWriter w(buf,size); Sync##name(w,*s); return w.Ok()?w.Size():0; } \
-static int Read##name(const void *buf,int len,T *s) { ByteReader r(buf,len); Sync##name(r,*s); return r.Ok(); }
-
-//PLAYERPOSITION, 16 bytes
-template<class IO> static void SyncPosition(IO &io,PlayerPosition &p)
-{
-	io.i8(p.type);
-	io.i8(p.pnum);
-	io.i8(p.weapon);
-	io.i8(p.keys);
-	io.i8(p.state);
-	io.u8(p.fwd);
-	io.u8(p.tilt);
-	io.u16(p.posx);
-	io.u16(p.posy);
-	io.u16(p.posz);
-	io.i8(p.velx);
-	io.i8(p.vely);
-	io.i8(p.velz);
-}
-WIREPAIR(Position,PlayerPosition)
-#define POSITIONSIZE 16
-
-//FIREGUN, 27 bytes
-template<class IO> static void SyncFireGun(IO &io,FireGunDirection &f)
-{
-	io.i8(f.type);
-	io.i8(f.pnum);
-	io.i8(f.reload);
-	SyncVec(io,f.dir);
-	SyncVec(io,f.pos);
-}
-WIREPAIR(FireGun,FireGunDirection)
-#define FIREGUNSIZE 27
-
-//KILLEDPOSITION, 15 bytes
-template<class IO> static void SyncKilledPosition(IO &io,KilledPosition &k)
-{
-	io.i8(k.type);
-	io.i8(k.killed);
-	io.i8(k.killer);
-	SyncVec(io,k.pos);
-}
-WIREPAIR(KilledPosition,KilledPosition)
-#define KILLEDPOSITIONSIZE 15
-
-//a server object, 43 bytes; timeout stays on the server
-template<class IO> static void SyncServerObject(IO &io,ServerObject &o)
-{
-	io.i8(o.type);
-	SyncVec(io,o.pos);
-	SyncVec(io,o.dir);
-	SyncVec(io,o.vel);
-	io.i8(o.team);
-	io.i8(o.attached);
-	io.f32(o.speedpenalty);
-}
-#define SERVEROBJECTSIZE 43
-
-//UPDATESERVEROBJECT: type, int32 num, object
-template<class IO> static void SyncUpdateServerObject(IO &io,UpdateServerObject &u)
-{
-	io.i8(u.type);
-	io.i32(u.num);
-	SyncServerObject(io,u.updated);
-}
-WIREPAIR(UpdateServerObject,UpdateServerObject)
-#define UPDATESERVEROBJECTSIZE (5+SERVEROBJECTSIZE)
-
-//SERVEROBJECTSNAPSHOT: type, then every server object
-struct ServerObjectSnapshot
-{
-	char type;
-	ServerObject obj[MAXSERVEROBJS];
-};
-template<class IO> static void SyncSnapshot(IO &io,ServerObjectSnapshot &s)
-{
-	io.i8(s.type);
-	for(int i=0;i<MAXSERVEROBJS;i++) SyncServerObject(io,s.obj[i]);
-}
-WIREPAIR(Snapshot,ServerObjectSnapshot)
-#define SNAPSHOTSIZE (1+MAXSERVEROBJS*SERVEROBJECTSIZE)
-
-//SERVERVARS: type, then the fields of ServerVars in declaration order
-struct ServerVarsMessage
-{
-	char type;
-	ServerVars v;
-};
-template<class IO> static void SyncServerVars(IO &io,ServerVarsMessage &m)
-{
-	ServerVars &v=m.v;
-	io.i8(m.type);
-	io.f32(v.walkaccelerate);
-	io.f32(v.strafeaccelerate);
-	io.f32(v.resistance);
-	io.f32(v.stopresistance);
-	io.f32(v.gravity);
-	io.i32(v.chopperthrust);
-	io.i32(v.radarenable);
-	io.i32(v.gattimeout);
-	io.i32(v.m16timeout);
-	io.i32(v.steyrtimeout);
-	io.i32(v.umptimeout);
-	io.i32(v.grenadetimeout);
-	io.i32(v.berettatimeout);
-	io.i32(v.sr1000timeout);
-	io.i32(v.grenadeexplodetime);
-	io.i32(v.gatammohold);
-	io.i32(v.m16ammohold);
-	io.i32(v.steyrammohold);
-	io.i32(v.umpammohold);
-	io.i32(v.grenadeammohold);
-	io.i32(v.berettaammohold);
-	io.i32(v.sr1000ammohold);
-	io.i32(v.gatreloadtime);
-	io.i32(v.m16reloadtime);
-	io.i32(v.steyrreloadtime);
-	io.i32(v.umpreloadtime);
-	io.i32(v.grenadereloadtime);
-	io.i32(v.berettareloadtime);
-	io.i32(v.sr1000reloadtime);
-	io.f32(v.gatspeed);
-	io.f32(v.m16speed);
-	io.f32(v.steyrspeed);
-	io.f32(v.umpspeed);
-	io.f32(v.grenadespeed);
-	io.f32(v.berettaspeed);
-	io.f32(v.sr1000speed);
-	io.f32(v.highbulletdamage);
-	io.f32(v.lowbulletdamage);
-	io.f32(v.grenadedamage);
-	io.f32(v.scale);
-	io.f32(v.thrustrechargerate);
-	io.f32(v.thrustuse);
-	io.i32(v.capturelimit);
-	io.i32(v.timelimit);
-	io.i32(v.gamemode);
-	io.i32(v.positionresendtime);
-}
-WIREPAIR(ServerVars,ServerVarsMessage)
-#define SERVERVARSSIZE (1+46*4)
-static_assert(sizeof(ServerVars)==46*4,"ServerVars changed: update SyncServerVars and bump the protocol");
-
-//REMOTEGAMEDATA: type, int32 gamestate
-struct RemoteGameDataMessage
-{
-	char type;
-	RemoteGameData d;
-};
-template<class IO> static void SyncRGD(IO &io,RemoteGameDataMessage &m)
-{
-	io.i8(m.type);
-	io.i32(m.d.gamestate);
-}
-WIREPAIR(RGD,RemoteGameDataMessage)
-#define RGDSIZE 5
-
-//LANDINFO: type, LandDefs (every deformation), SkySettings
-template<class IO> static void SyncLandInfo(IO &io,LandInfo &l)
-{
-	io.i8(l.type);
-	LandDefs &d=l.ldfs;
-	io.i32(d.numdefs);
-	for(int i=0;i<NUMDEF;i++)
-	{
-		LandDeformation &df=d.df[i];
-		io.i8(df.type);
-		io.i32(df.sx);
-		io.i32(df.sy);
-		io.i32(df.sh);
-		io.i32(df.sw);
-		io.f32(df.sc);
-		io.f32(df.sd);
-		io.f32(df.sf);
-	}
-	for(int t=0;t<9;t++) io.str(d.groundtex[t],sizeof(d.groundtex[t]));
-	io.i32(d.numgroundtex);
-	io.u32(d.randomseed);
-	io.u32(d.numscenery);
-	io.u32(d.numblotch);
-	SkySettings &k=l.skysets;
-	io.f32(k.sunheight);
-	io.f32(k.fogr);
-	io.f32(k.fogg);
-	io.f32(k.fogb);
-	io.f32(k.cloudvelx);
-	io.f32(k.cloudvely);
-	io.f32(k.cloudmistvelx);
-	io.f32(k.cloudmistvely);
-	io.f32(k.sunskylight);
-	io.f32(k.suneyelight);
-	io.f32(k.fogbegin);
-	io.i32(k.uselandclouds);
-	io.i32(k.lightning);
-	io.i32(k.usemist);
-	io.i32(k.precipitation);
-	io.f32(k.mistopacity);
-	io.f32(k.cloudheight);
-	io.str(k.cloudtex,sizeof(k.cloudtex));
-	io.str(k.misttex,sizeof(k.misttex));
-	io.str(k.sound,sizeof(k.sound));
-	io.i32(k.numlillypad);
-}
-WIREPAIR(LandInfo,LandInfo)
-#define LANDINFOSIZE (1+4+NUMDEF*29+9*60+4*4+17*4+3*60+4)
-static_assert(sizeof(SkySettings)==17*4+3*60+4,"SkySettings changed: update SyncLandInfo and bump the protocol");
+//wire format of each message: src/net/netmsg.h
 
 //PLAYERNAMES: uint8 count, then per player: uint8 number, int32 kills,
 //int32 deaths, int8 team, uint8 name length (<=31), name
@@ -463,20 +187,6 @@ static void WritePlayerName(ByteWriter &w,int i)
 	w.U8((unsigned char)pl->team);
 	w.U8(namelen);
 	w.Bytes(pl->name,namelen);
-}
-#define PLAYERNAMESIZE (11+31)
-
-//REQUESTENTER and INFO: type, uint8 n, name[n], NUL, version trailer (version.h).
-//Copies the name (at most namesize-1 bytes, up to a NUL) and returns the offset
-//of the trailer.
-static int ReadHelloName(const char *msg,int msglen,char *name,int namesize)
-{
-	int n=msglen>=2?(unsigned char)msg[1]:0;
-	if(n>namesize-1) n=namesize-1;
-	int i;
-	for(i=0;i<n&&2+i<msglen&&msg[2+i];i++) name[i]=msg[2+i];
-	name[i]=0;
-	return 2+n+1;
 }
 
 void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pnum);
@@ -548,11 +258,14 @@ void StartServer()
 	ConsoleDisplayText("Started server");
 	RedrawSplash(800,"Loading Textures");
 	LoadTextures();
-	RedrawSplash(800,"Loading Sky");
-	LoadSky();
-	RedrawSplash(800,"Creating Land");
-	RandomLand(ldfs);
-	CreateLand(ldfs);
+	if(!StartServerMap())   //a saved map chosen by loadmap or Server Setup (hugekilla.cpp)
+	{
+		RedrawSplash(800,"Loading Sky");
+		LoadSky();
+		RedrawSplash(800,"Creating Land");
+		RandomLand(ldfs);
+		CreateLand(ldfs);
+	}
 
 	consolevisible=0;
 	strcpy(GetLocalPlayer()->name,netsettings.playername);
@@ -1193,48 +906,9 @@ void ClientLoop()
 					
 					static LandInfo landinfo;
 					if(!ReadLandInfo(&msg,msglen,&landinfo)) break;
-					LandInfo *linfo=&landinfo;
 					//bound everything the land builder uses as a count or a file name
-					LandDefs *ld=&linfo->ldfs;
-					if(ld->numdefs<0) ld->numdefs=0;
-					if(ld->numdefs>NUMDEF-1) ld->numdefs=NUMDEF-1;
-					if(ld->numgroundtex<0) ld->numgroundtex=0;
-					if(ld->numgroundtex>9) ld->numgroundtex=9;
-					for(int t=0;t<9;t++) SanitizeNetFileName(ld->groundtex[t],sizeof(ld->groundtex[t]));
-					if(ld->numscenery>1000) ld->numscenery=1000;
-					if(ld->numblotch>2000) ld->numblotch=2000;
-					SkySettings *ss=&linfo->skysets;
-					SanitizeNetFileName(ss->cloudtex,sizeof(ss->cloudtex));
-					SanitizeNetFileName(ss->misttex,sizeof(ss->misttex));
-					SanitizeNetFileName(ss->sound,sizeof(ss->sound));
-					CopyMemory(GetDefs(),&linfo->ldfs,sizeof(linfo->ldfs));
-					RedrawSplash(800,"Loading Textures");
-					LoadTextures();
-					RedrawSplash(800,"Loading Sky");
-					CopyMemory(GetSkySettings(),&linfo->skysets,sizeof(SkySettings));
-					//the sky's ambient sound, as LoadSky does on the server
-					if(strlen(GetSkySettings()->sound))
-					{
-						char soundname[200];
-						snprintf(soundname,sizeof(soundname),"sound\\%s",GetSkySettings()->sound);
-						LoadSound(soundname,0,0);
-						PlaySound(0,1);
-					}
-					char fullfilename[400];
-					if(strlen(GetSkySettings()->cloudtex))
-					{
-						strcpy(fullfilename,"textures\\clouds\\");
-						strcat(fullfilename,GetSkySettings()->cloudtex);
-						LoadTexture(fullfilename,2);
-					}
-					if(strlen(GetSkySettings()->misttex))
-					{
-						strcpy(fullfilename,"textures\\clouds\\");
-						strcat(fullfilename,GetSkySettings()->misttex);
-						LoadTexture(fullfilename,6);
-					}
-					RedrawSplash(800,"Creating Land");
-					CreateLand(*GetDefs());
+					SanitizeLandInfo(&landinfo.ldfs,&landinfo.skysets);
+					ApplyLand(&landinfo.ldfs,&landinfo.skysets);
 					for(int i=0;i<numplayers;i++)
 					{
 						GetPlayer(i)->playstate=1;
@@ -1275,24 +949,16 @@ void ClientLoop()
 				}
 			case PLAYERNAMES:
 				{
-					ByteReader r(&msg,msglen);
-					r.U8();   //type
-					int numnames=r.U8();
-					if(!r.Ok()) break;
-					if(numnames>MAXPLAYERS) numnames=MAXPLAYERS;
+					PlayerNameEntry entries[MAXPLAYERS];
+					int numnames=ReadPlayerNames(&msg,msglen,entries,MAXPLAYERS);
 					for(int i=0;i<numnames;i++)
 					{
-						int playernum=r.U8();
-						int kills=r.I32();
-						int deaths=r.I32();
-						char team=(char)r.U8();
-						int namelen=r.U8();
-						if(!r.Ok()||!ValidPlayer(playernum)||namelen>31||namelen>r.Left()) break;
-						GetPlayer(playernum)->kills=kills;
-						GetPlayer(playernum)->deaths=deaths;
-						GetPlayer(playernum)->team=team;
-						r.Bytes(GetPlayer(playernum)->name,namelen);
-						GetPlayer(playernum)->name[namelen]=0;
+						int playernum=entries[i].num;
+						if(!ValidPlayer(playernum)) break;
+						GetPlayer(playernum)->kills=entries[i].kills;
+						GetPlayer(playernum)->deaths=entries[i].deaths;
+						GetPlayer(playernum)->team=entries[i].team;
+						strcpy(GetPlayer(playernum)->name,entries[i].name);
 						if(playernum>=numplayers) 
 						{
 							char message[1000];
@@ -1740,6 +1406,42 @@ void DeletePlayer(int num,int reason)
 
 //sends the land information necessary to construct the same landscape
 
+//builds the land described by LandDefs and SkySettings (already sanitized:
+//SanitizeLandInfo): what a client does on LANDINFO, and the server when it
+//loads a map (src/game/mapfile.h). The blocks are cleared.
+
+void ApplyLand(const LandDefs *defs,const SkySettings *sky)
+{
+	CopyMemory(GetDefs(),defs,sizeof(LandDefs));
+	RedrawSplash(800,"Loading Textures");
+	LoadTextures();
+	RedrawSplash(800,"Loading Sky");
+	CopyMemory(GetSkySettings(),sky,sizeof(SkySettings));
+	//the sky's ambient sound, as LoadSky does on the server
+	if(strlen(GetSkySettings()->sound))
+	{
+		char soundname[200];
+		snprintf(soundname,sizeof(soundname),"sound\\%s",GetSkySettings()->sound);
+		LoadSound(soundname,0,0);
+		PlaySound(0,1);
+	}
+	char fullfilename[400];
+	if(strlen(GetSkySettings()->cloudtex))
+	{
+		strcpy(fullfilename,"textures\\clouds\\");
+		strcat(fullfilename,GetSkySettings()->cloudtex);
+		LoadTexture(fullfilename,2);
+	}
+	if(strlen(GetSkySettings()->misttex))
+	{
+		strcpy(fullfilename,"textures\\clouds\\");
+		strcat(fullfilename,GetSkySettings()->misttex);
+		LoadTexture(fullfilename,6);
+	}
+	RedrawSplash(800,"Creating Land");
+	CreateLand(*GetDefs());
+}
+
 void SendLandInfo(int num)
 {
 	static LandInfo landinfo;
@@ -1972,39 +1674,21 @@ void ReceiveBlockBuffer(char *buf,int pnum,int len)
 	}
 	GiveCredit(pnum,0,-1);
 						
-	int pos=0;
-	DWORD numblocks=WireGetU32(&buf[1]);   //len>=5 checked above
-	if(numblocks>(DWORD)(len-5)/9) numblocks=(len-5)/9;   //9 bytes per block
-	pos=5;
+	int numblocks=ReadBlocksCount(buf,len);   //bounded by len (netmsg.h)
+	int pos=BLOCKSHEADERSIZE+numblocks*BLOCKEDITSIZE;
 	int i;
 	for(i=0;i<numblocks;i++)
 	{
-		char x,y,z,type,team,top,side,bottom,del;
-		x=buf[pos];
-		pos++;
-		y=buf[pos];
-		pos++;
-		z=buf[pos];
-		pos++;
-		type=buf[pos];
-		pos++;
-		team=buf[pos];
-		pos++;
-		top=buf[pos];
-		pos++;
-		side=buf[pos];
-		pos++;
-		bottom=buf[pos];
-		pos++;
-		del=buf[pos];
-		pos++;
-		if(del)
+		BlockEdit b;
+		ReadBlockEdit(buf,i,&b);
+		if(!ValidBlockEdit(&b)) continue;   //type or texture the renderer can't index
+		if(b.del)
 		{
-			DeleteBlock(x,y,z);
+			DeleteBlock(b.x,b.y,b.z);
 		}
 		else
 		{
-			AddBlock(x,y,z,type,top,side,bottom);
+			AddBlock(b.x,b.y,b.z,b.type,b.top,b.side,b.bottom);
 		}
 	}
 	if(server)
@@ -2039,25 +1723,21 @@ int SendMultMessage(const void *msg,int len,int player=-1)
 //msglen: size of the message, type included
 void ReceiveChatMessage(char *msg,int msglen)
 {
-	ByteReader r(msg,msglen);
-	r.U8();   //type
-	char dest=(char)r.U8();
-	int sender=r.U8();
-	WORD len=r.U16();
-	if(!r.Ok()) return;
+	ChatMessage chat;
+	if(!ReadChat(msg,msglen,&chat)) return;
+	char dest=chat.dest;
+	int sender=chat.sender;
+	int len=chat.len;
 	//score, objective and info lines come from the server only
 	if(server&&sender&&dest!=CMSG_BROADCAST&&dest!=CMSG_TEAM) return;
 	//if(server==1&&(dest!=CMSG_BROADCAST&&dest!=CMSG_TEAM)) return;
 	
 
 
-	char chatmessage[1000];
+	char *chatmessage=chat.text;
+#ifdef HK_WIN32_NATIVE
 	char message[1000];
-	
-	if(len>255) len=255;
-	if(len>r.Left()) len=r.Left();
-	r.Bytes(chatmessage,len);
-	chatmessage[len]=0;
+#endif
 
 	if(dest==CMSG_BROADCAST||dest==CMSG_TEAM)
 	{

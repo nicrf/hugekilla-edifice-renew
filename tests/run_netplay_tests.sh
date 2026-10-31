@@ -22,12 +22,20 @@ export ASAN_OPTIONS=detect_leaks=0
 export HK_AUTOSTART=1 HK_SHOT=/dev/null HK_SHOT_FRAME=999999
 
 status=0
-for t in net_handshake net_identity net_join net_fuzz net_voice; do
+for t in net_handshake net_identity net_join net_fuzz net_voice net_map; do
 	log="$LOGDIR/$t.log"
-	"$BIN" >"$log" 2>&1 &
+	args=()
+	if [ "$t" = net_map ]; then
+		# a server started with a saved map (HK_MAPFILE), written by the test itself
+		python3 tests/net_map.py --write "$LOGDIR/test.map" || status=1
+		args=("$LOGDIR/test.map")
+		HK_MAPFILE="$LOGDIR/test.map" "$BIN" >"$log" 2>&1 &
+	else
+		"$BIN" >"$log" 2>&1 &
+	fi
 	pid=$!
 	echo "== $t"
-	python3 "tests/$t.py" || status=1
+	python3 "tests/$t.py" "${args[@]+"${args[@]}"}" || status=1
 	if ! kill -0 "$pid" 2>/dev/null; then
 		echo "server died during $t"
 		status=1

@@ -21,6 +21,7 @@ int GPlayerChangeTeam(int num,int team);
 void GTick();
 void GPlayerLeave(int num);
 void GReset();
+void GRestartPlayers();
 int GCanClaimObject(int pnum,int sonum);
 int GClaimObject(int pnum,int sonum);
 int GDropObject(int pnum,int sonum);

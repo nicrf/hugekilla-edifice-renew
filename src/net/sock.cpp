@@ -58,7 +58,7 @@ void Sock::Flush()
 {
 	sendbuf.type=0;
 	if(!sendbufpos) return;
-	int sent=sendto(sock,(char *)&sendbuf,sendbufpos+1,0,(SOCKADDR*)&dest,sizeof(dest));
+	if(sock) sendto(sock,(char *)&sendbuf,sendbufpos+1,0,(SOCKADDR*)&dest,sizeof(dest));
 	packetssent++;
 	datasendthissec+=sendbufpos+1+16;
 	datasendthisframe+=sendbufpos+1+16;
@@ -84,7 +84,7 @@ int Sock::Send(const void *data,int size)
 int Sock::Receive(void *data,SOCKADDR_IN *source,int maxsize)
 {
 	fromack=0;
-	if(!sock) return 0;
+	if(!sock&&!feeddata) return 0;
 	for(;;)
 	{
 		//messages left from the last complete reliable transfer
@@ -119,21 +119,33 @@ int Sock::Receive(void *data,SOCKADDR_IN *source,int maxsize)
 		}
 
 		//next datagram
-		fd_set recv;
-		FD_ZERO(&recv);
-		FD_SET(sock,&recv);
-		timeval tm;
-		tm.tv_sec=0;
-		tm.tv_usec=0;
-		int readit;
-		readit=select(sock+1,&recv,0,0,&tm);
-		if(readit<=0) return 0;
+		int received;
+		if(feeddata)
+		{
+			//as recvfrom: a datagram larger than the buffer is cut; source is left as is
+			received=feedsize<(int)sizeof(recvbuf)?feedsize:(int)sizeof(recvbuf);
+			if(received>0) CopyMemory(&recvbuf,feeddata,received);
+			feeddata=0;
+		}
+		else
+		{
+			if(!sock) return 0;
+			fd_set recv;
+			FD_ZERO(&recv);
+			FD_SET(sock,&recv);
+			timeval tm;
+			tm.tv_sec=0;
+			tm.tv_usec=0;
+			int readit;
+			readit=select(sock+1,&recv,0,0,&tm);
+			if(readit<=0) return 0;
 #ifdef _WIN32
-		int addrsize=sizeof(SOCKADDR_IN);
+			int addrsize=sizeof(SOCKADDR_IN);
 #else
-		socklen_t addrsize=sizeof(SOCKADDR_IN);
+			socklen_t addrsize=sizeof(SOCKADDR_IN);
 #endif
-		int received=recvfrom(sock,(char *)&recvbuf,sizeof(recvbuf),0,(SOCKADDR*)source,&addrsize);
+			received=recvfrom(sock,(char *)&recvbuf,sizeof(recvbuf),0,(SOCKADDR*)source,&addrsize);
+		}
 		packetsreceived++;
 		if(received<=0) return 0;
 		//once connected, only the peer's IP is listened to (any port: NATs may change it)
@@ -206,7 +218,7 @@ int Sock::Receive(void *data,SOCKADDR_IN *source,int maxsize)
 			buf ack;
 			ack.type=ACK;
 			memcpy(&ack.data[0],&recvbuf.data[4],4);   //id, part number
-			sendto(sock,(char *)&ack,1+4,0,(SOCKADDR *)&dest,sizeof(SOCKADDR));
+			if(sock) sendto(sock,(char *)&ack,1+4,0,(SOCKADDR *)&dest,sizeof(SOCKADDR));
 			packetssent++;
 			WORD id=WireGetU16(&recvbuf.data[4]);
 			if(id!=(WORD)(lastreliableid+1))   //WORD: keeps working after 65535 transfers
@@ -241,7 +253,7 @@ int Sock::Receive(void *data,SOCKADDR_IN *source,int maxsize)
 
 void Sock::ResendReliable(rbuf *curbuf)
 {
-	sendto(sock,(char *)&curbuf->data,curbuf->size,0,(SOCKADDR*)&dest,sizeof(dest));
+	if(sock) sendto(sock,(char *)&curbuf->data,curbuf->size,0,(SOCKADDR*)&dest,sizeof(dest));
 	packetssent++;
 	datasendthissec+=RELIABLEPACKETSIZE+1+16;
 	datasendthisframe+=RELIABLEPACKETSIZE+1+16;
