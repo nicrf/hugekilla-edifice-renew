@@ -1,0 +1,24 @@
+# edifice-lobby with Docker Compose:
+#   cp .env.example .env   (then edit it)
+#   docker compose up -d --build
+services:
+  lobby:
+    build: .
+    image: edifice-lobby
+    restart: unless-stopped
+    environment:
+      EDIFICE_PUBLIC_HOST: ${EDIFICE_PUBLIC_HOST:?set EDIFICE_PUBLIC_HOST in .env}
+      EDIFICE_TURN_RELAY_IP: ${EDIFICE_TURN_RELAY_IP:-}
+      EDIFICE_TURN_RELAY_PORTS: ${EDIFICE_TURN_RELAY_PORTS:-49160-49200}
+      EDIFICE_TURN_SECRET: ${EDIFICE_TURN_SECRET:?set EDIFICE_TURN_SECRET in .env}
+      EDIFICE_TRUST_PROXY: ${EDIFICE_TRUST_PROXY:-0}
+    ports:
+      - "8080:8080/tcp"            # HTTP API (put a TLS reverse proxy in front for HTTPS)
+      - "10000:10000/tcp"          # signaling
+      - "3478:3478/udp"            # STUN/TURN
+      - "49160-49200:49160-49200/udp"   # TURN relayed traffic, same range as EDIFICE_TURN_RELAY_PORTS
+    healthcheck:
+      test: ["CMD", "/edifice-lobby", "-healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
