@@ -1354,11 +1354,15 @@ void Redraw()
 	{
 		DrawText(- 1,1-(consolepartvisible-i)*.1,consoletext[i]);
 	}
+#ifdef HK_WIN32_NATIVE
 	if(GetLocalPlayer()->talking)
 	{
 		DrawText(-.65,0,"Say:");
 		DrawText(-.5,0,talktext);
 	}
+#else
+	DrawChat();   //src/ui/chat.cpp
+#endif
 	
 	itoa(cursendrate,tmptext,10);
 	DrawText(.5,.85,tmptext);
