@@ -125,6 +125,7 @@ struct Object
 	Vector vel;
 	DWORD timeout;
 	char wasfroze;
+	DWORD achit;   //server: remote players this bullet already hit (M11, multiplay.cpp)
 };
 
 struct ServerObject

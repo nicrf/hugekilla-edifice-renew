@@ -76,6 +76,9 @@ void DeletePlayer(int num,int reason);
 void GiveCredit(int player, int credit, int number);
 void SendRGD(int player);
 void SendVoiceFrame(int seq,const unsigned char *data,int len);
+//server anti-cheat (M11): the hits it sees on remote players (TickObjects)
+void AcBulletTick(Object *o);
+void AcGrenade(Object *o);
 
 #define CMSG_BROADCAST 0
 #define CMSG_TEAM 1

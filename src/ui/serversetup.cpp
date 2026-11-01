@@ -59,15 +59,19 @@ static const char *rowlabels[SETUPROWS]=
 
 #define PANELX1 -.95f
 #define PANELX2 .95f
-#define ROWTOP .5f
-#define ROWHEIGHT .09f
+#define ROWTOP .66f
+#define ROWHEIGHT .095f
 #define LABELX -.85f
-#define VALUEX -.1f
-#define CHARW .04f
+#define VALUEX -.2f
+#define VALUEX2 .85f
+#define ARROWW .08f            //"<" and ">" at both ends of a value
 
+static int keyrow;             //row picked with the keyboard
+
+//bottom of a row
 static float RowY(int row)
 {
-	return ROWTOP-row*ROWHEIGHT;
+	return ROWTOP-(row+1)*ROWHEIGHT;
 }
 
 static int Inside(float x1,float y1,float x2,float y2)
@@ -78,7 +82,7 @@ static int Inside(float x1,float y1,float x2,float y2)
 static int RowAt(float y)
 {
 	for(int i=0;i<SETUPROWS;i++)
-		if(y>=RowY(i)-.015f&&y<RowY(i)+ROWHEIGHT-.015f)
+		if(y>=RowY(i)&&y<RowY(i)+ROWHEIGHT)
 			return i;
 	return -1;
 }
@@ -160,6 +164,7 @@ void OpenServerSetup()
 	if(sv.capturelimit<1) sv.capturelimit=5;
 	if(sv.timelimit<5) sv.timelimit=10;
 	editingname=0;
+	keyrow=0;
 	showsetup=1;
 }
 
@@ -255,49 +260,77 @@ static void ChangeRow(int row,int dir)
 	}
 }
 
-static void RowText(int row,char *text)
+//the value shown for a row; 0 when it can't be changed (given by the map, no lobby)
+static int RowText(int row,char *text)
 {
 	switch(row)
 	{
-	case 0: sprintf(text,"%s%s",servername,editingname?"_":""); break;
+	case 0: strcpy(text,servername); break;
 	case 1: strcpy(text,sv.gamemode?"Sandbox":"Capture the flag"); break;
-	case 2: sprintf(text,"< %d >",sv.capturelimit); break;
-	case 3: sprintf(text,"< %d min >",sv.timelimit); break;
-	case 4: sprintf(text,"< %s >",skychoice>=0?skynames[skychoice]:"Random"); break;
-	case 5: sprintf(text,"< %s >",terrainchoice>=0?terrainnames[terrainchoice]:"Random"); break;
-	case 6: sprintf(text,"< %s >",scenerychoice>=0?scenerynames[scenerychoice]:"Random"); break;
-	case MAPROW: sprintf(text,"< %s >",mapchoice>=0?mapnames[mapchoice]:"New random"); break;
+	case 2: sprintf(text,"%d",sv.capturelimit); break;
+	case 3: sprintf(text,"%d min",sv.timelimit); break;
+	case 4: strcpy(text,skychoice>=0?skynames[skychoice]:"Random"); break;
+	case 5: strcpy(text,terrainchoice>=0?terrainnames[terrainchoice]:"Random"); break;
+	case 6: strcpy(text,scenerychoice>=0?scenerynames[scenerychoice]:"Random"); break;
+	case MAPROW: strcpy(text,mapchoice>=0?mapnames[mapchoice]:"New random land"); break;
 	case INTERNETROW:
-		if(lobbyok) sprintf(text,"< %s >",visibilitynames[visibility]);
-		else strcpy(text,"No lobby set (net.ini)");
+		if(lobbyok) strcpy(text,visibilitynames[visibility]);
+		else
+		{
+			strcpy(text,"No lobby set (net.ini)");
+			return 0;
+		}
 		break;
 	}
 	//a saved map brings its own sky, terrain and scenery
-	if(mapchoice>=0&&row>=4&&row<=6) strcpy(text,"From the map");
+	if(mapchoice>=0&&row>=4&&row<=6)
+	{
+		strcpy(text,"From the map");
+		return 0;
+	}
+	return 1;
+}
+
+//what a row does, under the list
+static const char *RowHelp(int row)
+{
+	switch(row)
+	{
+	case 0: return "Shown in the server list of the other players";
+	case 1: return sv.gamemode?"Build freely, no flags":"Bring the enemy flag back to your base";
+	case 2: return "Flag captures a team needs to win the round";
+	case 3: return "Length of a round";
+	case 4: case 5: case 6:
+		return mapchoice>=0?"The saved map gives the sky, terrain and scenery":"Random picks one when the server starts";
+	case MAPROW:
+		return mapchoice>=0?"A map saved with savemap, buildings included":"A new land from the settings above";
+	case INTERNETROW:
+		if(!lobbyok) return "Set lobby= in net.ini to announce games on the Internet";
+		if(visibility==0) return "Only players on your network see the game";
+		if(visibility==1) return "Listed on the Internet tab of the join screen";
+		return "Not listed: players join with the game code (console, scores)";
+	}
+	return "";
 }
 
 //buttons at the bottom of the panel
 
-#define BUTTONY -.78f
-static int OverButton(float x,const char *text)
-{
-	return Inside(x-.02f,BUTTONY-.02f,x+strlen(text)*CHARW+.02f,BUTTONY+.09f);
-}
-#define RANDOMX -.85f
-#define BACKX .2f
-#define STARTX .55f
+#define BTN_RANDOM -.9f,-.87f,-.42f,-.76f
+#define BTN_BACK .22f,-.87f,.52f,-.76f
+#define BTN_START .6f,-.87f,.9f,-.76f
 
 void ServerSetupClick()
 {
 	editingname=0;
-	if(OverButton(RANDOMX,"Randomize all")) { RandomizeAll(); return; }
-	if(OverButton(BACKX,"Back")) { showsetup=0; SaveSetup(); return; }
-	if(OverButton(STARTX,"Start")) { StartConfiguredServer(); return; }
+	if(Inside(BTN_RANDOM)) { RandomizeAll(); return; }
+	if(Inside(BTN_BACK)) { showsetup=0; SaveSetup(); return; }
+	if(Inside(BTN_START)) { StartConfiguredServer(); return; }
 	if(mousepos.x<LABELX||mousepos.x>PANELX2) return;
 	int row=RowAt(mousepos.y);
 	if(row<0) return;
+	keyrow=row;
 	//"<" (left part of the value) goes back, anything else forward
-	ChangeRow(row,mousepos.x<VALUEX+CHARW*1.5f?-1:1);
+	ChangeRow(row,mousepos.x<VALUEX+ARROWW?-1:1);
 }
 
 //returns 1 when the key was used by the screen
@@ -318,6 +351,11 @@ int ServerSetupHandleKey(int vk)
 		SaveSetup();
 	}
 	if(vk==VK_RETURN) StartConfiguredServer();
+	//keyboard: Up/Down (or Tab) pick a row, Left/Right change it
+	if(vk==VK_UP) keyrow=(keyrow+SETUPROWS-1)%SETUPROWS;
+	if(vk==VK_DOWN||vk==VK_TAB) keyrow=(keyrow+1)%SETUPROWS;
+	if(vk==VK_LEFT) ChangeRow(keyrow,-1);
+	if(vk==VK_RIGHT) ChangeRow(keyrow,1);
 	return 1;
 }
 
@@ -327,53 +365,68 @@ void ServerSetupHandleText(const char *text)
 		AppendText(servername,sizeof(servername),text);
 }
 
+//"<" or ">" of a value
+static void Arrow(float x1,float y1,float x2,float y2,const char *label)
+{
+	int over=Inside(x1,y1,x2,y2);
+	UIRect(x1,y1,x2,y2,1,1,1,over?.25f:.1f);
+	glColor3f(over?1:.8f,over?1:.8f,over?.5f:.8f);
+	UIText((x1+x2-UITextWidth(label))/2,UITextY(y1,y2),label);
+}
+
 void DrawServerSetup()
 {
 	if(!showsetup) return;
-	glDisable(GL_TEXTURE_2D);
-	glColor4f(0,0,0,.88f);
-	glBegin(GL_QUADS);
-	glVertex2f(PANELX1,-.92f);
-	glVertex2f(PANELX2,-.92f);
-	glVertex2f(PANELX2,.85f);
-	glVertex2f(PANELX1,.85f);
-	glEnd();
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
 	glEnable(GL_TEXTURE_2D);
+	UIPanel(PANELX1,-.92f,PANELX2,.9f,.13f,"Server Setup");
 
-	glColor3f(1,1,.5f);
-	DrawText(LABELX,.7f,"Server Setup");
 	char text[100];
+	int hoverrow=Inside(LABELX,RowY(SETUPROWS-1),PANELX2,ROWTOP)?RowAt(mousepos.y):-1;
 	for(int i=0;i<SETUPROWS;i++)
 	{
-		int hover=Inside(LABELX,RowY(i)-.015f,PANELX2,RowY(i)+ROWHEIGHT-.015f);
-		glColor3f(hover?1:.8f,hover?1:.8f,hover?1:.8f);
-		DrawText(LABELX,RowY(i),rowlabels[i]);
-		RowText(i,text);
-		if(i==0&&editingname) glColor3f(1,1,.5f);
-		else glColor3f(1,1,1);
-		DrawText(VALUEX,RowY(i),text);
-	}
-	glColor3f(.6f,.6f,.6f);
-	DrawText(LABELX,-.6f,"Click a value to change it");
-	if(setuperror[0])
-	{
-		char line[46];
-		snprintf(line,sizeof(line),"%s",setuperror);   //what fits in the panel
-		glColor3f(1,.4f,.4f);
-		DrawText(LABELX,-.69f,line);
+		float y1=RowY(i)+.008f,y2=RowY(i)+ROWHEIGHT-.008f;
+		int enabled=RowText(i,text);
+		if(i==hoverrow) UIRect(LABELX-.04f,RowY(i),PANELX2-.04f,RowY(i)+ROWHEIGHT,1,1,1,.06f);
+		if(i==keyrow) UIRect(LABELX-.04f,y1,LABELX-.032f,y2,1,1,.5f,.9f);
+		glColor3f(i==hoverrow||i==keyrow?1:.75f,i==hoverrow||i==keyrow?1:.75f,i==hoverrow||i==keyrow?1:.75f);
+		UIText(LABELX,UITextY(y1,y2),rowlabels[i]);
+		if(i==0)
+		{
+			UIField(VALUEX,y1,VALUEX2,y2,servername,editingname,"Edifice Server");
+			continue;
+		}
+		UIRect(VALUEX,y1,VALUEX2,y2,0,0,0,.55f);
+		if(enabled)
+		{
+			Arrow(VALUEX,y1,VALUEX+ARROWW,y2,"<");
+			Arrow(VALUEX2-ARROWW,y1,VALUEX2,y2,">");
+			glColor3f(1,1,1);
+		}
+		else glColor3f(.45f,.45f,.45f);
+		float room=VALUEX2-VALUEX-2*ARROWW-.04f;
+		float w=UITextWidth(text);
+		UITextFit(w<room?(VALUEX+VALUEX2-w)/2:VALUEX+ARROWW+.02f,UITextY(y1,y2),text,room);
 	}
 
-	const struct { float x; const char *text; } buttons[3]=
+	//what the row under the mouse (or picked with the keys) does
+	int helprow=hoverrow>=0?hoverrow:keyrow;
+	glColor3f(.6f,.6f,.6f);
+	UITextFit(LABELX,UITextY(-.3f,-.22f),RowHelp(helprow),PANELX2-.05f-LABELX);
+	if(setuperror[0])
 	{
-		{RANDOMX,"Randomize all"},{BACKX,"Back"},{STARTX,"Start"}
-	};
-	for(int i=0;i<3;i++)
-	{
-		if(OverButton(buttons[i].x,buttons[i].text)) glColor3f(1,1,1);
-		else if(i==2) glColor3f(.6f,1,.6f);
-		else glColor3f(.7f,.7f,.7f);
-		DrawText(buttons[i].x,BUTTONY,buttons[i].text);
+		UIRect(PANELX1+.02f,-.5f,PANELX2-.02f,-.4f,.6f,.15f,.1f,.35f);
+		glColor3f(1,.7f,.55f);
+		UITextFit(LABELX,UITextY(-.5f,-.4f),setuperror,PANELX2-.05f-LABELX);
 	}
+	glColor3f(.45f,.45f,.45f);
+	const char *keys="Click or Left/Right: change    Up/Down: pick a row    Enter: start    Esc: back";
+	UITextFit(LABELX,UITextY(-.72f,-.64f,.04f),keys,PANELX2-.05f-LABELX,.04f);
+
+	UIButton(BTN_RANDOM,"Randomize all",1);
+	UIButton(BTN_BACK,"Back",1);
+	UIButton(BTN_START,"Start",1,1);
 	glColor3f(1,1,1);
 }
 

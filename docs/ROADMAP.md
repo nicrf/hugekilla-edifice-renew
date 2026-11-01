@@ -149,6 +149,7 @@ Détail complet en section 5.
 ### M11 - Anti-triche et serveur autoritaire (M puis XL)
 - **Tâches :**
   - Phase 1 (M) : limite de débit sur KILLED/KILLEDPOSITION, munitions et cadence tenues par le serveur pour tous (multiplay.cpp:1704-1708), contrôle des sauts de position (en log seulement au début, à cause du respawn, du jetpack et du deltaplane), distance maximale de construction, limite de débit par IP.
+    *Fait :* conception et réglages dans `docs/M11.md` (logique dans `src/net/anticheat.h`). Le serveur compte les dégâts qu'il voit sur les joueurs distants et tue lui-même celui qui ne meurt pas ; sauts de position en journal seulement.
   - Phase 2 (M, seulement sans Steam ni ENet connectID) : handshake avec cookie HMAC, sans allouer de slot avant la validation.
   - Phase 3 (XL) : entrées numérotées, tick fixe sur une horloge réelle, tirs et morts décidés par le serveur (pour remplacer `Killed()` côté victime, playing.cpp:385 et 460), snapshots delta, prédiction et réconciliation côté client, slots stables au lieu du décalage de `DeletePlayer` (multiplay.cpp:1296).
 - **Fait quand :** on ne peut plus être invulnérable en n'envoyant pas KILLED.

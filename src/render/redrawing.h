@@ -25,6 +25,7 @@ void DrawConsole();
 void LoadScenery();
 void MoveUnnecessaryTextures();
 float DrawText(float,float,const char *);
+float HKPixelScale();   //pixels per window point (2 on Retina), platform_sdl.cpp
 void Draw(float offset);
 
 #include "ase.h"

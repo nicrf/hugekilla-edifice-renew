@@ -1518,7 +1518,7 @@ void Redraw()
 		glVertex2f(radarcenterx+radarwidth,radarcentery+radarheight);
 		glVertex2f(radarcenterx-radarwidth,radarcentery+radarheight);
 		glEnd();
-		glPointSize(2);
+		glPointSize(2*HKPixelScale());
 		glEnable(GL_BLEND);
 		glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
 		glBegin(GL_POINTS);
@@ -1675,7 +1675,7 @@ void Draw(float offset)
 		glVertex3f(lightningpos[0].x+200,lightningpos[0].y,lightningpos[0].z-200);
 		glEnd();
 		glDisable(GL_TEXTURE_2D);
-		glLineWidth(3);
+		glLineWidth(3*HKPixelScale());
 		glBlendFunc(GL_ONE,GL_ZERO);
 		glBegin(GL_LINES);
 
@@ -2044,7 +2044,7 @@ void Draw(float offset)
 	
 	
 	glEnable(GL_LINE_SMOOTH);
-	glLineWidth(3);
+	glLineWidth(3*HKPixelScale());
 	
 	glBegin(GL_LINES);
 	

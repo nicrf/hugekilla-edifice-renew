@@ -26,6 +26,8 @@
 #include "ui.h"
 #include "voice.h"
 #include "lobbygame.h"
+#include "anticheat.h"
+#include <stdarg.h>
 #define MAXLOCALLIST 128
 #ifndef HK_WIN32_NATIVE
 #ifndef _WIN32
@@ -192,6 +194,350 @@ static void WritePlayerName(ByteWriter &w,int i)
 	w.Bytes(pl->name,namelen);
 }
 
+//---- anti-cheat (roadmap M11 phase 1, docs/M11.md; the logic is in anticheat.h) ----
+
+//server vars, from the console or sv.ini; the defaults never get in the way of
+//normal play. 0 turns a check off.
+int ac_enable=1;            //0: no check at all
+int ac_killdamage=200;      //damage the server counts on a player before killing it itself
+int ac_hitcap=100;          //at most this much counted per bullet or grenade
+int ac_deadtime=5000;       //ms a player killed by the server stays dead
+int ac_killinterval=2000;   //ms between two deaths a client may report
+float ac_firetolerance=.75f;//shortest shot interval accepted, times the weapon's
+int ac_fireburst=300;       //ms of shots that may arrive bunched up (jitter)
+int ac_ammoslack=2;         //rounds the server's magazine may be off by, -1: off
+float ac_maxspeed=150;      //units/s between two positions above which it is logged
+int ac_firedist=20;         //units between a shot and its shooter above which it is logged
+int ac_builddist=50;        //blocks from the player a block may be placed or removed
+int ac_ipinfo=5;            //info requests answered per second and IP
+int ac_ipenter=30;          //join requests per minute and IP
+int ac_ippackets=50;        //messages per second and IP on the info port
+
+#define AC_KILL 0
+#define AC_DEATH 1
+#define AC_FIRE 2
+#define AC_AMMO 3
+#define AC_MOVE 4
+#define AC_BUILD 5
+#define AC_IP 6
+#define AC_STATE 7
+#define AC_ORIGIN 8
+#define ACKINDS 9
+static const char *ackind[ACKINDS]={"kill","death","fire","ammo","move","build","ip","state","origin"};
+
+struct AcPlayer
+{
+	float damage;        //counted since its last death
+	DWORD deaduntil;     //killed by the server: dead until then
+	DWORD lastdeath;     //last death counted, 0: none
+	int deathcounted;    //a death since the last respawn (its next 11 -> 10 is one)
+	DWORD lastfire;
+	AcBucket fire;
+	AcAmmo ammo;
+	AcMove move;
+};
+static AcPlayer acplayer[MAXPLAYERS];
+#define ACIPTABLE 64
+static AcIpEntry aciptable[ACIPTABLE];
+
+//each kind of event: 3 console lines, then one every 2 s; HK_ANTICHEAT_LOG=1 also
+//writes them on stderr (20, then 10 per second)
+static void AcLog(int kind,const char *fmt,...)
+{
+	static AcBucket console[ACKINDS],err[ACKINDS];
+	static int suppressed[ACKINDS];
+	static int toerr=getenv("HK_ANTICHEAT_LOG")!=0;
+	char text[300];
+	va_list args;
+	va_start(args,fmt);
+	vsnprintf(text,sizeof(text),fmt,args);
+	va_end(args);
+	if(toerr&&AcTake(&err[kind],curtime,.01f,20)) fprintf(stderr,"anticheat: %s: %s\n",ackind[kind],text);
+	if(AcTake(&console[kind],curtime,.0005f,3))
+	{
+		char line[400];
+		if(suppressed[kind]) snprintf(line,sizeof(line),"anticheat %s: %s (%d more)",ackind[kind],text,suppressed[kind]);
+		else snprintf(line,sizeof(line),"anticheat %s: %s",ackind[kind],text);
+		suppressed[kind]=0;
+		ConsoleDisplayText(line);
+	}
+	else suppressed[kind]++;
+}
+
+//the weapon tables of sv (GetAmmoHold has no default case)
+static int AcTimeout(int w)
+{
+	int t[7]={sv.gattimeout,sv.m16timeout,sv.steyrtimeout,sv.umptimeout,sv.grenadetimeout,sv.berettatimeout,sv.sr1000timeout};
+	return w>=0&&w<7?t[w]:0;
+}
+static int AcReloadTime(int w)
+{
+	int t[7]={sv.gatreloadtime,sv.m16reloadtime,sv.steyrreloadtime,sv.umpreloadtime,sv.grenadereloadtime,sv.berettareloadtime,sv.sr1000reloadtime};
+	return w>=0&&w<7?t[w]:0;
+}
+static void AcHolds(int *hold)
+{
+	int t[7]={sv.gatammohold,sv.m16ammohold,sv.steyrammohold,sv.umpammohold,sv.grenadeammohold,sv.berettaammohold,sv.sr1000ammohold};
+	for(int w=0;w<ACWEAPONS;w++) hold[w]=w<7?t[w]:0;
+}
+
+//console vars, with their value in sv.ini if it has one (after InitConsole)
+static void AcInitVars()
+{
+	CfgFile svini;
+	int loaded=svini.Load(UserFile("sv.ini"));
+	struct { int *i; float *f; const char *name; } vars[]={
+		{&ac_enable,0,"ac_enable"},{&ac_killdamage,0,"ac_killdamage"},{&ac_hitcap,0,"ac_hitcap"},
+		{&ac_deadtime,0,"ac_deadtime"},{&ac_killinterval,0,"ac_killinterval"},
+		{0,&ac_firetolerance,"ac_firetolerance"},{&ac_fireburst,0,"ac_fireburst"},{&ac_ammoslack,0,"ac_ammoslack"},
+		{0,&ac_maxspeed,"ac_maxspeed"},{&ac_firedist,0,"ac_firedist"},{&ac_builddist,0,"ac_builddist"},
+		{&ac_ipinfo,0,"ac_ipinfo"},{&ac_ipenter,0,"ac_ipenter"},{&ac_ippackets,0,"ac_ippackets"},
+	};
+	for(unsigned int v=0;v<sizeof(vars)/sizeof(vars[0]);v++)
+	{
+		char *val=loaded?svini.GetValues(vars[v].name):0;
+		if(vars[v].i)
+		{
+			if(val) *vars[v].i=atoi(val);
+			AddConsoleVar(vars[v].i,(char *)vars[v].name,1);
+		}
+		else
+		{
+			if(val) *vars[v].f=(float)atof(val);
+			AddConsoleVar(vars[v].f,(char *)vars[v].name,1);
+		}
+	}
+}
+
+static int AcDead(AcPlayer *a)
+{
+	return a->deaduntil&&(int)(curtime-a->deaduntil)<0;
+}
+
+//a new life: joined, or respawned after a death
+static void AcNewLife(int i)
+{
+	AcPlayer *a=&acplayer[i];
+	int hold[ACWEAPONS];
+	AcHolds(hold);
+	a->damage=0;
+	a->deathcounted=0;
+	a->fire.started=0;
+	AcAmmoFill(&a->ammo,hold);
+	a->ammo.weapon=GetPlayer(i)->weapon;
+	a->move.valid=0;
+}
+
+//a client gets slot i: it arrives dead (its first 11 -> 10 is a respawn)
+static void AcJoin(int i)
+{
+	ZeroMemory(&acplayer[i],sizeof(AcPlayer));
+	AcNewLife(i);
+	acplayer[i].deathcounted=1;
+}
+
+//client i reports its own death (KILLED, KILLEDPOSITION): 0 if it is ignored
+static int AcDeath(int i)
+{
+	if(!ac_enable) return 1;
+	AcPlayer *a=&acplayer[i];
+	if(AcDead(a))
+	{
+		AcLog(AC_DEATH,"%.31s (%d) reported a death the server already counted",GetPlayer(i)->name,i);
+		return 0;
+	}
+	if(ac_killinterval>0&&a->lastdeath&&(int)(curtime-a->lastdeath)<ac_killinterval)
+	{
+		AcLog(AC_DEATH,"%.31s (%d) reported deaths too often, ignored",GetPlayer(i)->name,i);
+		return 0;
+	}
+	a->lastdeath=curtime?curtime:1;
+	a->damage=0;
+	a->deathcounted=1;
+	return 1;
+}
+
+//the server kills player v itself: its client never reported the death
+static void AcServerKill(int v,int killer)
+{
+	AcPlayer *a=&acplayer[v];
+	if(!ValidPlayer(killer)||killer>=numplayers) killer=v;
+	AcLog(AC_KILL,"%.31s (%d) took %.0f damage without dying: killed by the server",GetPlayer(v)->name,v,a->damage);
+	ReceiveKillMessage(v,killer);
+	SimpleBuf killed=MakeSimple(KILLED,v,killer);
+	for(int i=1;i<numplayers;i++)
+		clientsock[i].SendReliable(killed.b,sizeof(killed.b),0);   //the victim too: it dies
+	GetPlayer(v)->playstate=11;
+	a->deaduntil=curtime+ac_deadtime;
+	if(!a->deaduntil) a->deaduntil=1;
+	a->lastdeath=curtime?curtime:1;
+	a->deathcounted=1;
+	a->damage=0;
+}
+
+//can the server count damage on remote player v: alive, or shooting
+static int AcCanBeHit(int v)
+{
+	AcPlayer *a=&acplayer[v];
+	if(AcDead(a)) return 0;
+	return GetPlayer(v)->playstate==10||(a->lastfire&&(int)(curtime-a->lastfire)<1500);
+}
+
+static void AcDamage(int v,int attacker,float damage)
+{
+	if(damage>ac_hitcap) damage=(float)ac_hitcap;
+	AcPlayer *a=&acplayer[v];
+	a->damage+=damage;
+	if(a->damage>=ac_killdamage) AcServerKill(v,attacker);
+}
+
+static int AcCountsDamage()
+{
+	return server&&ac_enable&&ac_killdamage>0;
+}
+
+//called by TickObjects for every step of a bullet: the hits the server sees on
+//remote players (each client still decides its own, playing.cpp)
+void AcBulletTick(Object *o)
+{
+	if(!AcCountsDamage()||(o->type!=1&&o->type!=3)) return;
+	int shooter=o->pnum;
+	if(!ValidPlayer(shooter)||shooter>=numplayers) return;
+	for(int v=1;v<numplayers;v++)
+	{
+		if(v==shooter||v==GetLocalNum()||(o->achit&(1u<<v))) continue;
+		Player *pl=GetPlayer(v);
+		if(GetPlayer(shooter)->team==pl->team&&pl->team!=0) continue;
+		if(!AcCanBeHit(v)) continue;
+		if(!AcBulletHits(o->pos.x,o->pos.y,o->pos.z,pl->pos.x,pl->pos.y,pl->pos.z,LANDGRIDSIZE)) continue;
+		o->achit|=1u<<v;
+		//the mean of the victim's roll, damage*(1+RND)
+		float damage=(o->type==1?sv.highbulletdamage:sv.lowbulletdamage)*1.5f*Magnitude(o->vel);
+		AcDamage(v,shooter,damage);
+	}
+}
+
+//called by TickObjects when a grenade explodes
+void AcGrenade(Object *o)
+{
+	if(!AcCountsDamage()) return;
+	for(int v=1;v<numplayers;v++)
+	{
+		if(v==GetLocalNum()||!AcCanBeHit(v)) continue;
+		Vector p=GetPlayer(v)->pos+Vector(0,-1,0);
+		float mag=AcDistance(o->pos.x,o->pos.y,o->pos.z,p.x,p.y,p.z,LANDGRIDSIZE);
+		if(mag<8) AcDamage(v,o->pnum,AcGrenadeDamage(mag,sv.grenadedamage));
+	}
+}
+
+static int AcFinite(float f)
+{
+	return f==f&&f<1e30f&&f>-1e30f;
+}
+
+//a shot (or reload) of client i: 0 if it is refused. Normalizes its direction.
+static int AcFire(int i,FireGunDirection *f)
+{
+	if(!ac_enable) return 1;
+	AcPlayer *a=&acplayer[i];
+	if(!AcFinite(f->dir.x)||!AcFinite(f->dir.y)||!AcFinite(f->dir.z)||
+		!AcFinite(f->pos.x)||!AcFinite(f->pos.y)||!AcFinite(f->pos.z)) return 0;
+	float len=Magnitude(f->dir);
+	if(len<.0001f) return 0;
+	f->dir=f->dir/len;   //the bullet's speed, so its damage, scales with it
+	if(AcDead(a))
+	{
+		AcLog(AC_FIRE,"%.31s (%d) fired while dead, refused",GetPlayer(i)->name,i);
+		return 0;
+	}
+	int w=GetPlayer(i)->weapon;
+	int hold[ACWEAPONS];
+	AcHolds(hold);
+	float cost=AcTimeout(w)*ac_firetolerance;
+	if(f->reload)
+	{
+		AcAmmoReload(&a->ammo,w,hold);
+		if(ac_firetolerance>0) AcFireReload(&a->fire,curtime,cost,(float)ac_fireburst,AcReloadTime(w)*ac_firetolerance);
+		return 1;
+	}
+	if(ac_firetolerance>0&&!AcFireAllowed(&a->fire,curtime,cost,(float)ac_fireburst))
+	{
+		AcLog(AC_FIRE,"%.31s (%d) fired weapon %d faster than it can, refused",GetPlayer(i)->name,i,w);
+		return 0;
+	}
+	if(ac_ammoslack>=0&&!AcAmmoFire(&a->ammo,w,ac_ammoslack))
+	{
+		AcLog(AC_AMMO,"%.31s (%d) fired weapon %d with an empty magazine, refused",GetPlayer(i)->name,i,w);
+		return 0;
+	}
+	a->lastfire=curtime?curtime:1;
+	Vector p=GetPlayer(i)->pos;
+	float dist=AcDistance(f->pos.x,f->pos.y,f->pos.z,p.x,p.y,p.z,LANDGRIDSIZE);
+	if(ac_firedist>0&&dist>ac_firedist)
+		AcLog(AC_ORIGIN,"%.31s (%d) fired %.0f units away from where it is",GetPlayer(i)->name,i,dist);
+	return 1;
+}
+
+//a position of client i with state (10 alive, 11 dead) and weapon: returns the
+//state the server keeps
+static int AcPosition(int i,int state,Vector pos,int weapon)
+{
+	if(!ac_enable) return state;
+	AcPlayer *a=&acplayer[i];
+	if(AcDead(a)) state=11;   //killed by the server: dead whatever it says
+	int prev=GetPlayer(i)->playstate;
+	if(prev==11&&state==10)
+	{
+		if(a->deathcounted) AcNewLife(i);   //respawn
+		else AcLog(AC_STATE,"%.31s (%d) came back to life without dying",GetPlayer(i)->name,i);
+	}
+	int hold[ACWEAPONS];
+	AcHolds(hold);
+	AcAmmoPosition(&a->ammo,weapon,hold);
+	if(state==10&&ac_maxspeed>0)
+	{
+		float speed=AcMoveSpeed(&a->move,pos.x,pos.y,pos.z,curtime,250,LANDGRIDSIZE);
+		if(speed>ac_maxspeed)
+			AcLog(AC_MOVE,"%.31s (%d) moved at %.0f units/s",GetPlayer(i)->name,i,speed);
+	}
+	else a->move.valid=0;
+	return state;
+}
+
+//the blocks client pnum sends: all near it (1), else none
+static int AcBlocksNear(const char *buf,int numblocks,int pnum)
+{
+	if(!ac_enable||ac_builddist<=0) return 1;
+	Vector p=GetPlayer(pnum)->pos;
+	for(int i=0;i<numblocks;i++)
+	{
+		BlockEdit b;
+		ReadBlockEdit(buf,i,&b);
+		if(!AcBuildNear(b.x,b.y,b.z,p.x,p.y,p.z,ac_builddist,BLOCKSIZE,BLOCKGRIDSIZE))
+		{
+			AcLog(AC_BUILD,"%.31s (%d) %s a block far from itself (%d %d %d), refused",
+				GetPlayer(pnum)->name,pnum,b.del?"removed":"placed",b.x,b.y,b.z);
+			return 0;
+		}
+	}
+	return 1;
+}
+
+//rate limits per source IP on the info port, kind 0: any message, 1: REQUESTINFO,
+//2: REQUESTENTER. 0: ignore it.
+static int AcIpAllowed(SOCKADDR_IN source,int kind)
+{
+	if(!ac_enable) return 1;
+	AcIpEntry *e=AcIpFind(aciptable,ACIPTABLE,source.sin_addr.s_addr,curtime);
+	int ok=1;
+	if(kind==0&&ac_ippackets>0) ok=AcTake(&e->packets,curtime,ac_ippackets/1000.f,ac_ippackets*2.f);
+	if(kind==1&&ac_ipinfo>0) ok=AcTake(&e->info,curtime,ac_ipinfo/1000.f,ac_ipinfo*4.f);
+	if(kind==2&&ac_ipenter>0) ok=AcTake(&e->enter,curtime,ac_ipenter/60000.f,ac_ipenter/4.f+1);
+	if(!ok) AcLog(AC_IP,"too many %s from %s, ignored",kind==0?"messages":kind==1?"info requests":"join requests",
+		inet_ntoa(source.sin_addr));
+	return ok;
+}
+
 void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pnum);
 void ReceivePosition(const char *msg,int msglen,int sender);
 static void RelayVoice(VoiceMessage *voice);
@@ -230,6 +576,9 @@ void InitSocks()
 	WORD version=MAKEWORD(2,2);
 	WSADATA vdata;
 	WSAStartup(version,&vdata);
+	static int acvars=0;
+	if(!acvars) AcInitVars();   //anti-cheat server vars (M11), after InitConsole
+	acvars=1;
 }
 
 //creates sockets and initializes some things
@@ -399,6 +748,7 @@ void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pn
 				GPlayerEnterGame(pnum);
 				ResetPlayer(pnum);
 				GetPlayer(pnum)->playstate=10;
+				AcJoin(pnum);
 				
 				ConsoleDisplayText("received blockinfo acknowledgement, sending objects and join game");
 				break;
@@ -434,6 +784,7 @@ void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pn
 		case KILLED:
 			{
 				if(!ValidPlayer(msg2)) break;
+				if(pnum>0&&!AcDeath(pnum)) break;   //rate limited (M11)
 				ReceiveKillMessage(pnum,msg2);
 				SimpleBuf killed=MakeSimple(KILLED,pnum,msg2);
 				if(server)
@@ -470,10 +821,12 @@ void ServerLoop()
 	int msglen;
 	while((msglen=infosock.Receive(&msg,&source)))
 	{
+		if(!AcIpAllowed(source,0)) continue;   //per-IP rate limits (M11)
 		switch (msg.type)
 		{
 		case REQUESTENTER:
 			{
+				if(!AcIpAllowed(source,2)) break;
 				char reqname[32];
 				int trailer=ReadHelloName((char *)&msg,msglen,reqname,sizeof(reqname));
 				PeerVersion peer;
@@ -566,6 +919,7 @@ void ServerLoop()
 				strcat(message," has connected");
 				ConsoleDisplayText(message);
 				GetPlayer(addplayer)->playstate=1;
+				AcJoin(addplayer);
 				GetPlayer(addplayer)->kills=0;
 				GetPlayer(addplayer)->deaths=0;
 				char names[2+PLAYERNAMESIZE];
@@ -592,7 +946,7 @@ void ServerLoop()
 				SimpleMessage simple;
 				if(!ReadSimple(&msg,msglen,&simple)) break;
 				//anyone can reach the info port: only info requests are answered there
-				if(simple.type2==REQUESTINFO)
+				if(simple.type2==REQUESTINFO&&AcIpAllowed(source,1))
 					HandleSimpleServer(simple.type2,simple.msg,simple.msg2,source,0);
 				break;
 			}
@@ -655,6 +1009,7 @@ void ServerLoop()
 				{
 					FireGunDirection firegun;
 					if(!ReadFireGun(&msg,clen,&firegun)) break;
+					if(!AcFire(i,&firegun)) break;   //rate, ammo, dead (M11)
 					TryFireGun(i,firegun.pos,firegun.dir,firegun.reload);
 					break;
 				}
@@ -663,6 +1018,7 @@ void ServerLoop()
 					KilledPosition kp;
 					if(!ReadKilledPosition(&msg,clen,&kp)) break;
 					if(!ValidPlayer(kp.killer)) break;
+					if(!AcDeath(i)) break;   //rate limited (M11)
 					kp.killed=i;
 					GetPlayer(i)->pos=kp.pos;
 					ReceiveKillMessage(i,kp.killer);
@@ -809,6 +1165,13 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 		case KILLED:
 			{
 				if(!ValidPlayer(msg)||!ValidPlayer(msg2)) break;
+				if((int)msg==GetLocalNum())
+				{
+					//the server killed us (M11): die here too, unless our own death (already
+					//counted) crossed it
+					if(GetLocalPlayer()->life<=0||GetLocalPlayer()->playstate!=10) break;
+					GetLocalPlayer()->life=0;
+				}
 				ReceiveKillMessage(msg,msg2);
 				break;
 			}
@@ -1416,6 +1779,7 @@ void DeletePlayer(int num,int reason)
 	{
 		CopyMemory(GetPlayer(i),GetPlayer(i+1),sizeof(Player));
 		if(server) CopyMemory(&clientsock[i],&clientsock[i+1],sizeof(Sock));
+		acplayer[i]=acplayer[i+1];
 	}
 	ZeroMemory(GetPlayer(numplayers),sizeof(Player));
 	ZeroMemory(&clientsock[numplayers],sizeof(Sock));
@@ -1530,9 +1894,10 @@ void ReceivePosition(const char *msg,int msglen,int sender)
 	src->weapon=ValidWeapon(pos->weapon)?pos->weapon:0;
 	if(sender>=0)
 	{
-		//a client only reports being alive or dead
+		//a client only reports being alive or dead, and stays dead while the
+		//server says so (M11)
 		if(pos->state==10||pos->state==11)
-			src->playstate=pos->state;
+			src->playstate=AcPosition(pnum,pos->state,src->pos,src->weapon);
 	}
 	else if(pos->state!=1) 
 		src->playstate=pos->state;
@@ -1695,6 +2060,8 @@ void SendBlockBuffer()
 void ReceiveBlockBuffer(char *buf,int pnum,int len)
 {
 	if(len<5) return;
+	//only near the player; a refused message costs no credit (M11)
+	if(server&&pnum>0&&!AcBlocksNear(buf,ReadBlocksCount(buf,len),pnum)) return;
 	if(server&&!GetPlayer(pnum)->credits[0])
 	{
 		return;
@@ -1841,6 +2208,7 @@ void CreateObject(int num,int obj,Vector pos,Vector dir,Vector vel)
 			object[i].dir=dir;
 			object[i].pnum=num;
 			object[i].timeout=curtime+1000;
+			object[i].achit=0;
 
 			object[i].wasfroze=0;
 			switch(obj)
