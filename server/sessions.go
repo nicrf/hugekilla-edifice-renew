@@ -18,9 +18,13 @@ type Session struct {
 	Token    string    `json:"token"`
 	Expires  time.Time `json:"expires"`
 	ICE      ICEConfig `json:"ice"`
-	// Signaling is the host:port of the signaling relay, empty when the lobby
-	// doesn't know its public name (the game then uses the lobby's host, port 10000)
+	// Signaling is the host:port of the TCP signaling relay, empty when the lobby
+	// doesn't know its public name (the game then uses the lobby's host, port
+	// 10000) or when the TCP relay is off
 	Signaling string `json:"signaling,omitempty"`
+	// SignalingURL is the same relay over WebSocket on the HTTP API,
+	// wss://host/v1/signal behind HTTPS: preferred by the games that know it
+	SignalingURL string `json:"signaling_url,omitempty"`
 }
 
 type ICEConfig struct {
@@ -42,7 +46,7 @@ type Sessions struct {
 	stunURLs   []string
 	turnURLs   []string // empty: TURN disabled
 	turnSecret string
-	signaling  string // host:port handed out with each session, may be empty
+	signaling  string // host:port of the TCP relay handed out with each session, may be empty
 	now        func() time.Time
 }
 

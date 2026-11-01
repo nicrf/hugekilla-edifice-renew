@@ -1,7 +1,8 @@
 // What the signaling relay sends (src/net/signaling.cpp, roadmap M7d): a hostile
 // or broken relay, or a peer, sends any bytes. The line reader stays bounded, the
 // line reader and the protobuf check stay in bounds, and what they accept is valid:
-// a session identity, a payload of the announced size, lines that fit.
+// a session identity, a payload of the announced size, lines that fit; the same
+// for the WebSocket relay (its answer to the upgrade, its frames, its URL).
 // The first byte splits the input in chunks of that size, as recv() would.
 #include "signaling.h"
 #include <stdint.h>
@@ -75,5 +76,36 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data,size_t size)
 	text[n]=0;
 	if(SignalParseAddress(text,host,sizeof(host),&port)) FUZZ_CHECK(host[0]&&port>=1&&port<=65535&&!strchr(host,':'));
 	if(SignalIceServer(text,"turn",out,sizeof(out))) FUZZ_CHECK(!strchr(out,',')&&!strchr(out,' ')&&!strchr(out,'?'));
+	char path[64];
+	int tls;
+	if(SignalParseURL(text,host,sizeof(host),&port,path,sizeof(path),&tls))
+		FUZZ_CHECK(host[0]&&port>=1&&port<=65535&&path[0]=='/'&&!strchr(path,' ')&&!strchr(host,':')&&!strchr(host,'@'));
+
+	// the same bytes as the relay's WebSocket: its answer to the upgrade, then frames
+	{
+		char *copy=(char *)malloc(size?size:1);
+		memcpy(copy,data,size);
+		int end=SignalWsResponse(copy,(int)size);
+		FUZZ_CHECK(end>=-1&&end<=(int)size&&end<=SIGNAL_WS_MAXRESPONSE);
+		free(copy);
+		SignalWsReader ws;
+		for(size_t at=0;at<size;at+=chunk)
+		{
+			int n=(int)(size-at<(size_t)chunk?size-at:chunk);
+			char *piece=(char *)malloc(n);
+			memcpy(piece,data+at,n);
+			ws.Add(piece,n);
+			free(piece);
+			int op,r;
+			std::string frame;
+			while((r=ws.Next(&op,&frame))==1)
+			{
+				FUZZ_CHECK((int)frame.size()<SIGNAL_MAXLINE);
+				FUZZ_CHECK(op==SIGNAL_WS_TEXT||op==SIGNAL_WS_BINARY||op==SIGNAL_WS_PING||op==SIGNAL_WS_PONG||op==SIGNAL_WS_CLOSE);
+				if(op>=SIGNAL_WS_CLOSE) FUZZ_CHECK(frame.size()<=125);
+			}
+			if(r<0) break;
+		}
+	}
 	return 0;
 }

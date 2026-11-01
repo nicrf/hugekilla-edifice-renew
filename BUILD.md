@@ -157,7 +157,7 @@ Les lettres suivent la disposition du clavier : sur AZERTY, remappez Avancer/Gau
 - `HK_KEYLOG=1` affiche dans le terminal chaque touche reçue par le jeu (code VK) et les changements de zoom.
 - `HK_MENU=options|options2|player|credits|join|internet|server|serverstart` ouvre cet écran au démarrage (`internet` : l'onglet Internet de Join).
 - `HK_LOBBYJOIN=<code>` cherche ce code de partie sur le lobby (`net.ini` `lobby=`) et rejoint la partie, par l'onglet Internet (en P2P si elle a une identité, voir GameNetworkingSockets).
-- `HK_P2P=0|1|relay` remplace `p2p=` de `net.ini` ; `HK_GNS_DEBUG=1` affiche les messages de GameNetworkingSockets.
+- `HK_P2P=0|1|relay` remplace `p2p=` de `net.ini` ; `HK_GNS_DEBUG=1` affiche les messages de GameNetworkingSockets. `HK_SIGNAL_TCP=1` : signalisation par le relais TCP même si le lobby propose son relais WebSocket (`wss://`). `EDIFICE_TEST_CA_FILE=cert.pem` (tests seulement) : certificat PEM d'un lobby auto-signé, accepté en plus de ceux du système pour le lobby et la signalisation (la vérification reste faite).
 - `HK_CONSOLE=1` démarre un serveur local et ouvre la console après quelques commandes (`help`, `maps`, …) ; `HK_CONSOLE=scroll` la fait défiler vers le haut, `HK_CONSOLE=notify` la laisse fermée (dernières lignes sur le jeu), toute autre valeur reste tapée à l'invite (`HK_CONSOLE=gr` : complétion).
 - `HK_SHOT=fichier.ppm` (et `HK_SHOT_FRAME=N`) enregistre l'image rendue N.
 - Chat vocal : `HK_VOICE_TEST_TONE=1` émet une tonalité à la place du micro, `HK_VOICE_AUTOTALK=1` émet en permanence (sans touche), `HK_VOICE_LOOPBACK=1` fait entendre sa propre voix par le chemin de réception, `HK_VOICE_LOG=1` affiche sur stderr chaque début de prise de parole entendue.

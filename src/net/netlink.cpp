@@ -125,9 +125,10 @@ int NetP2PStart(const LobbySession *s,const char *lobbyurl)
 #ifdef EDIFICE_GNS
 	int mode=NetP2PMode();
 	if(!mode) return 0;
-	char host[254];
+	char host[254]="";
 	int port=SIGNAL_DEFAULTPORT;
-	if(s->signaling[0]?!SignalParseAddress(s->signaling,host,sizeof(host),&port):!UrlHost(lobbyurl,host,sizeof(host)))
+	if((s->signaling[0]?!SignalParseAddress(s->signaling,host,sizeof(host),&port):!UrlHost(lobbyurl,host,sizeof(host)))&&
+		!s->signalurl[0])
 	{
 		fprintf(stderr,"p2p: no signaling relay address\n");
 		return 0;
@@ -153,7 +154,8 @@ int NetP2PStart(const LobbySession *s,const char *lobbyurl)
 		fprintf(stderr,"p2p: relay only, but the lobby has no TURN relay\n");
 		return 0;
 	}
-	GnsP2PConfig config={s->identity,s->token,host,port,stun.c_str(),turn.c_str(),users.c_str(),passes.c_str(),mode==2};
+	GnsP2PConfig config={s->identity,s->token,host,port,stun.c_str(),turn.c_str(),users.c_str(),passes.c_str(),mode==2,
+		s->signalurl};
 	return GnsLink::StartP2P(&config);
 #else
 	return 0;
