@@ -892,6 +892,14 @@ static int JoinAddressProven(SOCKADDR_IN source,const HelloCaps *caps,int msglen
 	return 0;
 }
 
+//debug aid (tests/net_webrtc.py): HK_NET_EVENTS=1 writes on stderr the shots and
+//block edits of the clients as they come in, before any check
+static int NetEvents()
+{
+	static int on=getenv("HK_NET_EVENTS")!=0;
+	return on;
+}
+
 void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pnum);
 void ReceivePosition(const char *msg,int msglen,int sender);
 static void RelayVoice(VoiceMessage *voice);
@@ -1386,6 +1394,7 @@ void ServerLoop()
 				}
 				case BLOCKS:
 					{
+						if(NetEvents()) fprintf(stderr,"net: blocks from player %d\n",i);
 						ReceiveBlockBuffer((char *)&msg,i,clen);
 						
 						break;
@@ -1400,6 +1409,7 @@ void ServerLoop()
 				{
 					FireGunDirection firegun;
 					if(!ReadFireGun(&msg,clen,&firegun)) break;
+					if(NetEvents()) fprintf(stderr,"net: shot from player %d\n",i);
 					if(!AcFire(i,&firegun)) break;   //rate, ammo, dead (M11)
 					TryFireGun(i,firegun.pos,firegun.dir,firegun.reload);
 					break;
@@ -1940,15 +1950,16 @@ int JoinNetQuery(const char *host,int port)
 
 //an Internet game joined P2P (M7d): the host identity the lobby lists, named by the
 //address and info port it lists (they then find its INFO answer, JoinNetFind). The
-//info link becomes a GameNetworkingSockets one if it isn't. Returns 0 if P2P can't
-//be used (the caller asks the host directly, JoinNetQuery).
+//info link becomes a P2P one (GameNetworkingSockets, WebRTC in a browser) if it
+//isn't. Returns 0 if P2P can't be used (the caller asks the host directly,
+//JoinNetQuery).
 int JoinNetQueryP2P(const char *address,int port,const char *identity)
 {
-	if(!NetLinkIsGns(infosock.link))
+	if(!NetLinkIsP2P(infosock.link))
 	{
 		infosock.Close();
 		infosock.Open(NetOpenInfoLink(netsettings.infosendport,0,1));
-		if(!NetLinkIsGns(infosock.link)) return 0;
+		if(!NetLinkIsP2P(infosock.link)) return 0;
 	}
 	SOCKADDR_IN dest=MakeSockAddr(0,0,0,0,htons((WORD)port));
 	dest.sin_addr.s_addr=inet_addr(address);

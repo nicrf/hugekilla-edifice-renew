@@ -507,6 +507,15 @@ extern "C" EMSCRIPTEN_KEEPALIVE int HKWebPlayState()
 	return GetLocalPlayer()->playstate;
 }
 
+// for tests/net_webrtc.py: one block edit sent to the server as the build menu sends
+// them (the host logs it with HK_NET_EVENTS, whatever its checks then decide)
+extern "C" EMSCRIPTEN_KEEPALIVE void HKWebSendBlock()
+{
+	StartBlockBuffer();
+	AddBlockBuffer(1, 1, 1, 1, 0, 0, 0, 0, 0);
+	SendBlockBuffer();
+}
+
 static void WebFrame()
 {
 	// Esc makes the browser leave pointer lock before the game sees the key: back to

@@ -88,10 +88,12 @@ static void DrawCredits()
 		"Protocol Buffers - BSD 3-clause",
 		"Abseil - Apache 2.0",
 		"OpenSSL - Apache 2.0",
+		"libdatachannel, libjuice - MPL 2.0",
+		"usrsctp - BSD 3-clause",
 		"stb_image - public domain / MIT",
 		"sokol_gfx - zlib license",
 	};
-	CreditsSection(rightx,y,colw,"Third-party libraries",libraries,9);
+	CreditsSection(rightx,y,colw,"Third-party libraries",libraries,(int)(sizeof(libraries)/sizeof(libraries[0])));
 	RColor3f(.75f,.75f,.75f);
 	UITextFit(rightx,y+.03f,"Full texts: licenses/ folder of the game",colw,.045f);
 	UIRect(-.02f,-.05f,-.016f,.7f,1,1,1,.12f);   //column separator

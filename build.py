@@ -2,12 +2,14 @@
 """Build Edifice (HugeKilla) on macOS, Linux or Windows.
 
     python3 build.py [--config Debug|Release] [--clean] [--run] [--package] [--test]
-                     [--no-gns] [--universal] [--web]
+                     [--no-gns] [--no-webrtc] [--universal] [--web]
 
 Configures into build/<os>-<config>[-gns][-universal], builds, and optionally runs
 the game or its unit tests, or packages it into dist/Edifice-<version>-<os>.(zip|tar.gz).
 GameNetworkingSockets (P2P Internet games) is in by default, as in the releases,
 through vcpkg (VCPKG_ROOT, else fetched into build/vcpkg); --no-gns leaves it out.
+With it comes libdatachannel (EDIFICE_WEBRTC), so that browser players join the
+games this build hosts; --no-webrtc leaves that out.
 --web builds the web version instead (Emscripten: EMSDK, else build/emsdk at the
 version of release.yml) into build/web[-debug]: --run serves it on localhost,
 --package zips the site into dist/Edifice-<version>-web.zip.
@@ -175,9 +177,15 @@ def web_env(emsdk):
     return env
 
 
+def vcpkg_features(args):
+    """the features of vcpkg.json a --gns build asks for"""
+    return "gns;webrtc" if args.webrtc else "gns"
+
+
 def gns_args(args, extra):
     """CMake arguments of a GameNetworkingSockets build: vcpkg toolchain, the
-    "gns" feature of vcpkg.json, and the triplet of the releases."""
+    "gns" feature of vcpkg.json (and "webrtc": libdatachannel), and the triplet
+    of the releases."""
     root = os.environ.get("VCPKG_ROOT")
     if not root and shutil.which("vcpkg"):
         root = os.path.dirname(os.path.realpath(shutil.which("vcpkg")))
@@ -186,7 +194,8 @@ def gns_args(args, extra):
     toolchain = os.path.join(root, "scripts", "buildsystems", "vcpkg.cmake")
     if not os.path.isfile(toolchain):
         die("no vcpkg toolchain in %s (VCPKG_ROOT); --no-gns builds without P2P" % root, hint=False)
-    cfg = ["-DEDIFICE_GNS=ON", "-DVCPKG_MANIFEST_FEATURES=gns",
+    cfg = ["-DEDIFICE_GNS=ON", "-DVCPKG_MANIFEST_FEATURES=" + vcpkg_features(args),
+           "-DEDIFICE_WEBRTC=" + ("ON" if args.webrtc else "OFF"),
            "-DCMAKE_TOOLCHAIN_FILE=" + toolchain,
            "-DVCPKG_OVERLAY_TRIPLETS=" + os.path.join(ROOT, "cmake", "triplets")]
     if any(a.startswith("-DVCPKG_TARGET_TRIPLET") for a in extra):
@@ -219,6 +228,9 @@ def main():
                          "vcpkg: VCPKG_ROOT, else one fetched into build/vcpkg")
     ap.add_argument("--no-gns", dest="gns", action="store_false",
                     help="without GameNetworkingSockets: no P2P, Internet games need open UDP ports")
+    ap.add_argument("--no-webrtc", dest="webrtc", action="store_false", default=True,
+                    help="with GameNetworkingSockets but without libdatachannel: browser players can't "
+                         "join the games this build hosts")
     ap.add_argument("--sokol", action="store_true", default=True,
                     help="render with sokol_gfx: Metal on macOS, D3D11 on Windows, GL 4.1 core on Linux "
                          "(the default, as the releases)")
@@ -288,6 +300,13 @@ def main():
     want = "ON" if args.sokol else "OFF"
     if cache_value(bdir, "HK_RENDER_SOKOL").upper() not in (want, "1" if args.sokol else "0", "TRUE" if args.sokol else "FALSE"):
         run([cmake, bdir, "-DHK_RENDER_SOKOL=" + want])
+
+    # a --gns tree configured before the WebRTC bridge (or with --no-webrtc): set it,
+    # vcpkg then installs libdatachannel at the next configure
+    if args.gns:
+        want = "ON" if args.webrtc else "OFF"
+        if cache_value(bdir, "EDIFICE_WEBRTC").upper() not in (want, "1" if args.webrtc else "0"):
+            run([cmake, bdir, "-DEDIFICE_WEBRTC=" + want, "-DVCPKG_MANIFEST_FEATURES=" + vcpkg_features(args)])
 
     run([cmake, "--build", bdir, "--config", args.config, "--parallel"])
 

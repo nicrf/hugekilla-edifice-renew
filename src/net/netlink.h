@@ -37,8 +37,10 @@ int NetSourceIsConnection(const SOCKADDR_IN *source);
 void NetQueryHost(const SOCKADDR_IN *dest);
 //at exit, once every Sock is closed
 void NetLinkShutdown();
-//1 if link is a GameNetworkingSockets info link
-int NetLinkIsGns(DatagramLink *link);
+//1 if link is an info link that joins P2P (GameNetworkingSockets; WebRTC in a browser)
+int NetLinkIsP2P(DatagramLink *link);
+//1 if a host of this build takes browsers (EDIFICE_WEBRTC: announced as webrtc)
+int NetWebRtcHost();
 
 //P2P: 0 off (or built without GameNetworkingSockets), 1 on, 2 relay only
 int NetP2PMode();

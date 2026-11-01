@@ -170,7 +170,11 @@ static void FromLobby(JoinGame *game,const LobbyGame *g)
 	memset(game,0,sizeof(*game));
 	snprintf(game->name,sizeof(game->name),"%s",g->name);
 	//on our network (the lobby gives the LAN addresses only then): joined there
-	if(g->numlan) snprintf(game->address,sizeof(game->address),"LAN %s",g->lan[0]);
+	int lan=g->numlan;
+#ifdef __EMSCRIPTEN__
+	lan=0;   //a browser doesn't join there (no UDP)
+#endif
+	if(lan) snprintf(game->address,sizeof(game->address),"LAN %s",g->lan[0]);
 	else snprintf(game->address,sizeof(game->address),"%s",g->address);
 	snprintf(game->version,sizeof(game->version),"%s",g->version);
 	PeerVersion peer;
@@ -180,6 +184,14 @@ static void FromLobby(JoinGame *game,const LobbyGame *g)
 	peer.layout=EDIFICE_NET_LAYOUT;
 	snprintf(peer.version,sizeof(peer.version),"%s",g->version);
 	game->compatible=VersionCompatible(&peer,game->reason,sizeof(game->reason));
+#ifdef __EMSCRIPTEN__
+	//a browser joins over WebRTC only (M14 task 3): hosts that say they take it
+	if(game->compatible&&!g->webrtc)
+	{
+		game->compatible=0;
+		snprintf(game->reason,sizeof(game->reason),"its host doesn't take browsers (older game, or no WebRTC)");
+	}
+#endif
 	game->players=g->players;
 	game->maxplayers=g->maxplayers;
 	game->gamemode=g->mode;
@@ -211,13 +223,11 @@ static void JoinInternet(const LobbyGame *g)
 		snprintf(status,sizeof(status),"Can't join: %s",game.reason);
 		return;
 	}
-#ifdef __EMSCRIPTEN__
-	//the browser has no UDP, and its WebRTC link isn't there yet (roadmap M14 task 3)
-	snprintf(status,sizeof(status),"Can't join %s from the browser yet: use the desktop game",g->name);
-	return;
-#endif
 	SaveName();
 	joining=*g;
+#ifdef __EMSCRIPTEN__
+	joining.numlan=0;   //no UDP to reach it there: WebRTC, which finds the LAN route itself
+#endif
 	joiningactive=JOINING_QUERY;
 	joiningp2p=0;
 	joiningsince=HKTicks();
@@ -230,7 +240,7 @@ static void JoinInternet(const LobbyGame *g)
 		joiningactive=JOINING_SESSION;
 		snprintf(status,sizeof(status),"Connecting to %s (P2P)...",g->name);
 	}
-	if(g->numlan)
+	if(joining.numlan)
 		snprintf(status,sizeof(status),"Contacting %s on your network (%s)...",g->name,g->lan[0]);
 }
 

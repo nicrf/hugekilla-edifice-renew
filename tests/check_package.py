@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Checks a release archive of build.py --package, as a player would get it:
-    python3 tests/check_package.py dist/Edifice-<version>-<os>.(zip|tar.gz) [--gns]
+    python3 tests/check_package.py dist/Edifice-<version>-<os>.(zip|tar.gz) [--gns [--no-webrtc]]
 
 Unpacks it into a temporary folder, then
   - contents: the game, data/, license texts (sokol_gfx's among them; with --gns:
-    licenses/ of GameNetworkingSockets, protobuf, abseil, OpenSSL);
+    licenses/ of GameNetworkingSockets, protobuf, abseil, OpenSSL, and but with
+    --no-webrtc of libdatachannel, libjuice, usrsctp: the browser bridge, M14);
   - dependencies: only the OS's own libraries or what the archive ships
     (macOS: otool -L, both architectures, signature; Linux: readelf, nothing of
     GameNetworkingSockets/protobuf/OpenSSL linked dynamically or exported;
@@ -17,8 +18,8 @@ Unpacks it into a temporary folder, then
     the unpacked game: a local lobby over TLS (self-signed certificate, trusted
     through EDIFICE_TEST_CA_FILE; needs openssl), the server announces itself
     there (servervisibility=public), opens its session and listens for P2P
-    connections. Catches a static OpenSSL taking the place of the system's under
-    libcurl (Linux).
+    connections (listed as taking browsers, "webrtc", unless --no-webrtc). Catches a
+    static OpenSSL taking the place of the system's under libcurl (Linux).
 The game runs with its own user folder (XDG_DATA_HOME, CFFIXED_USER_HOME,
 APPDATA) and a net.ini written here: servervisibility=lan unless --lobby, so it
 never announces itself on the public lobby. Linux needs a display (xvfb-run).
@@ -40,6 +41,7 @@ import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SYSTEM = platform.system()
+WEBRTC = True   # --gns builds have the WebRTC bridge (libdatachannel) unless --no-webrtc
 errors = []
 
 
@@ -82,6 +84,8 @@ def check_contents(top, gns):
     need = ["stb_image.txt", "SDL2.txt", "opus.txt", "sokol.txt"]   # the releases render with sokol_gfx
     if gns:
         need += ["gamenetworkingsockets.txt", "protobuf.txt", "abseil.txt", "openssl.txt"]
+    if gns and WEBRTC:
+        need += ["libdatachannel.txt", "libjuice.txt", "usrsctp.txt"]
     for n in need:
         if n not in have:
             fail("licenses/%s missing" % n)
@@ -130,7 +134,7 @@ def check_linux(top, gns):
     needed = re.findall(r"\(NEEDED\).*\[(.*)\]", out(["readelf", "-d", exe]))
     print("NEEDED: " + ", ".join(needed))
     for n in needed:
-        if re.search(r"GameNetworkingSockets|protobuf|absl|libssl|libcrypto", n):
+        if re.search(r"GameNetworkingSockets|protobuf|absl|libssl|libcrypto|datachannel|juice|usrsctp", n):
             fail("%s linked dynamically" % n)
     ldd = out(["ldd", exe])
     if "not found" in ldd:
@@ -326,6 +330,8 @@ def check_lobby(p, log, cert, gns):
                 fail("no '%s' (lobby session over HTTPS)" % want)
         if not mine[0].get("identity"):
             fail("the lobby lists the game without its P2P identity")
+        if WEBRTC and mine[0].get("webrtc") is not True:
+            fail("the lobby doesn't list the game as taking browsers (webrtc)")
 
 
 def main():
@@ -337,6 +343,8 @@ def main():
         del argv[i:i + 2]
     args = [a for a in argv if not a.startswith("--")]
     gns = "--gns" in argv
+    global WEBRTC
+    WEBRTC = "--no-webrtc" not in argv
     if len(args) != 1:
         sys.exit(__doc__)
     archive = os.path.abspath(args[0])
