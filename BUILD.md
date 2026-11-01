@@ -7,7 +7,9 @@ SDL2 est téléchargée et compilée **en statique** par CMake (`FetchContent`, 
 |---|---|
 | macOS (Intel / Apple Silicon) | `Edifice.app` autonome (données dans `Contents/Resources/data`), signé ad hoc |
 | Linux | `Edifice` + dossier `data/` à côté |
-| Windows (MSVC, x64) | `Edifice.exe` + dossier `data/` à côté, CRT statique |
+| Windows (MSVC, x64) | `Edifice.exe` + dossier `data/` à côté, CRT statique (avec `--gns` : DLL de GameNetworkingSockets et du runtime C++ à côté) |
+
+Les releases sont compilées avec GameNetworkingSockets (`--gns`, ci-dessous) pour le P2P des parties Internet ; sans vcpkg, `build.py` sans `--gns` compile tout le reste (parties Internet en UDP direct).
 
 ## Prérequis
 
@@ -35,7 +37,7 @@ python3 build.py --config Debug --run
 python3 build.py --package           # dist/Edifice-<version>-<os>.zip|.tar.gz
 ```
 
-Sous Windows : `py build.py ...`. Options : `--clean`, `--generator <G>`, `EDIFICE_ARCH=Win32` pour du 32 bits.
+Sous Windows : `py build.py ...`. Options : `--clean`, `--test` (tests unitaires après le build), `--generator <G>`, `EDIFICE_ARCH=Win32` pour du 32 bits, `--universal` (macOS : un binaire arm64 + x86_64, macOS 10.13 minimum, comme la release), `--gns` (ci-dessous). `EDIFICE_CMAKE_ARGS="-D…"` ajoute des arguments CMake.
 `-DEDIFICE_SYSTEM_SDL2=ON` (CMake) utilise une SDL2 installée au lieu de la compiler.
 La version vient de `project(Edifice VERSION …)` dans `CMakeLists.txt`.
 
@@ -57,9 +59,20 @@ Avec les presets CMake : `cmake --preset macos-release && cmake --build --preset
 
 Parties Internet : dans `net.ini`, `lobby=https://…` donne l'adresse du serveur `edifice-lobby` (par défaut l'instance publique `https://edifice.rousseaufournier.com` ; `lobby=` vide coupe les parties Internet, et l'onglet Internet de l'écran Join dit alors qu'aucun lobby n'est configuré), et `servervisibility=lan|public|friends|private` (ligne « Internet » de Server Setup) dit si l'hôte s'annonce : `public` est listée, `friends`/`private` se rejoignent par le code de partie (6 caractères, affiché dans la console et le tableau des scores de l'hôte). Avec GameNetworkingSockets (`EDIFICE_GNS`, ci-dessous), une partie Internet se rejoint en P2P (M7d) : rien à ouvrir chez l'hôte. Sans lui (ou avec `p2p=0`), c'est l'UDP direct vers l'IP vue par le lobby, et l'hôte doit ouvrir ses ports UDP (27020 et suivants).
 
-## GameNetworkingSockets (expérimental, M7)
+## GameNetworkingSockets (M7, dans les releases)
 
-Build avec vcpkg : `cmake -S . -B build/gns -DEDIFICE_GNS=ON -DVCPKG_MANIFEST_FEATURES=gns -DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake` (Windows : `-DVCPKG_TARGET_TRIPLET=x64-windows -A x64`, tout le jeu passe alors au runtime C++ partagé `/MD`). Sans l'option, rien ne change, sur le fil non plus.
+GameNetworkingSockets (Valve, BSD-3), avec protobuf et OpenSSL, vient de vcpkg (fonction `gns` de `vcpkg.json`). Une fois vcpkg installé :
+
+```bash
+git clone https://github.com/microsoft/vcpkg && vcpkg/bootstrap-vcpkg.sh   # Windows : vcpkg\bootstrap-vcpkg.bat
+export VCPKG_ROOT=$PWD/vcpkg
+python3 build.py --gns --package                 # build/<os>-release-gns, comme la release
+python3 build.py --gns --universal --package     # macOS : binaire universel, comme la release
+```
+
+Le premier build compile OpenSSL, protobuf et abseil (de quelques minutes à une demi-heure selon la machine), ensuite le cache binaire de vcpkg sert. Triplets : `x64-linux-release` (statique), `x64-windows-release` (`cmake/triplets/`, DLL : tout le jeu passe au runtime C++ partagé `/MD`, et les DLL du runtime sont copiées à côté de `Edifice.exe`), `universal-osx` (`cmake/triplets/`, statique, arm64 + x86_64) ; en Debug, ceux par défaut de vcpkg. `-DVCPKG_TARGET_TRIPLET=…` dans `EDIFICE_CMAKE_ARGS` en impose un autre. À la main : `cmake -S . -B build/gns -DEDIFICE_GNS=ON -DVCPKG_MANIFEST_FEATURES=gns -DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake` (Windows : `-DVCPKG_TARGET_TRIPLET=x64-windows -A x64`). Sans l'option, rien ne change, sur le fil non plus.
+
+`python3 tests/check_package.py dist/Edifice-<version>-<os>.<ext> --gns` vérifie une archive comme la CI : contenu et licences, dépendances (`otool`, `readelf`, `dumpbin`), puis le jeu décompressé lancé en serveur GameNetworkingSockets, avec son propre dossier utilisateur et `servervisibility=lan`, et `tests/net_handshake.py` contre lui ; `--lobby <edifice-lobby>` y ajoute un lobby local en HTTPS (certificat auto-signé, `openssl`) où le jeu doit s'annoncer et ouvrir sa session P2P (la CI le fait sous Linux) ; `--no-run` saute le lancement (écran verrouillé sous macOS : le rendu bloque).
 
 - `transport=gns` dans `net.ini` (ou `HK_TRANSPORT=gns`) : les parties par IP directe passent par une connexion GameNetworkingSockets chiffrée (`src/net/gnslink.cpp`, choix des liens dans `src/net/netlink.cpp`). L'hôte écoute en plus sur `gnsport` (défaut : `datasendport`, 27021) ; un client se connecte au `gnsport` du serveur qu'il interroge par IP. La recherche LAN et les pairs en UDP simple restent en UDP : un serveur en mode gns accepte aussi les clients UDP. Défaut : `transport=udp`.
 - Parties Internet en P2P (M7d, `src/net/gnssignal.cpp`, détails dans `docs/M7.md`) : un hôte annoncé sur le lobby (`servervisibility` autre que `lan`) écoute aussi les connexions P2P sous l'identité de sa session de lobby ; le client qui rejoint une partie de l'onglet Internet (ou par son code) ouvre sa propre session et s'y connecte par ICE (STUN/TURN du lobby, signalisation par le lobby), avec repli sur l'UDP direct. Aucun port à ouvrir, même avec `transport=udp`. `net.ini` : `p2p=1` (défaut), `p2p=0` (jamais : UDP direct comme en M7c), `p2p=relay` (seulement le relais TURN du lobby) ; `HK_P2P` a priorité. `HK_GNS_DEBUG=1` affiche les messages de GameNetworkingSockets (ICE compris).
@@ -86,7 +99,7 @@ build/fuzz/fuzz_map -max_total_time=60 /tmp/c    # fuzzing (le corpus grandit da
 
 ## Releases automatiques
 
-`.github/workflows/release.yml` : à chaque tag `v*` poussé (`git tag v0.2.0 && git push origin v0.2.0`), GitHub Actions compile macOS, Linux et Windows avec `build.py --package` et publie une release GitHub avec les trois archives. Lancement manuel possible (« Run workflow ») : les archives sont alors disponibles comme artefacts, sans release.
+`.github/workflows/release.yml` : à chaque tag `v*` poussé (`git tag v0.2.0 && git push origin v0.2.0`), GitHub Actions compile macOS, Linux et Windows avec `build.py --config Release --gns --package --test` (`--universal` sur macOS ; vcpkg épinglé par `VCPKG_COMMIT`, cache binaire gardé par `actions/cache`), vérifie chaque archive avec `tests/check_package.py`, puis publie une release GitHub avec les trois archives. À chaque push et PR, les archives sont aussi disponibles comme artefacts, sans release. Minimums : macOS 10.13 (Intel) / 11 (Apple Silicon), glibc 2.35 (Ubuntu 22.04 et plus récentes), Windows 10.
 
 ## Arborescence
 
