@@ -211,6 +211,11 @@ static void JoinInternet(const LobbyGame *g)
 		snprintf(status,sizeof(status),"Can't join: %s",game.reason);
 		return;
 	}
+#ifdef __EMSCRIPTEN__
+	//the browser has no UDP, and its WebRTC link isn't there yet (roadmap M14 task 3)
+	snprintf(status,sizeof(status),"Can't join %s from the browser yet: use the desktop game",g->name);
+	return;
+#endif
 	SaveName();
 	joining=*g;
 	joiningactive=JOINING_QUERY;

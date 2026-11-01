@@ -204,6 +204,11 @@ static void ReadVisibility()
 		CopyIniString(hostvisibility,ini.GetValues("servervisibility"),sizeof(hostvisibility));
 	if(strcmp(hostvisibility,"public")&&strcmp(hostvisibility,"friends")&&strcmp(hostvisibility,"private"))
 		strcpy(hostvisibility,"lan");
+#ifdef __EMSCRIPTEN__
+	//a game hosted in a browser can't be reached yet (no UDP, WebRTC to come,
+	//roadmap M14 task 3): never announced, the list would show a game nobody joins
+	strcpy(hostvisibility,"lan");
+#endif
 }
 
 int LobbyHostInternet()

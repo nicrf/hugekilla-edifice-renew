@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Smoke test of the web build (roadmap M14) in headless Chromium.
 
-    python3 tests/web_smoke.py [build/web] [--out DIR] [--headed]
+    python3 tests/web_smoke.py [build/web] [--out DIR] [--headed] [--lobby edifice-lobby]
 
 Serves the built site (index.html, .js, .wasm, .data) on a local port, opens it
 in Chromium through Playwright (pip install playwright; playwright install
@@ -10,20 +10,61 @@ chromium-headless-shell) and checks that:
   - the main menu draws (the canvas isn't one flat color);
   - a solo game starts (?HK_MENU=serverstart: Server Setup, then Start, as the
     player clicks it), the player spawns at a click and walks, the game keeps running;
-  - the user folder is in IndexedDB (/user, net.ini copied there).
+  - the user folder is in IndexedDB (/user, net.ini copied there);
+  - with --lobby (an edifice-lobby binary, server/): the Internet tab lists a game
+    announced on that lobby, run on another local port, so through CORS (M14 task 2).
 Screenshots go to --out (default build/web-smoke). Nothing is contacted but
-127.0.0.1 (the menu and a solo game don't ask the lobby anything).
+127.0.0.1 (the menu and a solo game don't ask the lobby anything; with --lobby,
+net.ini points to the local one).
 """
 import argparse
 import base64
 import functools
 import http.server
+import json
 import os
+import re
 import socket
+import subprocess
 import sys
 import threading
+import time
+import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def free_port():
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def start_lobby(binary, page_origin):
+    """a local edifice-lobby that lets the page call it (CORS) and lists games from
+    127.0.0.1, with one game announced; returns (process, its URL)"""
+    port = free_port()
+    proc = subprocess.Popen([binary, "-http", "127.0.0.1:%d" % port, "-signal", "off",
+                             "-turn", "127.0.0.1:%d" % free_port(), "-allow-private",
+                             "-cors-origins", page_origin],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+    url = "http://127.0.0.1:%d" % port
+    for _ in range(100):
+        try:
+            urllib.request.urlopen(url + "/healthz", timeout=1).read()
+            break
+        except OSError:
+            time.sleep(0.1)
+    cmake = open(os.path.join(ROOT, "CMakeLists.txt")).read()
+    version = re.search(r"project\s*\([^)]*VERSION\s+([0-9.]+)", cmake).group(1)
+    proto = re.search(r"define EDIFICE_PROTOCOL_VERSION\s+(\d+)",
+                      open(os.path.join(ROOT, "src", "net", "version.h")).read()).group(1)
+    game = {"name": "Web smoke fort", "port": 37020, "version": version, "protocol": int(proto),
+            "players": 3, "maxplayers": 8, "mode": 0, "visibility": "public"}
+    req = urllib.request.Request(url + "/v1/servers", data=json.dumps(game).encode(),
+                                 headers={"Content-Type": "application/json"}, method="POST")
+    urllib.request.urlopen(req, timeout=5).read()
+    return proc, url
 
 
 def serve(site):
@@ -67,6 +108,7 @@ def main():
     ap.add_argument("site", nargs="?", default=os.path.join(ROOT, "build", "web"))
     ap.add_argument("--out", default=os.path.join(ROOT, "build", "web-smoke"))
     ap.add_argument("--headed", action="store_true")
+    ap.add_argument("--lobby", help="an edifice-lobby binary: also checks the Internet tab")
     args = ap.parse_args()
     if not os.path.isfile(os.path.join(args.site, "index.wasm")):
         sys.exit("no web build in %s (python3 build.py --web)" % args.site)
@@ -142,6 +184,34 @@ def main():
         check(not errors, "no page error in the game")
         aborted = [l for l in log if "abort" in l.lower() or "Aborted" in l]
         check(not aborted, "the game didn't abort")
+
+        if args.lobby:
+            # the Internet tab, from a lobby on another origin (port): CORS
+            lobby, lobbyurl = start_lobby(args.lobby, url.rstrip("/"))
+            try:
+                page.evaluate("""(lobby) => new Promise(r => {
+                    const f = '/user/net.ini';
+                    const ini = FS.readFile(f, {encoding: 'utf8'}).replace(/^lobby=.*$/m, 'lobby=' + lobby);
+                    FS.writeFile(f, ini);
+                    FS.syncfs(false, r);
+                })""", lobbyurl)
+                answers = []
+                page.on("response", lambda r: answers.append(r) if "/v1/servers" in r.url else None)
+                load("?HK_MENU=internet")
+                page.wait_for_timeout(3000)
+                sample(page, os.path.join(args.out, "internet.png"))
+                ok = [r for r in answers if r.status == 200 and
+                      r.headers.get("access-control-allow-origin") == url.rstrip("/")]
+                check(bool(ok), "the lobby answers the page (CORS)")
+                check(bool(ok) and "Web smoke fort" in ok[0].text(), "the Internet tab gets the game list")
+                check(not [l for l in log if "CORS" in l], "no CORS error")
+                # joining needs WebRTC (task 3): the screen says so
+                page.mouse.dblclick(100, 186)
+                page.wait_for_timeout(500)
+                sample(page, os.path.join(args.out, "internet-join.png"))
+            finally:
+                lobby.terminate()
+                lobby.wait()
         browser.close()
     httpd.shutdown()
     for l in log[-40:]:

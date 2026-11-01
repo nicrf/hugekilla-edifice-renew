@@ -214,8 +214,9 @@ jobs:
   web:
     # The web version (roadmap M14): Emscripten, WebGL2, no threads, solo and offline.
     # Unit tests in Node.js, then tests/web_smoke.py plays it in headless Chromium
-    # (SwiftShader's WebGL2): the menu, a solo game, the IndexedDB user folder. The
-    # site (as a zip) and the screenshots are kept as artifacts.
+    # (SwiftShader's WebGL2): the menu, a solo game, the IndexedDB user folder, and
+    # the Internet list from a local lobby on another origin (CORS). The site (as a
+    # zip) and the screenshots are kept as artifacts.
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -241,12 +242,18 @@ jobs:
           [ -n "${EMSDK:-}" ] || export EMSDK=$(cd "$(dirname "$(which emcc)")/../.." && pwd)
           python build.py --web --test --package
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache-dependency-path: server/go.sum
+
       - name: Play it in headless Chromium
         timeout-minutes: 15
         run: |
+          (cd server && go build -o ../build/edifice-lobby .)
           pip install playwright==1.64.1
           python -m playwright install --with-deps chromium-headless-shell
-          python tests/web_smoke.py build/web --out web-shots
+          python tests/web_smoke.py build/web --out web-shots --lobby build/edifice-lobby
 
       - uses: actions/upload-artifact@v4
         if: always()

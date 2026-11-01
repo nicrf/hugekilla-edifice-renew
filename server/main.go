@@ -41,6 +41,7 @@ func main() {
 	trustedProxies := flag.String("trusted-proxies", env("EDIFICE_TRUSTED_PROXIES", ""), "with -trust-proxy, comma-separated IPs/CIDRs of the reverse proxies (empty: just one, the peer)")
 	allowPrivate := flag.Bool("allow-private", os.Getenv("EDIFICE_ALLOW_PRIVATE") == "1", "list games announced from private/loopback addresses (LAN and tests)")
 	publicURL := flag.String("public-url", env("EDIFICE_PUBLIC_URL", ""), "URL players reach the HTTP API at, e.g. https://lobby.example.org (empty: taken from each request)")
+	corsOrigins := flag.String("cors-origins", env("EDIFICE_CORS_ORIGINS", DefaultCORSOrigins), "comma-separated origins of the web version allowed to call the API from a browser (CORS), \"*\" for any, \"none\" for none")
 	tlsCert := flag.String("tls-cert", env("EDIFICE_TLS_CERT", ""), "serve the HTTP API over HTTPS with this certificate (PEM; without a TLS reverse proxy)")
 	tlsKey := flag.String("tls-key", env("EDIFICE_TLS_KEY", ""), "...and this key")
 	ttl := flag.Duration("ttl", 60*time.Second, "a game disappears when its host hasn't refreshed it for this long")
@@ -100,6 +101,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("-trusted-proxies: %v", err)
 	}
+	cors, err := ParseCORSOrigins(*corsOrigins)
+	if err != nil {
+		log.Fatalf("-cors-origins: %v", err)
+	}
+	log.Printf("CORS (web version): %s", *corsOrigins)
 	go func() {
 		for range time.Tick(time.Minute) {
 			sessions.Expire()
@@ -125,7 +131,7 @@ func main() {
 
 	api := &API{registry: registry, sessions: sessions, signaling: signaling, trustProxy: *trustProxy,
 		trustedProxies: proxies, allowPrivate: *allowPrivate, publicURL: *publicURL,
-		limiter: newRateLimiter(*rateLimit, (*rateLimit+2)/3), refresh: *ttl / 3}
+		limiter: newRateLimiter(*rateLimit, (*rateLimit+2)/3), refresh: *ttl / 3, cors: cors}
 	srv := &http.Server{
 		Addr:              *httpAddr,
 		Handler:           api,

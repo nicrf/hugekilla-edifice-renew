@@ -606,7 +606,7 @@ int LobbySetURL(const char *url,const char *useragent)
 	return LobbyHttpAvailable();
 }
 
-#ifdef EDIFICE_LOBBY_CURL
+#if defined(EDIFICE_LOBBY_CURL)
 
 #include <curl/curl.h>
 #include <atomic>
@@ -819,6 +819,149 @@ void LobbyShutdown(int waitms)
 	curl_global_cleanup();
 	started=0;
 	stopping=0;
+}
+
+#elif defined(__EMSCRIPTEN__)
+
+//The web build (roadmap M14): the browser's fetch through emscripten_fetch, without
+//threads. Requests run in the browser and their callbacks come between two frames,
+//on the game's thread: the game sends then polls exactly as with the curl worker.
+//The lobby must allow the page's origin (CORS, EDIFICE_CORS_ORIGINS in server/).
+//The browser chooses the address family and the User-Agent (ipv4 and the agent
+//are ignored: only a host needs the lobby to see its IPv4, and the web build
+//doesn't host Internet games).
+
+#include <emscripten/fetch.h>
+#include <map>
+
+struct LobbyRequest
+{
+	std::string method,url,body,auth;
+	const char *headers[7];
+	int done;
+	int dropped;
+	int status;
+	std::string reply;
+};
+
+static std::map<int,LobbyRequest *> requests;   //every request not polled yet
+static int nextrequest=1;
+
+int LobbyHttpAvailable()
+{
+	return 1;
+}
+
+//success and failure alike: an HTTP status (or 0 when it couldn't be fetched)
+static void Finished(emscripten_fetch_t *f)
+{
+	LobbyRequest *r=(LobbyRequest *)f->userData;
+	r->status=f->status;
+	if(f->numBytes>LOBBY_MAXREPLY)
+	{
+		r->status=0;
+		r->reply="the lobby's answer is too long";
+	}
+	else if(f->status==0)
+		//a network error, or the lobby doesn't allow this page (CORS): the browser
+		//doesn't tell which
+		r->reply=f->statusText[0]?f->statusText:"network error (or the lobby doesn't allow this page)";
+	else if(f->data&&f->numBytes>0)
+		r->reply.assign(f->data,(size_t)f->numBytes);
+	r->done=1;
+	emscripten_fetch_close(f);
+	if(r->dropped) delete r;   //LobbyDrop forgot it already
+}
+
+int LobbySend(const char *method,const char *path,const char *body,const char *token,int ipv4)
+{
+	(void)ipv4;
+	if(!lobbyurl[0]||!method||!path||path[0]!='/') return 0;
+	if(strlen(method)>=sizeof(((emscripten_fetch_attr_t *)0)->requestMethod)) return 0;
+	int running=0;
+	for(std::map<int,LobbyRequest *>::iterator i=requests.begin();i!=requests.end();++i)
+		if(!i->second->done) running++;
+	if(running>=16) return 0;   //the lobby isn't answering: don't pile up
+	LobbyRequest *r=new LobbyRequest;
+	r->method=method;
+	r->url=std::string(lobbyurl)+path;
+	if(body) r->body=body;
+	r->done=r->dropped=0;
+	r->status=0;
+	int h=0;
+	r->headers[h++]="Accept";
+	r->headers[h++]="application/json";
+	if(body)
+	{
+		r->headers[h++]="Content-Type";
+		r->headers[h++]="application/json";
+	}
+	if(token)
+	{
+		r->auth=std::string("Bearer ")+token;
+		r->headers[h++]="Authorization";
+		r->headers[h++]=r->auth.c_str();
+	}
+	r->headers[h]=0;
+	int id=nextrequest++;
+	if(nextrequest<=0) nextrequest=1;
+	requests[id]=r;
+
+	emscripten_fetch_attr_t attr;
+	emscripten_fetch_attr_init(&attr);
+	strcpy(attr.requestMethod,method);
+	attr.attributes=EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
+	attr.onsuccess=Finished;
+	attr.onerror=Finished;
+	attr.userData=r;
+	attr.requestHeaders=r->headers;
+	if(body)
+	{
+		attr.requestData=r->body.data();
+		attr.requestDataSize=r->body.size();
+	}
+	attr.timeoutMSecs=10000;
+	emscripten_fetch(&attr,r->url.c_str());
+	return id;
+}
+
+int LobbyPoll(int request,int *status,std::string *reply)
+{
+	std::map<int,LobbyRequest *>::iterator i=requests.find(request);
+	if(i==requests.end())
+	{
+		*status=0;
+		if(reply) *reply="no such request";
+		return 1;
+	}
+	LobbyRequest *r=i->second;
+	if(!r->done) return 0;
+	*status=r->status;
+	if(reply) reply->swap(r->reply);
+	requests.erase(i);
+	delete r;
+	return 1;
+}
+
+void LobbyDrop(int request)
+{
+	std::map<int,LobbyRequest *>::iterator i=requests.find(request);
+	if(i==requests.end()) return;
+	if(i->second->done) delete i->second;
+	else i->second->dropped=1;   //Finished deletes it
+	requests.erase(i);
+}
+
+//nothing to wait for: the page goes away with its requests, and a closing host
+//(none on the web) would only have its DELETE in flight
+void LobbyShutdown(int)
+{
+	for(std::map<int,LobbyRequest *>::iterator i=requests.begin();i!=requests.end();++i)
+	{
+		if(i->second->done) delete i->second;
+		else i->second->dropped=1;
+	}
+	requests.clear();
 }
 
 #else   //built without libcurl: no Internet list

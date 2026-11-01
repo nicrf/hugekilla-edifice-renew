@@ -15,8 +15,9 @@ import (
 )
 
 // APIVersion goes up with each addition to the API a game may rely on: 1 the game
-// list, sessions and signaling; 2 the "lan" addresses of a game (same network)
-const APIVersion = 2
+// list, sessions and signaling; 2 the "lan" addresses of a game (same network);
+// 3 CORS for the web version (cors.go)
+const APIVersion = 3
 
 // API is the HTTP JSON interface of the lobby:
 //
@@ -45,6 +46,7 @@ type API struct {
 	publicURL      string // https://host the players use, "" to take it from each request
 	limiter        *rateLimiter
 	refresh        time.Duration
+	cors           *CORS // origins of the web version allowed to call the API (cors.go)
 
 	hintMu   sync.Mutex
 	hintLast time.Time
@@ -252,6 +254,10 @@ func statusFor(err error) int {
 }
 
 func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// before the rate limit: a page's preflight comes before each of its writes
+	if a.cors.handle(w, r) {
+		return
+	}
 	path := strings.TrimSuffix(r.URL.Path, "/")
 	if path == "/healthz" {
 		w.Write([]byte("ok\n"))

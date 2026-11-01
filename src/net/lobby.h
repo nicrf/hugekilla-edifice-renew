@@ -1,6 +1,7 @@
 //client of edifice-lobby (server/, roadmap M7c): the list of Internet games.
-//HTTP(S) requests run one at a time on a worker thread (libcurl), so the game loop
-//never waits for the network: it sends a request, then polls for its answer.
+//HTTP(S) requests run one at a time on a worker thread (libcurl), or in the browser
+//(emscripten_fetch, the web build), so the game loop never waits for the network: it
+//sends a request, then polls for its answer.
 //The answers are small fixed JSON documents, read here by a bounded parser that
 //keeps only validated fields (the lobby is a remote server: never trusted).
 //Nothing in here depends on the game, so tests/lobby_test.cpp uses it directly;
@@ -81,7 +82,7 @@ struct LobbySession
 
 //---- HTTP (worker thread) ----
 
-int LobbyHttpAvailable();   //0 when built without libcurl
+int LobbyHttpAvailable();   //0 when built without libcurl (natively) or fetch (web)
 //base URL of the lobby, e.g. https://lobby.example.org (http:// or https://, no
 //spaces, at most 200 characters). Returns 0, and disables the lobby, otherwise.
 int LobbySetURL(const char *url,const char *useragent);
