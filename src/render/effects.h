@@ -26,6 +26,10 @@ void FxBulletWake(const Vector &from,const Vector &to);
 //dir (normalized): dust, grains, sparks off a block
 void FxBulletImpact(const Vector &hit,const Vector &dir,int onblock);
 
+//drawn at once (DrawGunExplosions, fxprefs.muzzleflash): the glow of a shot around
+//the muzzle sprite, bright 0..1, turned by rot (radians) so it flickers
+void FxMuzzleGlow(const Vector &pos,float size,float bright,float rot);
+
 //procedural textures of the effects (LoadTextures)
 void FxLoadTextures();
 //moves and draws the effects: Draw (redrawing.cpp), with the scene's camera; layer

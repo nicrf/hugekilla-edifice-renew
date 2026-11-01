@@ -645,6 +645,27 @@ static void Streak(const FxParticle &p,float length,float r,float g,float b,floa
 	Vertex(tail-side);
 }
 
+void FxMuzzleGlow(const Vector &pos,float size,float bright,float rot)
+{
+	CameraFromModelView();
+	RPushAttrib(RATTR_ENABLE|RATTR_COLOR|RATTR_FOG|RATTR_POLYGON|RATTR_TEXTURE|RATTR_CURRENT);
+	RDisable(RCAP_CULL|RCAP_FOG);
+	REnable(RCAP_BLEND|RCAP_DEPTHTEST|RCAP_TEXTURE);
+	RBlendFunc(RBLEND_ADD);
+	RDepthMask(0);
+	//a ragged orange burst, and a white-hot core
+	TexBind(TEX_FX_FIRE);
+	RBegin(RP_QUADS);
+	Billboard(pos,size,rot,1,.6f,.25f,.8f*bright);
+	REnd();
+	TexBind(TEX_FX_GLOW);
+	RBegin(RP_QUADS);
+	Billboard(pos,size*.45f,0,1,.95f,.8f,bright);
+	REnd();
+	RDepthMask(1);
+	RPopAttrib();
+}
+
 struct SortItem
 {
 	float depth;

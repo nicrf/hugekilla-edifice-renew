@@ -51,7 +51,7 @@ AseObj projectile[10];
 AseObj servercobs[50][3];
 AseObj hangglider;
 GraphicsPrefs graphicsprefs;
-FxPrefs fxprefs={1,1,1,1};
+FxPrefs fxprefs={1,1,1,1,1};
 GunDrawInfo gun[10];
 
 int landfaces;
@@ -1144,6 +1144,12 @@ static void DrawGunExplosions(int local)
 			epos[2]=pos+top*factor*(sin(ang+PI*1.5)*1)+right*factor*(cos(ang+PI*1.5)*1);
 			epos[3]=pos+top*factor*(sin(ang+PI)*1)+right*factor*(cos(ang+PI)*1);
 			
+			//the light of the shot around the sprite's flame, for its first 80 ms
+			//(M13.5). Before the sprite: the sprite's whole quad writes depth, and
+			//the glow, in about its plane, would fail the test inside it
+			if(fxprefs.muzzleflash&&timesincefire<8&&pl->weapon!=4)   //4: thrown grenades
+				FxMuzzleGlow(pos,factor*1.1f,.7f*(1-timesincefire/8),pl->curexplosionrot*37);
+
 			REnable(RCAP_DEPTHTEST);
 			RDisable(RCAP_FOG);
 			RBlendFunc(RBLEND_ALPHA);
@@ -1159,7 +1165,7 @@ static void DrawGunExplosions(int local)
 			RVertex3fv((float*)&epos[2]);
 			RTexCoord2f(0,0);
 			RVertex3fv((float*)&epos[3]);
-			
+
 			REnd();
 		}
 	}
