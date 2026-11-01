@@ -9,6 +9,8 @@
 #include "redrawing.h"
 #include "vector.h"
 #include "playing.h"
+
+extern char menu;   //playing.cpp: BUILDING while placing a structure
 #include "multiplay.h"
 #include "sound.h"
 #include "ui.h"
@@ -334,6 +336,11 @@ static void HandleEvent(const SDL_Event &ev)
 		if (IsBuildMenuOpen())
 		{
 			BuildMenuWheel(ud);
+			break;
+		}
+		if (menu == BUILDING && !consolevisible)
+		{
+			BuildPreviewWheel(ud, (SDL_GetModState() & (KMOD_CTRL | KMOD_GUI)) != 0);
 			break;
 		}
 		if (consolevisible && GetLocalPlayer()->playstate != 0)
