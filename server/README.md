@@ -54,6 +54,8 @@ Une partie annoncée depuis une adresse privée (10/8, 172.16/12, 192.168/16, 12
 
 Sans reverse proxy, le lobby peut servir l'API en HTTPS lui-même : `-tls-cert`/`-tls-key`.
 
+**Version web du jeu (CORS)** : la page du jeu (GitHub Pages, `https://nicrf.github.io/hugekilla-edifice-renew/`) appelle l'API depuis une autre origine. Le lobby répond avec `Access-Control-Allow-Origin` aux seules origines de `EDIFICE_CORS_ORIGINS` (par défaut `https://nicrf.github.io` ; ajouter le domaine personnalisé s'il y en a un, par exemple `https://nicrf.github.io,https://play.example.org`), et répond lui-même aux requêtes `OPTIONS` de pré-vérification (méthodes `GET, POST, PUT, DELETE`, en-têtes `Authorization, Content-Type`), avant la limite de débit. Le jeu natif n'envoie pas d'`Origin` et n'est pas concerné ; le WebSocket de signalisation n'est pas soumis à CORS. Le reverse proxy ne doit pas ajouter ses propres en-têtes CORS (Caddy n'en ajoute pas par défaut).
+
 Ou avec Docker seul :
 
 ```bash
@@ -72,6 +74,7 @@ docker run -p 8080:8080 -p 10000:10000 -p 3478:3478/udp -e EDIFICE_PUBLIC_HOST=l
 | `-trust-proxy` | `EDIFICE_TRUST_PROXY=1` | non | IP du client lue dans `X-Forwarded-For` (entrée la plus à droite), schéma dans `X-Forwarded-Proto` (derrière un reverse proxy) |
 | `-trusted-proxies` | `EDIFICE_TRUSTED_PROXIES` | — | avec `-trust-proxy` : IP/CIDR des proxys en chaîne (vide : un seul, celui qui se connecte) |
 | `-public-url` | `EDIFICE_PUBLIC_URL` | — | URL publique de l'API (`https://lobby.example.org`) pour `signaling_url` ; vide = déduite de chaque requête |
+| `-cors-origins` | `EDIFICE_CORS_ORIGINS` | `https://nicrf.github.io` | origines de la version web autorisées à appeler l'API depuis un navigateur (CORS), séparées par des virgules ; `*` = toutes, `none` = aucune |
 | `-allow-private` | `EDIFICE_ALLOW_PRIVATE=1` | non | accepte les parties annoncées depuis une adresse privée ou de bouclage (LAN, tests) |
 | `-tls-cert`, `-tls-key` | `EDIFICE_TLS_CERT`, `EDIFICE_TLS_KEY` | — | sert l'API en HTTPS (sans reverse proxy) |
 | `-ttl` | — | `60s` | une partie disparaît si son hôte ne l'a pas renouvelée depuis ce délai |
@@ -81,11 +84,11 @@ Pour le relais TURN, les ports UDP des allocations doivent aussi être joignable
 
 ## Versions
 
-Chaque image dit ce qu'elle est : `GET /v1/version` renvoie `{"version": "0.5.4", "commit": "…", "api": 2}`, `edifice-lobby -version` l'affiche, et le lobby l'écrit au démarrage dans son journal.
+Chaque image dit ce qu'elle est : `GET /v1/version` renvoie `{"version": "0.5.4", "commit": "…", "api": 3}`, `edifice-lobby -version` l'affiche, et le lobby l'écrit au démarrage dans son journal.
 
 - **Tags de l'image** (`ghcr.io/nicrf/edifice-lobby`) : `latest` suit `main` ; chaque release du jeu `vX.Y.Z` publie `X.Y.Z` et `X.Y` ; chaque commit a aussi son `sha-<commit>`.
 - **Choisir sa version** : `EDIFICE_LOBBY_TAG` dans `.env` (défaut `latest`). `EDIFICE_LOBBY_TAG=0.5` garde la ligne 0.5 avec ses correctifs ; `0.5.4` fige une version exacte ; revenir en arrière = remettre l'ancien tag puis `docker compose pull && docker compose up -d`.
-- **`api`** monte quand l'API gagne quelque chose dont un jeu peut dépendre (2 : les adresses `lan` d'une partie). Les ajouts restent compatibles : un jeu plus ancien ignore ce qu'il ne connaît pas.
+- **`api`** monte quand l'API gagne quelque chose dont un jeu peut dépendre (2 : les adresses `lan` d'une partie ; 3 : CORS pour la version web). Les ajouts restent compatibles : un jeu plus ancien ignore ce qu'il ne connaît pas.
 
 ## API
 

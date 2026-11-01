@@ -18,6 +18,8 @@ services:
       EDIFICE_TRUSTED_PROXIES: ${EDIFICE_TRUSTED_PROXIES:-}
       EDIFICE_PUBLIC_URL: ${EDIFICE_PUBLIC_URL:-}
       EDIFICE_SIGNAL: ${EDIFICE_SIGNAL:-:10000}
+      # origins of the web version (CORS), comma-separated; add a custom domain here
+      EDIFICE_CORS_ORIGINS: ${EDIFICE_CORS_ORIGINS:-https://nicrf.github.io}
     ports:
       # HTTP API and the WebSocket signaling relay (GET /v1/signal): put a TLS
       # reverse proxy in front (Caddy's reverse_proxy passes WebSockets as is)

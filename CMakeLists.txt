@@ -96,7 +96,7 @@ FetchContent_MakeAvailable(opus)
 # anyway, and the join screen's Internet tab says it isn't available.
 option(EDIFICE_LOBBY "Internet game list (needs libcurl)" ON)
 set(HK_CURL_LIB)
-if(EDIFICE_LOBBY AND NOT EMSCRIPTEN)   # the web build has no curl (M14 task 2: fetch)
+if(EDIFICE_LOBBY AND NOT EMSCRIPTEN)   # the web build fetches through the browser (lobby.cpp)
   find_package(CURL QUIET)
   if(CURL_FOUND)
     set(HK_CURL_LIB CURL::libcurl)
@@ -302,6 +302,7 @@ if(EMSCRIPTEN)
     # generation keeps big arrays there
     -sSTACK_SIZE=8MB
     -sENVIRONMENT=web
+    -sFETCH=1   # the lobby (src/net/lobby.cpp: emscripten_fetch, M14 task 2)
     -lidbfs.js
     "SHELL:--pre-js ${HK_WEB_DIR}/pre.js"
     "SHELL:--shell-file ${HK_WEB_DIR}/shell.html"
@@ -486,6 +487,7 @@ if(EMSCRIPTEN)
       lobby_test signaling_test)
     target_link_options(${t} PRIVATE -sNODERAWFS=1 -sALLOW_MEMORY_GROWTH=1 -sSTACK_SIZE=1MB)
   endforeach()
+  target_link_options(lobby_test PRIVATE -sFETCH=1)   # lobby.cpp's emscripten_fetch
 endif()
 
 # ---- GameNetworkingSockets (roadmap M7) ---------------------------------------
