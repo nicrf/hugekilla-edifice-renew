@@ -1625,6 +1625,7 @@ void Redraw()
 		DrawScoreboard();
 	DrawBuildMenu();
 #ifndef HK_WIN32_NATIVE
+	DrawSpawnScreen();
 	if(consolevisible) DrawConsolePanel(0);
 #endif
 	ScreenShot();	
