@@ -47,6 +47,15 @@ template<class IO> inline void SyncPosition(IO &io,PlayerPosition &p)
 }
 WIREPAIR(Position,PlayerPosition)
 #define POSITIONSIZE 16
+//from a client with HELLOCAP_POSSEQ (M11 phase 3b): + uint16 sequence number,
+//one more for each position it sends. Older servers read the first 16 bytes only.
+#define POSITIONSEQSIZE (POSITIONSIZE+2)
+//the sequence number of a position, -1 if it has none
+inline int ReadPositionSeq(const void *buf,int len)
+{
+	if(len<POSITIONSEQSIZE) return -1;
+	return WireGetU16((const unsigned char *)buf+POSITIONSIZE);
+}
 
 //FIREGUN, 27 bytes
 template<class IO> inline void SyncFireGun(IO &io,FireGunDirection &f)

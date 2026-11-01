@@ -14,8 +14,8 @@
 // Both sides must have the same protocol version. The one negotiation within a
 // protocol is the capability byte of REQUESTENTER and INFO below (HELLOCAP_*):
 // bytes appended where older builds of the same protocol stop reading, and new
-// messages (ENTERCOOKIE; HITMODE, SERVERHIT) only sent to a peer that announced it
-// understands them.
+// messages (ENTERCOOKIE; HITMODE, SERVERHIT) or meanings (DELETEPLAYER that keeps
+// the slots) only sent to a peer that announced it understands them.
 // EDIFICE_VERSION_STRING (the release, from CMakeLists.txt) is informative only.
 
 #ifndef EDIFICE_VERSION_H
@@ -48,7 +48,7 @@ struct PeerVersion
 	char version[16];
 };
 
-// Capabilities (M11 phases 2 and 3a, docs/M11.md), still protocol 5. After the version
+// Capabilities (M11 phases 2, 3a and 3b, docs/M11.md), still protocol 5. After the version
 // trailer, where builds before them stop reading:
 //   REQUESTENTER: ... trailer | uint8 caps | cookie[HELLOCOOKIE_SIZE] if caps & HELLOCAP_HASCOOKIE
 //   INFO:         ... trailer | 4 bytes of details | uint8 caps
@@ -57,6 +57,10 @@ struct PeerVersion
 #define HELLOCAP_REQUIRECOOKIE 4 // INFO: clients without HELLOCAP_COOKIE are refused (ac_requirecookie)
 #define HELLOCAP_SERVERHITS 8    // REQUESTENTER: the client obeys HITMODE/SERVERHIT; INFO: the server
                                  // decides hits (ac_serverhits, M11 phase 3a)
+#define HELLOCAP_STABLESLOTS 16  // REQUESTENTER: the client understands PLAYERLEFT_KEEPSLOTS (DELETEPLAYER
+                                 // without renumbering, M11 phase 3b); INFO: the server keeps slots
+#define HELLOCAP_POSSEQ 32       // REQUESTENTER: its PLAYERPOSITIONs end with a uint16 sequence number
+                                 // (POSITIONSEQSIZE, netmsg.h); the server drops those without one
 #define HELLOCOOKIE_SIZE 8
 #define HELLOCAPS_MAX (1+HELLOCOOKIE_SIZE)
 

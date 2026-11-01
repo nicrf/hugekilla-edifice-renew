@@ -30,7 +30,7 @@ status=0
 # net_cookie@require: the same server vars plus ac_requirecookie 1 (docs/M11.md)
 for run in net_handshake net_identity net_join net_fuzz net_voice net_voice@1 net_voice@2 \
 		net_voice@3 net_voice@10 net_voice@26 net_voice@40 net_map net_anticheat \
-		net_cookie net_cookie@require; do
+		net_cookie net_cookie@require net_slots; do
 	t="${run%@*}"
 	log="$LOGDIR/$run.log"
 	args=()
@@ -54,7 +54,8 @@ for run in net_handshake net_identity net_join net_fuzz net_voice net_voice@1 ne
 		args=("$map")
 		HK_MAPFILE="$map" "$BIN" >"$log" 2>&1 &
 	else
-		[ "$t" = net_anticheat ] && args=("$log")   # checks the server's log lines
+		# these check the server's log lines
+		{ [ "$t" = net_anticheat ] || [ "$t" = net_slots ]; } && args=("$log")
 		"$BIN" >"$log" 2>&1 &
 	fi
 	pid=$!
@@ -69,8 +70,8 @@ for run in net_handshake net_identity net_join net_fuzz net_voice net_voice@1 ne
 	fi
 	kill "$pid" 2>/dev/null
 	wait "$pid" 2>/dev/null
-	if [ "$t" != net_anticheat ] && [ "$t" != net_fuzz ] &&
-			grep -E "anticheat: (kill|death|fire|ammo|build|state|ip|origin):" "$log"; then
+	if [ "$t" != net_anticheat ] && [ "$t" != net_fuzz ] && [ "$t" != net_slots ] &&
+			grep -E "anticheat: (kill|death|fire|ammo|build|state|ip|origin|position):" "$log"; then
 		echo "anti-cheat false positive during $run"
 		status=1
 	fi

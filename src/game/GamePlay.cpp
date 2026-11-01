@@ -45,6 +45,7 @@ int GetTeamSize(int teamnum,int living)
 	int teamsize=0;
 	for(int i=0;i<numplayers;i++)
 	{
+		if(!PlayerSlotUsed(i)) continue;   //a free slot (M11 phase 3b)
 		if(GetPlayer(i)->playstate>=10||!living)
 		if(teamnum==-1||GetPlayer(i)->team==teamnum) 
 			teamsize++;
@@ -126,6 +127,21 @@ void GPlayerLeave(int num)
 		}
 	}
 
+}
+
+//server: the players after left were renumbered down one (DeletePlayer, a client
+//of an older build in the game). Their objects move with them; the update tells
+//every client (older ones don't move them themselves).
+void GPlayerRenumber(int left)
+{
+	for(int i=0;i<MAXSERVEROBJS;i++)
+	{
+		if(sobject[i].type&&sobject[i].attached>left)
+		{
+			sobject[i].attached--;
+			SendUpdateServerObject(i);
+		}
+	}
 }
 
 
@@ -225,6 +241,7 @@ void GRestartPlayers()
 {
 	for(int i=0;i<numplayers;i++)
 	{
+		if(!PlayerSlotUsed(i)) continue;
 		GetPlayer(i)->playstate=1;
 		GetPlayer(i)->team=0;
 	}
