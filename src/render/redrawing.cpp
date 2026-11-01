@@ -51,7 +51,7 @@ AseObj projectile[10];
 AseObj servercobs[50][3];
 AseObj hangglider;
 GraphicsPrefs graphicsprefs;
-FxPrefs fxprefs={1,1,1,1,1};
+FxPrefs fxprefs={1,1,1,1,1,0};
 GunDrawInfo gun[10];
 
 int landfaces;
@@ -1352,7 +1352,7 @@ void Redraw()
 	sprintf(tmptext,"%d",(int)curfps);
 	if(!consolevisible)
 	{
-		UIText(-.97f,.88f,tmptext);
+		if(fxprefs.netstats) UIText(-.97f,.88f,tmptext);
 		if(menu) UITextLines(-.6f,.5f,menutext);
 	}
 	sprintf(tmptext,"%d",(int)(curtime&999));
@@ -1371,46 +1371,49 @@ void Redraw()
 	}
 	DrawVoiceHUD();
 	
-	sprintf(tmptext,"%d",(int)cursendrate);
-	UIText(.5f,.88f,tmptext);
-	sprintf(tmptext,"%d",(int)currecvrate);
-	UIText(.7f,.88f,tmptext);
-	char faceinfo[100];
-	
-	if(datasendthisframe)
+	//debug aid of the original game, off unless Options asks for it
+	if(fxprefs.netstats)
 	{
-		sendbright=1;
-	}
-	sendbright/=1.3;
-	RDisable(RCAP_TEXTURE);
-	RColor4f(1,0,0,sendbright);
-	RBegin(RP_QUADS);
-	RVertex2f(.5,.75);
-	RVertex2f(.6,.75);
-	RVertex2f(.6,.82);
-	RVertex2f(.5,.82);
-	
-	REnd();
-	REnable(RCAP_TEXTURE);
-	RColor3f(1,1,1);
-	if(datarecvthisframe)
-	{
-		recvbright=1;
-	}
+		sprintf(tmptext,"%d",(int)cursendrate);
+		UIText(.5f,.88f,tmptext);
+		sprintf(tmptext,"%d",(int)currecvrate);
+		UIText(.7f,.88f,tmptext);
+		char faceinfo[100];
+		
+		if(datasendthisframe)
+		{
+			sendbright=1;
+		}
+		sendbright/=1.3;
+		RDisable(RCAP_TEXTURE);
+		RColor4f(1,0,0,sendbright);
+		RBegin(RP_QUADS);
+		RVertex2f(.5,.75);
+		RVertex2f(.6,.75);
+		RVertex2f(.6,.82);
+		RVertex2f(.5,.82);
+		
+		REnd();
+		REnable(RCAP_TEXTURE);
+		RColor3f(1,1,1);
+		if(datarecvthisframe)
+		{
+			recvbright=1;
+		}
 
-	recvbright/=1.3;
-	RDisable(RCAP_TEXTURE);
-	RColor4f(0,0,1,recvbright);
-	RBegin(RP_QUADS);
-	RVertex2f(.7,.75);
-	RVertex2f(.8,.75);
-	RVertex2f(.8,.82);
-	RVertex2f(.7,.82);
-	
-	REnd();
-	REnable(RCAP_TEXTURE);
-	RColor3f(1,1,1);
-
+		recvbright/=1.3;
+		RDisable(RCAP_TEXTURE);
+		RColor4f(0,0,1,recvbright);
+		RBegin(RP_QUADS);
+		RVertex2f(.7,.75);
+		RVertex2f(.8,.75);
+		RVertex2f(.8,.82);
+		RVertex2f(.7,.82);
+		
+		REnd();
+		REnable(RCAP_TEXTURE);
+		RColor3f(1,1,1);
+	}
 	datasendthisframe=0;
 	datarecvthisframe=0;
 
