@@ -19,6 +19,7 @@
 #include "gameplay.h"
 #include "sock.h"
 #include "udplink.h"
+#include "netlink.h"
 #include "version.h"
 #include "wire.h"
 #include "netmsg.h"
@@ -241,7 +242,7 @@ void StartServer()
 	LoadNetSettings();
 	numplayers=1;
 	
-	infosock.Open(UdpLink::Open(netsettings.infosendport,1));
+	infosock.Open(NetOpenInfoLink(netsettings.infosendport,1));
 
 	SetLocalNum(0);
 	GetLocalPlayer()->playstate=10;
@@ -291,6 +292,7 @@ void CloseSocks()
 {
 	Disconnect();
 	LobbyQuit();
+	NetLinkShutdown();
 	WSACleanup();
 }
 
@@ -516,9 +518,12 @@ void ServerLoop()
 					break;
 				}
 				
-				//each client gets its own server port: the first free one after datasendport
+				//each client gets its own server port: the first free one after datasendport.
+				//A GameNetworkingSockets client has its connection instead (netlink.h): its
+				//port is only a number then, nothing is bound.
 				int baseport=ntohs(netsettings.datasendport);
-				UdpLink *newlink=new UdpLink;
+				DatagramLink *peerlink=NetOpenPeerLink(&source);
+				UdpLink *newlink=peerlink?0:new UdpLink;
 				int port=0;
 				for(int p=baseport+1;p<=baseport+2*MAXPLAYERS&&!port;p++)
 				{
@@ -526,18 +531,19 @@ void ServerLoop()
 					for(int c=1;c<numplayers;c++)
 						if(clientsock[c].link&&clientsock[c].localport==p) used=1;
 					if(used) continue;
-					if(newlink->Bind(htons(p))) port=p;
+					if(peerlink||newlink->Bind(htons(p))) port=p;
 				}
 				if(!port)
 				{
-					delete newlink;
 					ConsoleDisplayText("no free port for a new client");
 					RefuseClient(source,SERVERFULL,"The server has no free port.");
+					delete peerlink;   //after the refusal, which goes through its connection
+					delete newlink;
 					break;
 				}
 
 				strcpy(GetPlayer(addplayer)->name,reqname);
-				clientsock[addplayer].Open(newlink);
+				clientsock[addplayer].Open(peerlink?peerlink:newlink);
 				clientsock[addplayer].dest=source;
 				clientsock[addplayer].dest.sin_port=htons(port);   //the client binds the same port
 				clientsock[addplayer].localport=port;
@@ -611,7 +617,11 @@ void ServerLoop()
 						VoiceMessage voice;
 						if(!ReadVoice(&msg,clen,&voice)) break;
 						voice.player=i;   //a client only speaks for itself
-						if(GetPlayer(i)->playstate<10) break;
+						if(GetPlayer(i)->playstate<10)
+						{
+							if(getenv("HK_VOICE_LOG")) fprintf(stderr,"voice from %d dropped: state %d\n",i,GetPlayer(i)->playstate);
+							break;
+						}
 						RelayVoice(&voice);
 						break;
 					}
@@ -745,7 +755,7 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 					GetLocalPlayer()->playstate=1;
 					GetLocalPlayer()->timeout=curtime+70000;
 					numplayers=msg2+1;
-					datasock.Open(UdpLink::Open(msg,0));
+					datasock.Open(NetOpenDataLink(msg,&source));
 					datasock.dest=source;
 					datasock.dest.sin_port=msg;
 					datasock.filterip=1;   //from now on, only the server's IP
@@ -1151,7 +1161,7 @@ void JoinNetOpen()
 {
 	LoadNetSettings();
 	if(!infosock.link)
-		infosock.Open(UdpLink::Open(netsettings.infosendport,1));
+		infosock.Open(NetOpenInfoLink(netsettings.infosendport,0));
 }
 
 void JoinNetClose()
@@ -1209,6 +1219,7 @@ int JoinNetQuery(const char *host,int port)
 	}
 	SOCKADDR_IN dest=MakeSockAddr(0,0,0,0,port?htons((WORD)port):netsettings.infosendport);
 	dest.sin_addr.s_addr=addr;
+	NetQueryHost(&dest);
 	SendInfoRequest(dest);
 	return 1;
 }
@@ -1556,6 +1567,15 @@ static void RelayVoice(VoiceMessage *voice)
 	char buf[VOICEMSGSIZE];
 	int size=WriteVoice(buf,sizeof(buf),voice);
 	if(!size) return;
+	static int voicelog=getenv("HK_VOICE_LOG")!=0;
+	if(voicelog)   //debug: why a frame went (or not) to each player
+		for(int i=0;i<numplayers;i++)
+		{
+			Vector pa=GetPlayer(speaker)->pos,pb=GetPlayer(i)->pos;
+			fprintf(stderr,"relay %d seq %d -> %d: state %d/%d dist %.1f (%.1f %.1f %.1f)-(%.1f %.1f %.1f)\n",
+				speaker,voice->seq,i,GetPlayer(speaker)->playstate,GetPlayer(i)->playstate,
+				VoiceDistance(pa.x,pa.y,pa.z,pb.x,pb.y,pb.z),pa.x,pa.y,pa.z,pb.x,pb.y,pb.z);
+		}
 	for(int i=1;i<numplayers;i++)
 		if(i!=speaker&&GetPlayer(i)->playstate>=10&&VoiceNear(speaker,i))
 			clientsock[i].Send(buf,size);

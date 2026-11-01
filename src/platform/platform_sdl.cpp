@@ -22,6 +22,7 @@
 extern GraphicsPrefs graphicsprefs;
 extern DWORD curtime;
 extern int consolevisible;
+extern int consoleoverlay;
 
 HINSTANCE hInst;
 HWND hWnd;
@@ -257,6 +258,7 @@ static void HandleEvent(const SDL_Event &ev)
 		OptionsHandleText(ev.text.text);
 		ServerSetupHandleText(ev.text.text);
 		ChatHandleText(ev.text.text);
+		ConsoleHandleText(ev.text.text);
 		break;
 	case SDL_MOUSEMOTION:
 	{
@@ -318,6 +320,11 @@ static void HandleEvent(const SDL_Event &ev)
 		if (IsBuildMenuOpen())
 		{
 			BuildMenuWheel(ud);
+			break;
+		}
+		if (consolevisible && GetLocalPlayer()->playstate != 0)
+		{
+			ConsoleScroll(ud * 3);
 			break;
 		}
 		if (ud < 0) SwitchGun(50);
@@ -627,6 +634,19 @@ int main(int argc, char **argv)
 		if (!strcmp(m, "player")) { OpenOptions(); mousepos = Vector(.4f, .72f, 0); OptionsClick(); }
 	}
 
+	// Debug aid: HK_CONSOLE=1 starts a local server and opens the console after a few
+	// commands, so it has content; HK_CONSOLE=scroll also scrolls back, HK_CONSOLE=notify
+	// leaves it closed (last lines over the game), any other <text> is left at the prompt.
+	if (const char *c = getenv("HK_CONSOLE"))
+	{
+		StartServer();
+		const char *cmds[] = { "help", "maps", "gravity", "loadmap ../nope", "drawdistance 60" };
+		for (int i = 0; i < 5; i++) ConsoleExecute(cmds[i]);
+		if (!strcmp(c, "scroll")) ConsoleScroll(12);
+		else if (strcmp(c, "1") && strcmp(c, "notify")) ConsoleSetInput(c);
+		consolevisible = strcmp(c, "notify") != 0;
+	}
+
 	DWORD nexttimertick = 0;
 	while (!quitrequested)
 	{
@@ -671,6 +691,7 @@ int main(int argc, char **argv)
 		// The build menu frees the mouse but keeps drawing the game behind it.
 		if (GetLocalPlayer()->playstate == 0 || (lockedcursor == 0 && !IsBuildMenuOpen()))
 		{
+			consoleoverlay = 0;   // the console log draws its own frames while loading
 			if (redraw)
 				DrawMenu();
 			if (GetLocalPlayer()->playstate != 0)

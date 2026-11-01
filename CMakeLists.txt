@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(Edifice VERSION 0.4.0 LANGUAGES C CXX)
+project(Edifice VERSION 0.4.1 LANGUAGES C CXX)
 
 # Edifice (HugeKilla) - one build, one code path for every platform:
 #   SDL2 (window, input, audio) + legacy OpenGL on macOS, Linux and Windows.
@@ -17,7 +17,12 @@ if(NOT HK_MULTI_CONFIG AND NOT CMAKE_BUILD_TYPE)
 endif()
 if(MSVC)
   # Static CRT, like the original Release build: no VC++ redistributable needed.
-  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+  # With EDIFICE_GNS (below) the shared one for everything, as its DLL needs.
+  if(EDIFICE_GNS)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+  else()
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+  endif()
 endif()
 
 # ---- SDL2 --------------------------------------------------------------------
@@ -51,7 +56,11 @@ set(OPUS_BUILD_TESTING OFF CACHE BOOL "" FORCE)
 set(OPUS_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
 set(OPUS_INSTALL_PKG_CONFIG_MODULE OFF CACHE BOOL "" FORCE)
 set(OPUS_INSTALL_CMAKE_CONFIG_MODULE OFF CACHE BOOL "" FORCE)
-set(OPUS_STATIC_RUNTIME ON CACHE BOOL "" FORCE)   # MSVC: same static CRT as the game
+if(EDIFICE_GNS)
+  set(OPUS_STATIC_RUNTIME OFF CACHE BOOL "" FORCE)
+else()
+  set(OPUS_STATIC_RUNTIME ON CACHE BOOL "" FORCE)   # MSVC: same static CRT as the game
+endif()
 list(LENGTH CMAKE_OSX_ARCHITECTURES HK_NUM_OSX_ARCHS)
 if(HK_NUM_OSX_ARCHS GREATER 1)
   # universal macOS build: opus picks SSE or NEON sources for the host CPU only
@@ -128,6 +137,7 @@ set(SOURCES
   src/net/lobby.cpp
   src/net/lobbygame.cpp
   src/net/multiplay.cpp
+  src/net/netlink.cpp
   src/net/sock.cpp
   src/net/udplink.cpp
   src/net/version.cpp
@@ -295,13 +305,29 @@ if(EDIFICE_GNS)
   endif()
   add_executable(gns_loopback_test tests/gns_loopback_test.cpp)
   target_link_libraries(gns_loopback_test PRIVATE ${HK_GNS_LIB})
-  if(MSVC)
-    # On Windows GameNetworkingSockets comes as a DLL (vcpkg x64-windows, like
-    # Valve ships it): link the shared C++ runtime here. The static vcpkg
-    # triplet builds it importing protobuf from a DLL that isn't there.
-    set_property(TARGET gns_loopback_test PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
-  endif()
+  # On Windows GameNetworkingSockets comes as a DLL (vcpkg x64-windows, like
+  # Valve ships it): the shared C++ runtime (above, and for the tests below). The
+  # static vcpkg triplet builds it importing protobuf from a DLL that isn't there.
   add_test(NAME gns_loopback COMMAND gns_loopback_test)
+
+  # The game: GnsLink (docs/M7.md), used with transport=gns in net.ini
+  target_sources(Edifice PRIVATE src/net/gnslink.cpp)
+  target_compile_definitions(Edifice PRIVATE EDIFICE_GNS)
+  target_link_libraries(Edifice PRIVATE ${HK_GNS_LIB})
+  # Sock over GnsLink against a game server (tests/run_gns_netplay_test.sh)
+  add_executable(gns_netplay_test tests/gns_netplay_test.cpp src/net/gnslink.cpp
+    src/net/sock.cpp src/net/udplink.cpp src/game/Vector.cpp)
+  target_include_directories(gns_netplay_test PRIVATE ${INCLUDE_DIRS})
+  target_link_libraries(gns_netplay_test PRIVATE ${HK_GNS_LIB})
+  if(MSVC)
+    set_property(TARGET gns_loopback_test gns_netplay_test PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+    target_compile_definitions(gns_netplay_test PRIVATE WIN32 _WINDOWS _MBCS _USE_MATH_DEFINES NOMINMAX
+      _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS _WINSOCK_DEPRECATED_NO_WARNINGS)
+    target_link_libraries(gns_netplay_test PRIVATE ws2_32 opengl32)
+  else()
+    target_compile_options(gns_netplay_test PRIVATE -fsigned-char -fwrapv -Wno-write-strings
+      -Wno-deprecated-declarations $<$<CXX_COMPILER_ID:GNU>:-fpermissive>)
+  endif()
 endif()
 
 # ---- Fuzzing -----------------------------------------------------------------

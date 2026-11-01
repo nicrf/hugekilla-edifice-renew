@@ -23,12 +23,14 @@ export HK_AUTOSTART=1 HK_SHOT=/dev/null HK_SHOT_FRAME=999999
 
 status=0
 # name@N: the same test in the world of HK_SEED=N, on top of the random one
+# (10, 26, 40: worlds where players 2 units apart stood ~100 units apart in height)
 for run in net_handshake net_identity net_join net_fuzz net_voice net_voice@1 net_voice@2 \
-		net_voice@3 net_voice@4 net_voice@5 net_map; do
+		net_voice@3 net_voice@10 net_voice@26 net_voice@40 net_map; do
 	t="${run%@*}"
 	log="$LOGDIR/$run.log"
 	args=()
 	if [ "$run" != "$t" ]; then export HK_SEED="${run#*@}"; else unset HK_SEED; fi
+	if [ "$t" = net_voice ]; then export HK_VOICE_LOG=1; else unset HK_VOICE_LOG; fi
 	if [ "$t" = net_map ]; then
 		# a server started with a saved map (HK_MAPFILE), written by the test itself;
 		# absolute path: the game runs from its data folder
@@ -41,7 +43,10 @@ for run in net_handshake net_identity net_join net_fuzz net_voice net_voice@1 ne
 	fi
 	pid=$!
 	echo "== $run"
-	python3 "tests/$t.py" "${args[@]+"${args[@]}"}" || status=1
+	if ! python3 "tests/$t.py" "${args[@]+"${args[@]}"}"; then
+		status=1
+		echo "-- server log (tail):"; tail -n 60 "$log"
+	fi
 	if ! kill -0 "$pid" 2>/dev/null; then
 		echo "server died during $run"
 		status=1
