@@ -39,6 +39,7 @@ void ServerSetupHandleText(const char *text);
 void DrawServerSetup();
 int IsSpawnScreenOpen();
 int SpawnScreenHandleKey(int vk);
+int SpawnScreenBlocksKey(int vk);
 void DrawSpawnScreen();
 #endif
 

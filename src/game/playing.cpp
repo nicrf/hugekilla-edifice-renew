@@ -575,6 +575,9 @@ void Play()
 				zoomtarget=-1;
 			}
 		}
+#ifndef HK_WIN32_NATIVE
+		if(IsSpawnScreenOpen()) mxchange=mychange=0;   //no looking around before playing
+#endif
 		mspeed*=controls.mousesensitivity;
 		mspeed/=powf(1.05,cur->fzoom);
 		cur->fwd-=CrossProduct(Vector(0,1,0),cur->fwd)*mxchange*mspeed;
