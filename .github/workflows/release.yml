@@ -120,51 +120,11 @@ jobs:
           path: dist/Edifice-*
           if-no-files-found: error
 
-  netplay-tests:
-    if: "!startsWith(github.ref, 'refs/tags/v') && github.event_name != 'schedule'"
-    # Network tests against a headless server built with AddressSanitizer:
-    # version handshake, join bookkeeping, malformed packets (tests/net_*.py).
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install build tools, virtual display and software OpenGL
-        timeout-minutes: 20
-        run: |
-          .github/scripts/apt-install.sh build-essential cmake ninja-build xvfb libgl1-mesa-dri libglu1-mesa-dev \
-            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev \
-            libxkbcommon-dev libwayland-dev libasound2-dev libpulse-dev libcurl4-openssl-dev
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.23'
-          cache-dependency-path: server/go.sum
-
-      - name: Build with AddressSanitizer
-        env:
-          EDIFICE_CMAKE_ARGS: -DCMAKE_CXX_FLAGS=-fsanitize=address -DCMAKE_C_FLAGS=-fsanitize=address -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address
-        run: python3 build.py --config Debug --no-gns
-
-      - name: Network tests
-        run: tests/run_netplay_tests.sh build/linux-debug/Edifice netplay-logs
-
-      - name: Lobby tests (edifice-lobby, a host announcing, a client joining by game code)
-        run: |
-          (cd server && go build -o ../build/edifice-lobby .)
-          SDL_AUDIODRIVER=dummy xvfb-run -a python3 tests/net_lobby.py build/linux-debug/Edifice \
-            build/edifice-lobby build/linux-debug/lobby_test
-
-      - uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: netplay-logs
-          path: netplay-logs
-
   gns:
     # GameNetworkingSockets (roadmap M7, in the releases since M7e): an encrypted
     # loopback connection test, and the game built with EDIFICE_GNS=ON.
-    # On Linux, netplay through GameNetworkingSockets (tests/run_gns_netplay_test.sh),
-    # and Internet games joined P2P through edifice-lobby (tests/net_p2p.py).
+    # The netplay tests (tests/run_*netplay_tests.sh, net_lobby.py, net_p2p.py) run
+    # locally, not here (BUILD.md).
     # Not required for releases (the build job checks the archives themselves).
     strategy:
       fail-fast: false
@@ -183,11 +143,6 @@ jobs:
           .github/scripts/apt-install.sh build-essential cmake ninja-build pkg-config libglu1-mesa-dev \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev \
             libxkbcommon-dev libwayland-dev libasound2-dev libpulse-dev libcurl4-openssl-dev
-
-      - name: Virtual display and software OpenGL (Linux)
-        if: runner.os == 'Linux'
-        timeout-minutes: 20
-        run: .github/scripts/apt-install.sh xvfb libgl1-mesa-dri
 
       - name: Build tools (macOS)
         if: runner.os == 'macOS'
@@ -216,32 +171,6 @@ jobs:
         run: |
           cmake --build build/gns --config Release
           ctest --test-dir build/gns -C Release -R gns_loopback --output-on-failure
-
-      - name: Netplay through GameNetworkingSockets (Linux)
-        if: runner.os == 'Linux'
-        timeout-minutes: 15
-        run: tests/run_gns_netplay_test.sh build/gns/Edifice build/gns/gns_netplay_test gns-logs
-
-      - uses: actions/setup-go@v5
-        if: runner.os == 'Linux'
-        with:
-          go-version: '1.23'
-          cache-dependency-path: server/go.sum
-
-      - name: P2P through the lobby, direct then TURN relay only (Linux)
-        if: runner.os == 'Linux'
-        timeout-minutes: 15
-        run: |
-          (cd server && go build -o ../build/edifice-lobby .)
-          NET_P2P_LOGS=gns-logs/p2p xvfb-run -a python3 tests/net_p2p.py build/gns/Edifice \
-            build/edifice-lobby build/gns/gns_p2p_test
-
-      - uses: actions/upload-artifact@v4
-        if: failure() && runner.os == 'Linux'
-        with:
-          name: gns-netplay-logs
-          path: gns-logs
-          if-no-files-found: ignore
 
   fuzzing:
     if: github.event_name != 'pull_request' && !startsWith(github.ref, 'refs/tags/v')
