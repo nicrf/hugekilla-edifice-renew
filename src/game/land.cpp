@@ -400,7 +400,8 @@ void RandomLand(LandDefs &ldfs)
 
 void SmoothLight()
 {
-	float nl[LANDGRIDSIZE][LANDGRIDSIZE];
+	//1 MB: static, Windows gives the main thread a 1 MB stack (it overflowed there)
+	static float nl[LANDGRIDSIZE][LANDGRIDSIZE];
 	for(int x=0;x<LANDGRIDSIZE;x++)
 	{
 		for(int y=0;y<LANDGRIDSIZE;y++)
@@ -436,7 +437,7 @@ void SmoothWaterLight()
 
 void SmoothLand()
 {
-	float nl[LANDGRIDSIZE][LANDGRIDSIZE];
+	static float nl[LANDGRIDSIZE][LANDGRIDSIZE];   //1 MB, as SmoothLight's
 	
 	for(int x=0;x<LANDGRIDSIZE;x++)
 	{
