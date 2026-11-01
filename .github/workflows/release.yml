@@ -3,6 +3,7 @@
 #  - tag v* (git tag v0.2.0 && git push origin v0.2.0): build + GitHub release with the 3 archives
 #    (only the 3 builds: the network tests and fuzzing already ran on the PR / main)
 #  - fuzzing: on main, every Monday, or by hand (Actions > Run workflow), not on PRs
+#  - sokol: the sokol_gfx renderer (roadmap M13) built and drawn, on every push and PR
 name: Build & release
 
 on:
@@ -122,6 +123,65 @@ jobs:
           name: edifice-${{ matrix.name }}
           path: dist/Edifice-*
           if-no-files-found: error
+
+  sokol:
+    # The sokol_gfx renderer (HK_RENDER_SOKOL, roadmap M13), not in the releases yet:
+    # a Debug build (sokol_gfx validates every call, and every GL call on Linux)
+    # without GameNetworkingSockets, its unit tests, then tests/render_smoke.py draws
+    # the menus and a game: Metal on the macOS runner's virtual GPU, GL
+    # 4.1 core on Linux (Mesa's llvmpipe under Xvfb). The frames are kept as artifacts.
+    if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            name: macos
+          - os: ubuntu-22.04
+            name: linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build tools (macOS)
+        if: matrix.name == 'macos'
+        run: brew install ninja
+
+      - name: Install build tools, virtual display and software OpenGL (Linux)
+        if: matrix.name == 'linux'
+        timeout-minutes: 20
+        run: |
+          .github/scripts/apt-install.sh build-essential cmake ninja-build pkg-config libgl1-mesa-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev \
+            libxkbcommon-dev libwayland-dev libasound2-dev libpulse-dev libcurl4-openssl-dev \
+            xvfb libgl1-mesa-dri
+
+      - name: Build (Debug, sokol_gfx) and unit tests
+        shell: bash
+        env:
+          EDIFICE_CMAKE_ARGS: -DEDIFICE_WERROR=ON
+        run: python build.py --config Debug --no-gns --sokol --test
+
+      - name: Draw the menus and a game
+        shell: bash
+        timeout-minutes: 10
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a -s "-screen 0 1280x1024x24" python3 tests/render_smoke.py build/linux-debug-sokol/Edifice --out shots
+          else
+            python tests/render_smoke.py build/macos-debug-sokol/Edifice.app --out shots
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sokol-frames-${{ matrix.name }}
+          path: shots
+          if-no-files-found: ignore
 
   fuzzing:
     if: github.event_name != 'pull_request' && !startsWith(github.ref, 'refs/tags/v')
