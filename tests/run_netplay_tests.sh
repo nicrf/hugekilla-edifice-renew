@@ -23,8 +23,9 @@ export HK_AUTOSTART=1 HK_SHOT=/dev/null HK_SHOT_FRAME=999999
 
 status=0
 # name@N: the same test in the world of HK_SEED=N, on top of the random one
+# (10, 26, 40: worlds where players 2 units apart stood ~100 units apart in height)
 for run in net_handshake net_identity net_join net_fuzz net_voice net_voice@1 net_voice@2 \
-		net_voice@3 net_voice@4 net_voice@5 net_map; do
+		net_voice@3 net_voice@10 net_voice@26 net_voice@40 net_map; do
 	t="${run%@*}"
 	log="$LOGDIR/$run.log"
 	args=()

@@ -1,9 +1,11 @@
 """Proximity voice chat relay (VOICE message, src/net/voicemsg.h):
     HK_AUTOSTART=1 <Edifice binary> &  then  python3 tests/net_voice.py
 Three clients join a local server like net_join.py and report positions:
-A at x=1, B at x=511 (2 units away across the world's edge, which wraps), C
-far away. The host keeps players above the ground, so A and B stand side by side:
-the terrain under them, random in every world, can't lift one out of range. A sends VOICE frames with a spoofed player field: B must get them as
+A and B on the very same spot, C far away. The host lifts every player onto
+the ground or the blocks under it, and the world is random: 2 units apart (even
+across the world's edge) can mean a 100-unit step, out of voice range, so
+"near" has to be the same x, z. The wrap itself is covered by voice_test.
+A sends VOICE frames with a spoofed player field: B must get them as
 coming from A's slot, C must get nothing. Then B moves away and gets nothing
 either; malformed VOICE messages are never relayed. Last, A stands next to the
 host and sends garbage frames, which the host decodes (opus must reject them)."""
@@ -199,7 +201,7 @@ def check(cond, what):
     ok &= bool(cond)
 
 
-bpos = [511]
+bpos = [1]
 
 
 def place(bx):
@@ -228,7 +230,7 @@ for cl in clients:
     cl.voices = []
 
 # near (across the world edge) and far
-place(511)
+place(1)
 talk(100, 10)
 for cl in clients:
     cl.pump(0.5)
@@ -263,7 +265,7 @@ for cl in clients:
 check(not b.voices, "player out of range got nothing (%d)" % len(b.voices))
 
 # back in range
-place(511)
+place(1)
 b.voices = []
 talk(300, 5)
 for cl in clients:
