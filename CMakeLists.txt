@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(Edifice VERSION 0.6.1 LANGUAGES C CXX)
+project(Edifice VERSION 0.6.2 LANGUAGES C CXX)
 
 # Edifice (HugeKilla) - one build, one code path for every platform:
 #   SDL2 (window, input, audio) + sokol_gfx (Metal on macOS, D3D11 on Windows,
