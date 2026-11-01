@@ -165,6 +165,25 @@ void RotateStructure(char o[MAXSTRUCTSIZE][MAXSTRUCTSIZE][MAXSTRUCTSIZE],
 	}
 }
 
+//middle of the blocks of a structure, seen from above
+static void FootprintCenter(char s[MAXSTRUCTSIZE][MAXSTRUCTSIZE][MAXSTRUCTSIZE],float *cx,float *cz)
+{
+	int minx=MAXSTRUCTSIZE,maxx=-1,minz=MAXSTRUCTSIZE,maxz=-1;
+	for(int x=0;x<MAXSTRUCTSIZE;x++)
+	for(int y=0;y<MAXSTRUCTSIZE;y++)
+	for(int z=0;z<MAXSTRUCTSIZE;z++)
+	if(s[x][y][z]!=' '&&s[x][y][z]!='r')
+	{
+		if(x<minx) minx=x;
+		if(x>maxx) maxx=x;
+		if(z<minz) minz=z;
+		if(z>maxz) maxz=z;
+	}
+	if(maxx<0) minx=maxx=minz=maxz=0;
+	*cx=(minx+maxx)/2.f;
+	*cz=(minz+maxz)/2.f;
+}
+
 //has two purposes: one, draw the structure as a wireframe.  two, place the structure permenantly
 
 void PlaceStructure(int task)
@@ -189,7 +208,7 @@ void PlaceStructure(int task)
 	//forward from the player, along the axis the structure faces
 	static const int fwdx[4]={1,0,-1,0},fwdz[4]={0,1,0,-1};
 	int fwd=rot;
-	rot=(rot+buildrot)&3;
+	//facing the player first: its 'r' blocks say where it goes
 	CopyMemory(rotstructure,curstructure,sizeof(curstructure));
 	for(int i=0;i<rot;i++)
 	{
@@ -217,6 +236,21 @@ void PlaceStructure(int task)
 	offz=ppos.z/BLOCKSIZE-refz+BLOCKGRIDSIZE;
 	offx+=fwdx[fwd]*builddist;
 	offz+=fwdz[fwd]*builddist;
+	//then turned by the wheel about the middle of its footprint, which stays put
+	//(about the 'r' blocks, often at an edge, it swung around the player)
+	if(buildrot)
+	{
+		float cx0,cz0,cx1,cz1;
+		FootprintCenter(rotstructure,&cx0,&cz0);
+		for(int i=0;i<buildrot;i++)
+		{
+			RotateStructure(rotstructure,tmpstructure);
+			CopyMemory(rotstructure,tmpstructure,sizeof(rotstructure));
+		}
+		FootprintCenter(rotstructure,&cx1,&cz1);
+		offx+=(int)floorf(cx0-cx1+.5f);
+		offz+=(int)floorf(cz0-cz1+.5f);
+	}
 	int px,py,pz;
 	px=ppos.x;
 	py=ppos.y;
