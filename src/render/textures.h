@@ -4,7 +4,7 @@
 //Texture registry (M12.5). The game names its textures by slot; the slot numbers
 //are the IDs the original code passed straight to glBindTexture, kept so that
 //textures sharing a slot (the splash and the first ground texture) still do.
-//The GL names come from glGenTextures, so M13 can swap the backend here.
+//The GL names come from glGenTextures (texture_gl.cpp), so M13 can swap the backend.
 enum TexSlot
 {
 	TEX_LAND=1,             //DrawLand's first bind (blank until F2 loads a random ground)
@@ -36,7 +36,7 @@ enum TexFilter
 };
 
 unsigned TexName(int slot);     //backend name of the slot, created on first use
-void TexBind(int slot);         //binds the slot to GL_TEXTURE_2D
+void TexBind(int slot);         //the texture of the next draws (renderer.cpp: batched, a change draws the batch)
 //uploads 8-bit pixels (1 luminance, 2 luminance+alpha, 3 RGB, 4 RGBA channels),
 //rows bottom-up, with mipmaps; replaces what the slot held
 void TexUpload(int slot,int width,int height,int channels,const void *pixels,TexFilter filter);

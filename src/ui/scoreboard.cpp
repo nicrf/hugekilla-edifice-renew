@@ -3,7 +3,7 @@
 //ping, packet loss), sorted by team and kills. A host listed on the lobby also sees
 //its game code.
 
-#include "gl.h"
+#include "renderer.h"
 #include "redrawing.h"
 #include "playing.h"
 #include "multiplay.h"
@@ -34,9 +34,9 @@ static int ComparePlayers(const void *a,const void *b)
 
 static void TeamColor(int team,float brightness)
 {
-	if(team==1) glColor3f(1*brightness,.35f*brightness,.35f*brightness);
-	else if(team==2) glColor3f(.45f*brightness,.6f*brightness,1*brightness);
-	else glColor3f(brightness,brightness,brightness);
+	if(team==1) RColor3f(1*brightness,.35f*brightness,.35f*brightness);
+	else if(team==2) RColor3f(.45f*brightness,.6f*brightness,1*brightness);
+	else RColor3f(brightness,brightness,brightness);
 }
 
 //first line of a multi-line game message ('\r' separated)
@@ -64,17 +64,17 @@ void DrawScoreboard()
 	float top=.82f;
 	float bottom=top-.26f-rows*ROWH-.08f;
 
-	glPushAttrib(GL_ENABLE_BIT|GL_CURRENT_BIT|GL_COLOR_BUFFER_BIT);
-	glEnable(GL_BLEND);
-	glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
-	glEnable(GL_TEXTURE_2D);
+	RPushAttrib(RATTR_ENABLE|RATTR_CURRENT|RATTR_COLOR);
+	REnable(RCAP_BLEND);
+	RBlendFunc(RBLEND_ALPHA);
+	REnable(RCAP_TEXTURE);
 	//translucent: the game goes on behind
 	UIRect(BOARDX1,bottom,BOARDX2,top,.035f,.035f,.04f,.78f);
 	UIRect(BOARDX1,top-.2f,BOARDX2,top,1,1,1,.05f);
 	UIRect(BOARDX1,top-.204f,BOARDX2,top-.2f,1,1,.5f,.5f);
 
 	char text[200];
-	glColor3f(1,1,.5f);
+	RColor3f(1,1,.5f);
 	if(sv.gamemode==0)
 		sprintf(text,"Capture the flag - first to %d",sv.capturelimit);
 	else
@@ -84,19 +84,19 @@ void DrawScoreboard()
 	char line[200];
 	FirstLine(curscore,line,sizeof(line));
 	if(!line[0]) FirstLine(curobjective,line,sizeof(line));
-	glColor3f(.85f,.85f,.85f);
+	RColor3f(.85f,.85f,.85f);
 	UITextFit(textx,top-.165f,line,1.1f);
 	sprintf(text,"%d player%s",count,count==1?"":"s");
 	UIText(right-UITextWidth(text),top-.09f,text);
 	if(LobbyHostCode()[0])   //hosting on the Internet: the code to give to friends
 	{
 		sprintf(text,"Game code %s",LobbyHostCode());
-		glColor3f(1,1,.5f);
+		RColor3f(1,1,.5f);
 		UIText(right-UITextWidth(text),top-.165f,text);
 	}
 
 	float y=top-.28f;
-	glColor3f(.6f,.6f,.6f);
+	RColor3f(.6f,.6f,.6f);
 	const char *headers[6]={"Name","Kills","Deaths","K/D","Ping","Loss"};
 	for(int c=0;c<6;c++)
 		UIText(colx[c],y,headers[c],.045f);
@@ -110,7 +110,7 @@ void DrawScoreboard()
 		if(local)
 		{
 			UIRect(BOARDX1+.04f,y-.012f,BOARDX2-.04f,y+ROWH-.012f,1,1,1,.07f);
-			glColor3f(1,1,1);
+			RColor3f(1,1,1);
 			UIText(colx[0]-.05f,y,">");
 		}
 		TeamColor(cur->team,local?1:.85f);
@@ -134,10 +134,10 @@ void DrawScoreboard()
 	}
 	if(count>rows)
 	{
-		glColor3f(.6f,.6f,.6f);
+		RColor3f(.6f,.6f,.6f);
 		sprintf(text,"+%d more",count-rows);
 		UIText(colx[0],y-ROWH,text);
 	}
-	glPopAttrib();
-	glColor3f(1,1,1);
+	RPopAttrib();
+	RColor3f(1,1,1);
 }

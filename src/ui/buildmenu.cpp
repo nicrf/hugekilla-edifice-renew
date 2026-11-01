@@ -2,7 +2,7 @@
 //on the left, their structures on the right, picked with the mouse. Picking one loads it
 //as a preview in the world (menu BUILDING): left click builds it, right click cancels.
 
-#include "gl.h"
+#include "renderer.h"
 #include "platform.h"
 #include "fileio.h"
 #include "redrawing.h"
@@ -176,12 +176,12 @@ static void DisplayName(const char *file,char *out,int size)
 void DrawBuildMenu()
 {
 	if(!buildmenuopen) return;
-	glPushAttrib(GL_ENABLE_BIT|GL_CURRENT_BIT|GL_COLOR_BUFFER_BIT);
-	glEnable(GL_BLEND);
-	glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
-	glEnable(GL_TEXTURE_2D);
+	RPushAttrib(RATTR_ENABLE|RATTR_CURRENT|RATTR_COLOR);
+	REnable(RCAP_BLEND);
+	RBlendFunc(RBLEND_ALPHA);
+	REnable(RCAP_TEXTURE);
 	UIPanel(PANELX1,PANELY1,PANELX2,PANELY2,TITLEH,"Build");
-	glColor3f(.6f,.6f,.6f);
+	RColor3f(.6f,.6f,.6f);
 	const char *hint=numcategories?"Pick a structure":"No structures found";
 	UIText(PANELX2-.05f-UITextWidth(hint),UITextY(PANELY2-TITLEH,PANELY2),hint);
 	UIRect(CATX2+.02f,RowY(VISIBLEROWS-1),CATX2+.024f,LISTTOP,1,1,1,.12f);   //column separator
@@ -193,9 +193,9 @@ void DrawBuildMenu()
 		int hover=Inside(CATX1,y1,CATX2,y2);
 		if(c==curcategory) UIRect(CATX1,y1,CATX2,y2,1,1,.5f,.15f);
 		else if(hover) UIRect(CATX1,y1,CATX2,y2,1,1,1,.06f);
-		if(c==curcategory) glColor3f(1,1,.5f);
-		else if(hover) glColor3f(1,1,1);
-		else glColor3f(.75f,.75f,.75f);
+		if(c==curcategory) RColor3f(1,1,.5f);
+		else if(hover) RColor3f(1,1,1);
+		else RColor3f(.75f,.75f,.75f);
 		UITextFit(CATX,UITextY(y1,y2),categories[c],CATX2-CATX-.02f);
 	}
 	for(int r=0;r<VISIBLEROWS&&scroll+r<numitems;r++)
@@ -203,11 +203,11 @@ void DrawBuildMenu()
 		float y1=RowY(r),y2=y1+ROWH;
 		int hover=Inside(ITEMX1,y1,ITEMX2,y2);
 		if(hover) UIRect(ITEMX1,y1,ITEMX2,y2,1,1,1,.08f);
-		glColor3f(hover?1:.85f,hover?1:.85f,hover?1:.85f);
+		RColor3f(hover?1:.85f,hover?1:.85f,hover?1:.85f);
 		DisplayName(items[scroll+r],name,NAMELEN);
 		UITextFit(ITEMX,UITextY(y1,y2),name,ITEMX2-ITEMX-.02f);
 	}
-	glColor3f(.45f,.45f,.45f);
+	RColor3f(.45f,.45f,.45f);
 	if(numitems>VISIBLEROWS)
 	{
 		char more[64];
@@ -215,6 +215,6 @@ void DrawBuildMenu()
 		UIText(ITEMX,UITextY(PANELY1+.02f,PANELY1+.1f,.04f),more,.04f);
 	}
 	UIText(CATX,UITextY(PANELY1+.02f,PANELY1+.1f,.04f),"Esc or right click: close",.04f);
-	glPopAttrib();
-	glColor3f(1,1,1);
+	RPopAttrib();
+	RColor3f(1,1,1);
 }

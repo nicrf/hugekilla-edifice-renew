@@ -9,7 +9,7 @@
 //gives its LAN addresses, see lobby.h) is also asked there, from the start: whichever
 //answers first is joined (routers seldom loop back to their LAN from their public IP).
 
-#include "gl.h"
+#include "renderer.h"
 #include "platform.h"
 #include "cfgfile.h"
 #include "redrawing.h"
@@ -606,8 +606,8 @@ static void Tab(float x1,float y1,float x2,float y2,const char *label,int active
 	int over=!active&&Inside(x1,y1,x2,y2);
 	UIRect(x1,y1,x2,y2,1,1,active?.5f:1,active?.2f:over?.14f:.06f);
 	if(active) UIRect(x1,y1,x2,y1+.006f,1,1,.5f,.9f);
-	if(active) glColor3f(1,1,.5f);
-	else glColor3f(over?1:.7f,over?1:.7f,over?1:.7f);
+	if(active) RColor3f(1,1,.5f);
+	else RColor3f(over?1:.7f,over?1:.7f,over?1:.7f);
 	UIText((x1+x2-UITextWidth(label))/2,UITextY(y1,y2),label);
 }
 
@@ -623,18 +623,18 @@ void DrawJoinScreen()
 	if(!joinscreen) return;
 	Update();
 	if(!joinscreen) return;   //joined
-	glPushAttrib(GL_ENABLE_BIT|GL_CURRENT_BIT|GL_COLOR_BUFFER_BIT);
-	glEnable(GL_BLEND);
-	glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
-	glEnable(GL_TEXTURE_2D);
+	RPushAttrib(RATTR_ENABLE|RATTR_CURRENT|RATTR_COLOR);
+	REnable(RCAP_BLEND);
+	RBlendFunc(RBLEND_ALPHA);
+	REnable(RCAP_TEXTURE);
 	UIPanel(-.95f,-.92f,.95f,PANELY2,TITLEH,"Join a game");
 	Tab(TAB_LANBTN,"LAN / IP",tab==TAB_LAN);
 	Tab(TAB_INETBTN,"Internet",tab==TAB_INTERNET);
-	glColor3f(.6f,.6f,.6f);
+	RColor3f(.6f,.6f,.6f);
 	UIText(.47f-UITextWidth("Name"),UITextY(.795f,.875f),"Name");
 	UIField(FIELD_NAME,playername,focus==FOCUS_NAME,"Player");
 
-	glColor3f(.7f,.7f,.7f);
+	RColor3f(.7f,.7f,.7f);
 	float labely=UITextY(.63f,.72f);
 	if(tab==TAB_INTERNET)
 	{
@@ -661,9 +661,9 @@ void DrawJoinScreen()
 	{
 		int active=ColSort(c)!=SORT_FOUND&&ColSort(c)==sortmode;
 		float x2=c<5?colx[c+1]:LISTX2;
-		if(active) glColor3f(1,1,.5f);
-		else if(ColSort(c)!=SORT_FOUND&&Inside(colx[c]-.01f,HEADY1,x2,HEADY2)) glColor3f(1,1,1);
-		else glColor3f(.6f,.6f,.6f);
+		if(active) RColor3f(1,1,.5f);
+		else if(ColSort(c)!=SORT_FOUND&&Inside(colx[c]-.01f,HEADY1,x2,HEADY2)) RColor3f(1,1,1);
+		else RColor3f(.6f,.6f,.6f);
 		float end=UIText(colx[c],UITextY(HEADY1,HEADY2,.045f),ColName(c),.045f);
 		if(active) UIRect(colx[c],HEADY1+.008f,end,HEADY1+.013f,1,1,.5f,.8f);
 	}
@@ -674,7 +674,7 @@ void DrawJoinScreen()
 	{
 		const char *empty=GameCount()?"Only incompatible servers found (tick the box below to see them)":
 			tab==TAB_INTERNET?inetmsg:"Searching the LAN... (F5 or Refresh to search again)";
-		glColor3f(.55f,.55f,.55f);
+		RColor3f(.55f,.55f,.55f);
 		UITextFit(colx[0],UITextY(ROWTOP-ROWH,ROWTOP),empty,LISTX2-colx[0]-.03f);
 	}
 	for(int r=0;r<n&&r<MAXROWS;r++)
@@ -690,27 +690,27 @@ void DrawJoinScreen()
 		else if(hover) UIRect(ROWRECT(r),1,1,1,.08f);
 		else if(r&1) UIRect(ROWRECT(r),1,1,1,.025f);
 		float dim=g->compatible?1:.45f;
-		glColor3f(dim,dim,dim);
+		RColor3f(dim,dim,dim);
 		Cell(colx[0],y,colx[1],g->name);
-		glColor3f(dim*.8f,dim*.8f,dim*.8f);
+		RColor3f(dim*.8f,dim*.8f,dim*.8f);
 		Cell(colx[1],y,colx[2],g->address);
 		Cell(colx[2],y,colx[3],g->version);
-		glColor3f(dim,dim,dim);
+		RColor3f(dim,dim,dim);
 		if(g->players>=0) snprintf(text,sizeof(text),"%d/%d",g->players,g->maxplayers);
 		else strcpy(text,"?");
 		Cell(colx[3],y,colx[4],text);
 		Cell(colx[4],y,colx[5],g->players<0?"?":g->gamemode?"Build":"CTF");
 		if(tab==TAB_INTERNET)
 		{
-			glColor3f(dim,dim,dim*.6f);
+			RColor3f(dim,dim,dim*.6f);
 			Cell(colx[5],y,LISTX2,lobbygames[order[r]].id);
 		}
 		else
 		{
-			if(!g->compatible) glColor3f(dim,dim,dim);
-			else if(g->ping<80) glColor3f(.6f,1,.6f);
-			else if(g->ping<200) glColor3f(1,1,.5f);
-			else glColor3f(1,.55f,.45f);
+			if(!g->compatible) RColor3f(dim,dim,dim);
+			else if(g->ping<80) RColor3f(.6f,1,.6f);
+			else if(g->ping<200) RColor3f(1,1,.5f);
+			else RColor3f(1,.55f,.45f);
 			snprintf(text,sizeof(text),"%d ms",g->ping);
 			Cell(colx[5],y,LISTX2,text);
 		}
@@ -718,7 +718,7 @@ void DrawJoinScreen()
 	if(n>MAXROWS)
 	{
 		snprintf(text,sizeof(text),"+%d more: sort the list or hide the incompatible ones",n-MAXROWS);
-		glColor3f(.5f,.5f,.5f);
+		RColor3f(.5f,.5f,.5f);
 		UIText(colx[0],ROWTOP-MAXROWS*ROWH-.055f,text,.04f);
 	}
 
@@ -744,9 +744,9 @@ void DrawJoinScreen()
 	if(kind==2) UIRect(STATUSBAR,.6f,.15f,.1f,.35f);
 	else if(kind==1) UIRect(STATUSBAR,.5f,.45f,.1f,.3f);
 	else UIRect(STATUSBAR,1,1,1,.04f);
-	if(kind==2) glColor3f(1,.7f,.55f);
-	else if(kind==1) glColor3f(1,1,.6f);
-	else glColor3f(.75f,.75f,.75f);
+	if(kind==2) RColor3f(1,.7f,.55f);
+	else if(kind==1) RColor3f(1,1,.6f);
+	else RColor3f(.75f,.75f,.75f);
 	UITextFit(-.9f,UITextY(-.5f,-.41f),line,1.8f);
 
 	//show incompatible servers: a check box
@@ -754,19 +754,19 @@ void DrawJoinScreen()
 	UIRect(-.9f,-.605f,-.86f,-.555f,1,1,1,overbox?.5f:.3f);
 	UIRect(-.895f,-.6f,-.865f,-.56f,0,0,0,1);
 	if(showincompatible) UIRect(-.888f,-.593f,-.872f,-.567f,1,1,.5f,1);
-	glColor3f(overbox?1:.8f,overbox?1:.8f,overbox?1:.8f);
+	RColor3f(overbox?1:.8f,overbox?1:.8f,overbox?1:.8f);
 	UIText(-.83f,UITextY(-.62f,-.54f),"Show incompatible servers");
-	glColor3f(.45f,.45f,.45f);
+	RColor3f(.45f,.45f,.45f);
 	snprintf(text,sizeof(text),"You: v%s (protocol %d)",EDIFICE_VERSION_STRING,EDIFICE_PROTOCOL_VERSION);
 	UIText(.9f-UITextWidth(text),UITextY(-.62f,-.54f),text);
 
 	UIButton(BTN_BACK,"Back",1);
 	UIButton(BTN_JOIN,"Join",sel&&sel->compatible,1);
 	const char *keys="Double-click or Enter: join    Tab: next field    F5: refresh    Esc: back";
-	glColor3f(.45f,.45f,.45f);
+	RColor3f(.45f,.45f,.45f);
 	float w=UITextWidth(keys,.04f);
 	UITextFit(-w/2>-.55f?-w/2:-.55f,UITextY(-.87f,-.76f,.04f),keys,1.1f,.04f);
 
-	glPopAttrib();
-	glColor3f(1,1,1);
+	RPopAttrib();
+	RColor3f(1,1,1);
 }

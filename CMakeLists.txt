@@ -132,6 +132,7 @@ set(SOURCES
   src/render/redrawing.cpp
   src/render/textures.cpp
   src/render/texture_gl.cpp
+  src/render/renderer.cpp
   src/render/renderer_gl.cpp
   src/render/image.cpp
   src/game/cfgfile.cpp

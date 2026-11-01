@@ -1,6 +1,6 @@
 //used to load various textures from .bmp and .pxr files  (pxr files can store an alpha channel)
 
-#include "gl.h"
+#include "renderer.h"
 #include "fileio.h"
 #include "cfgfile.h"
 #include "models.h"
@@ -383,7 +383,7 @@ void LoadSplashTexture()
 }
 void LoadTextures()
 {
-	glEnable(GL_TEXTURE_2D);
+	REnable(RCAP_TEXTURE);
 	LoadTexture("textures/ammoicon.bmp",TEX_AMMOICON);
 	LoadTexture("textures/healthicon.bmp",TEX_HEALTHICON);
 	

@@ -1,7 +1,7 @@
 //used to draw menus (only the main menu now), see if they are clicked, and take the appropriate action
 
 
-#include "gl.h"
+#include "renderer.h"
 #include "platform.h"
 #include "multiplay.h"
 #include "ui.h"
@@ -51,10 +51,10 @@ int CloseCredits()
 //a grey heading and its lines; moves y under them
 static void CreditsSection(float x,float &y,float maxw,const char *heading,const char **lines,int count)
 {
-	glColor3f(.6f,.6f,.6f);
+	RColor3f(.6f,.6f,.6f);
 	UIText(x,y,heading,.045f);
 	y-=CREDITSLINEH+.005f;
-	glColor3f(1,1,1);
+	RColor3f(1,1,1);
 	for(int i=0;i<count;i++,y-=CREDITSLINEH)
 		UITextFit(x,y,lines[i],maxw);
 	y-=.05f;
@@ -62,9 +62,9 @@ static void CreditsSection(float x,float &y,float maxw,const char *heading,const
 
 static void DrawCredits()
 {
-	glEnable(GL_BLEND);
-	glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
-	glEnable(GL_TEXTURE_2D);
+	REnable(RCAP_BLEND);
+	RBlendFunc(RBLEND_ALPHA);
+	REnable(RCAP_TEXTURE);
 	UIPanel(CREDITSPX1,CREDITSPY1,CREDITSPX2,CREDITSPY2,.13f,"Edifice (HugeKilla) - Credits");
 	const float leftx=-.82f,rightx=.04f,colw=.8f;
 	float y=.64f;
@@ -91,14 +91,14 @@ static void DrawCredits()
 		"stb_image - public domain / MIT",
 	};
 	CreditsSection(rightx,y,colw,"Third-party libraries",libraries,8);
-	glColor3f(.75f,.75f,.75f);
+	RColor3f(.75f,.75f,.75f);
 	UITextFit(rightx,y+.03f,"Full texts: licenses/ folder of the game",colw,.045f);
 	UIRect(-.02f,-.05f,-.016f,.7f,1,1,1,.12f);   //column separator
 
-	glColor3f(.45f,.45f,.45f);
+	RColor3f(.45f,.45f,.45f);
 	UIText(leftx,UITextY(-.87f,-.76f,.04f),"Click or press Esc to close",.04f);
 	UIButton(BTN_CREDITSCLOSE,"Close",1);
-	glColor3f(1,1,1);
+	RColor3f(1,1,1);
 }
 
 //---- menu screen text and widgets ----
@@ -175,7 +175,7 @@ float UIText(float x,float y,const char *text,float h,int len)
 	const float cell=1.f/16;
 	float cw=h*CELLASPECT;
 	TexBind(TEX_FONT);
-	glBegin(GL_QUADS);
+	RBegin(RP_QUADS);
 	for(int i=0;i<len;i++)
 	{
 		int g=GlyphIndex(text[i]);
@@ -183,18 +183,18 @@ float UIText(float x,float y,const char *text,float h,int len)
 		float u=(g%16)*cell,v=(g/16)*cell;
 		if(g)
 		{
-			glTexCoord2f(u,v);
-			glVertex2f(x1,y+h);
-			glTexCoord2f(u,v+cell);
-			glVertex2f(x1,y);
-			glTexCoord2f(u+cell,v+cell);
-			glVertex2f(x1+cw,y);
-			glTexCoord2f(u+cell,v);
-			glVertex2f(x1+cw,y+h);
+			RTexCoord2f(u,v);
+			RVertex2f(x1,y+h);
+			RTexCoord2f(u,v+cell);
+			RVertex2f(x1,y);
+			RTexCoord2f(u+cell,v+cell);
+			RVertex2f(x1+cw,y);
+			RTexCoord2f(u+cell,v);
+			RVertex2f(x1+cw,y+h);
 		}
 		x+=(glyphright[g]-glyphleft[g]+GLYPHGAP)*cw;
 	}
-	glEnd();
+	REnd();
 	return x-GLYPHGAP*cw;
 }
 
@@ -236,15 +236,15 @@ int UIInside(float x1,float y1,float x2,float y2)
 
 void UIRect(float x1,float y1,float x2,float y2,float r,float g,float b,float a)
 {
-	glDisable(GL_TEXTURE_2D);
-	glColor4f(r,g,b,a);
-	glBegin(GL_QUADS);
-	glVertex2f(x1,y1);
-	glVertex2f(x2,y1);
-	glVertex2f(x2,y2);
-	glVertex2f(x1,y2);
-	glEnd();
-	glEnable(GL_TEXTURE_2D);
+	RDisable(RCAP_TEXTURE);
+	RColor4f(r,g,b,a);
+	RBegin(RP_QUADS);
+	RVertex2f(x1,y1);
+	RVertex2f(x2,y1);
+	RVertex2f(x2,y2);
+	RVertex2f(x1,y2);
+	REnd();
+	REnable(RCAP_TEXTURE);
 }
 
 static void Outline(float x1,float y1,float x2,float y2,float t,float r,float g,float b,float a)
@@ -258,13 +258,13 @@ static void Outline(float x1,float y1,float x2,float y2,float t,float r,float g,
 //panel of a menu screen: opaque enough that the main menu behind doesn't show through
 void UIPanel(float x1,float y1,float x2,float y2,float titleh,const char *title)
 {
-	glEnable(GL_BLEND);
-	glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+	REnable(RCAP_BLEND);
+	RBlendFunc(RBLEND_ALPHA);
 	UIRect(x1,y1,x2,y2,.035f,.035f,.04f,1);
 	UIRect(x1,y2-titleh,x2,y2,1,1,1,.06f);
 	UIRect(x1,y2-titleh-.004f,x2,y2-titleh,1,1,.5f,.5f);
 	Outline(x1,y1,x2,y2,.004f,1,1,1,.15f);
-	glColor3f(1,1,.5f);
+	RColor3f(1,1,.5f);
 	UIText(x1+.05f,UITextY(y2-titleh,y2,.065f),title,.065f);
 }
 
@@ -273,7 +273,7 @@ void UIArrow(float x1,float y1,float x2,float y2,const char *label)
 {
 	int over=UIInside(x1,y1,x2,y2);
 	UIRect(x1,y1,x2,y2,1,1,1,over?.25f:.1f);
-	glColor3f(over?1:.8f,over?1:.8f,over?.5f:.8f);
+	RColor3f(over?1:.8f,over?1:.8f,over?.5f:.8f);
 	UIText((x1+x2-UITextWidth(label))/2,UITextY(y1,y2),label);
 }
 
@@ -293,9 +293,9 @@ int UIButton(float x1,float y1,float x2,float y2,const char *label,int enabled,i
 		UIRect(x1,y1,x2,y2,1,1,1,over?.24f:.12f);
 		Outline(x1,y1,x2,y2,.004f,1,1,1,over?.6f:.3f);
 	}
-	if(!enabled) glColor3f(.38f,.38f,.38f);
-	else if(strong) glColor3f(.85f,1,.85f);
-	else glColor3f(over?1:.9f,over?1:.9f,over?1:.9f);
+	if(!enabled) RColor3f(.38f,.38f,.38f);
+	else if(strong) RColor3f(.85f,1,.85f);
+	else RColor3f(over?1:.9f,over?1:.9f,over?1:.9f);
 	float w=UITextWidth(label);
 	UIText((x1+x2-w)/2,UITextY(y1,y2),label);
 	return over;
@@ -313,13 +313,13 @@ void UIField(float x1,float y1,float x2,float y2,const char *text,int focused,co
 	float x=x1+pad;
 	if(!text[0]&&placeholder&&!focused)
 	{
-		glColor3f(.42f,.42f,.42f);
+		RColor3f(.42f,.42f,.42f);
 		UITextFit(x,y,placeholder,room);
 		return;
 	}
 	const char *shown=text;
 	while(*shown&&UITextWidth(shown)>room) shown++;
-	glColor3f(1,1,focused?.75f:1);
+	RColor3f(1,1,focused?.75f:1);
 	x=UIText(x,y,shown);
 	if(focused&&!((curtime/500)&1))
 		UIRect(x+.006f,y+UITEXTH*.12f,x+.011f,y+UITEXTH*.8f,1,1,.5f,.9f);
@@ -375,15 +375,15 @@ int ButtonOver()
 void DrawMenu()
 {
 	int over=ButtonOver();	
-	glClearColor(0,0,0,0);
+	RClearColor(0,0,0,0);
 	if(GetLocalPlayer()->playstate==0)
 		RedrawSplash(TEX_SPLASH,0,1);
 	else
-		glClear(GL_COLOR_BUFFER_BIT);
+		RClear(1,0);
 	MainMenuButtons();
-	glEnable(GL_TEXTURE_2D);
-	glEnable(GL_BLEND);
-	glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+	REnable(RCAP_TEXTURE);
+	REnable(RCAP_BLEND);
+	RBlendFunc(RBLEND_ALPHA);
 	//a full screen panel (join, server setup, options, credits) hides the menu, which
 	//would show through
 	int covered=IsJoinScreenOpen()||IsServerSetupOpen()||IsOptionsOpen()||showcredits;
@@ -391,34 +391,34 @@ void DrawMenu()
 	{
 		TexBind(TEX_MENU0+button[i].tex);
 		if(i==over)
-			glColor3f(1,1,1);
+			RColor3f(1,1,1);
 		else
-			glColor3f(.7,.7,.7);
-		glBegin(GL_QUADS);
-		glTexCoord2f(0,((float)button[i].texpos+1)/4);
-		glVertex2f(button[i].x1,button[i].y1);
-		glTexCoord2f(1,((float)button[i].texpos+1)/4);
-		glVertex2f(button[i].x2,button[i].y1);
-		glTexCoord2f(1,(float)button[i].texpos/4);
-		glVertex2f(button[i].x2,button[i].y2);
-		glTexCoord2f(0,(float)button[i].texpos/4);
-		glVertex2f(button[i].x1,button[i].y2);
-		glEnd();
+			RColor3f(.7,.7,.7);
+		RBegin(RP_QUADS);
+		RTexCoord2f(0,((float)button[i].texpos+1)/4);
+		RVertex2f(button[i].x1,button[i].y1);
+		RTexCoord2f(1,((float)button[i].texpos+1)/4);
+		RVertex2f(button[i].x2,button[i].y1);
+		RTexCoord2f(1,(float)button[i].texpos/4);
+		RVertex2f(button[i].x2,button[i].y2);
+		RTexCoord2f(0,(float)button[i].texpos/4);
+		RVertex2f(button[i].x1,button[i].y2);
+		REnd();
 	}
-	glColor3f(1,1,1);
+	RColor3f(1,1,1);
 	if(GetLocalPlayer()->playstate!=0)
 		UIText(-.8f,.8f,"Press escape to resume game");
 	{
 		char version[64];
 		sprintf(version,"v%s (protocol %d)",EDIFICE_VERSION_STRING,EDIFICE_PROTOCOL_VERSION);
-		glColor3f(.5,.5,.5);
+		RColor3f(.5,.5,.5);
 		UIText(.97f-UITextWidth(version),.92f,version);
-		glColor3f(1,1,1);
+		RColor3f(1,1,1);
 	}
 	//framed on their click areas (OverCreditsButton, OverOptionsButton)
 	if(!covered) UIButton(CREDITSX1,CREDITSY1,CREDITSX2,CREDITSY2,"Credits",1);
 	if(!covered) UIButton(OPTIONSX1,CREDITSY1,OPTIONSX2,CREDITSY2,"Options",1);
-	glColor3f(1,1,1);
+	RColor3f(1,1,1);
 	DrawOptions();
 	DrawServerSetup();
 	if(showcredits)

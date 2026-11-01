@@ -6,7 +6,7 @@
 //Internet list (edifice-lobby, lobbygame.cpp). Choices are kept in sv.ini and net.ini.
 
 
-#include "gl.h"
+#include "renderer.h"
 #include "platform.h"
 #include "fileio.h"
 #include "cfgfile.h"
@@ -360,9 +360,9 @@ void ServerSetupHandleText(const char *text)
 void DrawServerSetup()
 {
 	if(!showsetup) return;
-	glEnable(GL_BLEND);
-	glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
-	glEnable(GL_TEXTURE_2D);
+	REnable(RCAP_BLEND);
+	RBlendFunc(RBLEND_ALPHA);
+	REnable(RCAP_TEXTURE);
 	UIPanel(PANELX1,-.92f,PANELX2,.9f,.13f,"Server Setup");
 
 	char text[100];
@@ -373,7 +373,7 @@ void DrawServerSetup()
 		int enabled=RowText(i,text);
 		if(i==hoverrow) UIRect(LABELX-.04f,RowY(i),PANELX2-.04f,RowY(i)+ROWHEIGHT,1,1,1,.06f);
 		if(i==keyrow) UIRect(LABELX-.04f,y1,LABELX-.032f,y2,1,1,.5f,.9f);
-		glColor3f(i==hoverrow||i==keyrow?1:.75f,i==hoverrow||i==keyrow?1:.75f,i==hoverrow||i==keyrow?1:.75f);
+		RColor3f(i==hoverrow||i==keyrow?1:.75f,i==hoverrow||i==keyrow?1:.75f,i==hoverrow||i==keyrow?1:.75f);
 		UIText(LABELX,UITextY(y1,y2),rowlabels[i]);
 		if(i==0)
 		{
@@ -385,9 +385,9 @@ void DrawServerSetup()
 		{
 			UIArrow(VALUEX,y1,VALUEX+ARROWW,y2,"<");
 			UIArrow(VALUEX2-ARROWW,y1,VALUEX2,y2,">");
-			glColor3f(1,1,1);
+			RColor3f(1,1,1);
 		}
-		else glColor3f(.45f,.45f,.45f);
+		else RColor3f(.45f,.45f,.45f);
 		float room=VALUEX2-VALUEX-2*ARROWW-.04f;
 		float w=UITextWidth(text);
 		UITextFit(w<room?(VALUEX+VALUEX2-w)/2:VALUEX+ARROWW+.02f,UITextY(y1,y2),text,room);
@@ -395,21 +395,21 @@ void DrawServerSetup()
 
 	//what the row under the mouse (or picked with the keys) does
 	int helprow=hoverrow>=0?hoverrow:keyrow;
-	glColor3f(.6f,.6f,.6f);
+	RColor3f(.6f,.6f,.6f);
 	UITextFit(LABELX,UITextY(-.3f,-.22f),RowHelp(helprow),PANELX2-.05f-LABELX);
 	if(setuperror[0])
 	{
 		UIRect(PANELX1+.02f,-.5f,PANELX2-.02f,-.4f,.6f,.15f,.1f,.35f);
-		glColor3f(1,.7f,.55f);
+		RColor3f(1,.7f,.55f);
 		UITextFit(LABELX,UITextY(-.5f,-.4f),setuperror,PANELX2-.05f-LABELX);
 	}
-	glColor3f(.45f,.45f,.45f);
+	RColor3f(.45f,.45f,.45f);
 	const char *keys="Click or Left/Right: change    Up/Down: pick a row    Enter: start    Esc: back";
 	UITextFit(LABELX,UITextY(-.72f,-.64f,.04f),keys,PANELX2-.05f-LABELX,.04f);
 
 	UIButton(BTN_RANDOM,"Randomize all",1);
 	UIButton(BTN_BACK,"Back",1);
 	UIButton(BTN_START,"Start",1,1);
-	glColor3f(1,1,1);
+	RColor3f(1,1,1);
 }
 
