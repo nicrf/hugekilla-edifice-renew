@@ -23,6 +23,8 @@
 | **Steam (M8-M10)** | **M2, M3, M7** | SDR authentifie l'identité Steam, mais un pair malveillant reste un pair : indices, chaînes et tailles doivent déjà être bornés |
 | Serveur autoritaire (M11) | M7 | Modèle de messages entièrement nouveau |
 | Restructuration lourde (M12) | Fin du port, M5, M6 | Déplacer des fichiers pendant le port produirait des conflits en série |
+| Rendu sokol_gfx (M13) | M12.5 (`IRenderer`) | Le backend ne se remplace qu'une fois tous les appels `gl*` regroupés dans `src/render/` |
+| Portage web (M14) | M13, M7d (signalisation, TURN) | WebGL2/WebGPU seulement côté rendu, WebRTC seulement côté réseau |
 
 **Couche réseau ou protocole d'abord ?** On restructure la couche réseau (abstraction du transport, M7) **sans changer le protocole UDP** : les callbacks de `SendReliable` (sock.cpp:118-150) font partie du contrat de l'interface, et chaque backend les émule. On ne refond le protocole (M6, puis éventuellement M11) qu'avec un incrément de `EDIFICE_PROTOCOL_VERSION` à chaque lot.
 
@@ -166,6 +168,28 @@ Chaque PR rejoue la recette et garde la CI MSVC verte.
   5. `IRenderer` : `glGenTextures` à la place des IDs codés en dur (1, 2, 4, 6, 300, 400+i, 600, 800, 1300+), avec une validation par pixel-diff.
   6. Passe UB finale : retirer `-Wno-return-type`, `-fwrapv` et `-fno-strict-aliasing` (CMakeLists.txt:59-62), et passer en `-Werror`.
 
+### M13 - Rendu moderne avec sokol_gfx (L, à mener par petites PR)
+Le rendu (`src/render/`, environ 3 300 lignes) est du pipeline fixe OpenGL 2 : 47 `glBegin`/`glEnd`, plus de 300 `glVertex`/`glTexCoord`/`glColor`, pile de matrices, `glFog`, `glPushAttrib`. OpenGL est figé en 4.1 et déprécié sur macOS. **sokol_gfx** (un header C, zlib, compatible LGPL) cible Metal, D3D11, GL 3.3, WebGL2 et WebGPU, et ouvre donc aussi le portage web (M14). SDL3 GPU a été écarté faute de backend web, et wgpu ou Dawn parce qu'ils sont plus lourds à intégrer et réservés à WebGPU.
+- **Tâches :**
+  1. Terminer `IRenderer` (M12.5) avec un batcher : `pushQuad`, `pushTri`, `drawMesh(ase)`, états de blend, de cull et de brouillard. Les matrices passent à une petite lib (glm ou HandmadeMath) au lieu de la pile GL. Plus aucun appel `gl*` hors de `src/render/`.
+  2. Premier backend : le batcher en OpenGL fixe, pour valider l'abstraction par pixel-diff (`HK_SHOT`) sans changer de rendu.
+  3. Backend sokol_gfx derrière `option(HK_RENDER_SOKOL)`, avec des shaders GLSL convertis par `sokol-shdc` (MSL, HLSL, GLSL ES, WGSL) au build. Il reproduit d'abord le rendu actuel, brouillard compris, et doit passer le même pixel-diff à une tolérance près.
+  4. Bascule par défaut sur sokol_gfx dans les releases macOS, Linux et Windows, puis retrait du backend OpenGL fixe.
+  5. Modernisation visuelle, une PR par effet, chacun désactivable dans les options : éclairage par pixel, ombres (shadow map), MSAA, post-process (bloom, tonemapping), brouillard en shader.
+- **Fait quand :** les trois releases tournent sur sokol_gfx (Metal sur macOS), sans régression visible à la recette, et `src/render/` ne contient plus aucun appel OpenGL direct.
+
+### M14 - Portage web (L puis M)
+Le rendu ne pose pas de difficulté après M13 : SDL2 et sokol_gfx sont supportés par Emscripten. Les vrais obstacles sont le réseau et l'environnement du navigateur.
+- **Tâches :**
+  1. Build Emscripten **en solo et hors ligne** (preset CMake `web`) :
+     - Boucle principale via `emscripten_set_main_loop`, ou Asyncify en solution de transition.
+     - `data/` préchargé (`--preload-file`), `.sav` et `net.ini` dans IndexedDB (IDBFS).
+     - Audio par SDL2. Le micro du chat vocal (`voice.cpp`, opus) demande la permission du navigateur.
+  2. Lobby : remplacer curl (`lobby.cpp`) par `emscripten_fetch` derrière la même interface, avec CORS activé sur `edifice-lobby`.
+  3. Réseau : le navigateur n'ouvre pas de socket UDP, et `UdpLink` comme `GnsLink` y sont donc indisponibles. Ajouter un `DatagramLink` WebRTC DataChannel (non fiable, non ordonné) qui réutilise la signalisation et le TURN de M7d. Il faut aussi un pont côté natif pour que joueurs web et natifs se rejoignent. Les threads de `gnssignal.cpp` et `lobby.cpp` sont à remplacer par de l'asynchrone ou des pthreads Emscripten, qui imposent les en-têtes COOP/COEP.
+  4. Publication : une page statique (par exemple `play.rousseaufournier.com` derrière Caddy, en-têtes COOP/COEP) et un job CI qui produit l'archive web à chaque tag `v*`.
+- **Fait quand :** une partie solo tourne dans Chrome, Firefox et Safari, puis un joueur web rejoint une partie hébergée par un client natif via le lobby public.
+
 ## 4. Sécurité : vulnérabilités classées
 
 Toutes sont déclenchables à distance. L'obstacle du checksum XOR (sock.cpp:350-364) est trivial à calculer.
@@ -298,6 +322,8 @@ uint32 magic 'EDV1' | uint16 protocol | uint32 layoutHash | uint8 verLen | char 
 - **Faux positifs de l'anti-triche :** passer d'abord par une phase de log seulement.
 - **Licence :** le code est sous LGPL-3.0 et Steamworks est propriétaire. Garder le SDK hors du dépôt, en dépendance optionnelle et liée dynamiquement, avec un build sans Steam complet. Une exception peut être demandée à l'auteur (license.txt:3). À faire valider par un juriste.
 - **macOS :** le hardened runtime entre en conflit avec l'overlay Steam (entitlements nécessaires). `steam_appid.txt` dépend du `chdir` d'EnterDataDir.
+- **Rendu (M13) :** la physique est couplée au rendu (playing.cpp:495-503) : le nouveau backend ne doit pas changer le pas de temps. Les GPU intégrés anciens peuvent manquer de GL 3.3, d'où le maintien du backend fixe jusqu'à la bascule.
+- **Web (M14) :** sans pont WebRTC côté natif, les joueurs web ne jouent qu'entre eux. Safari et Firefox ont un support WebGPU récent : rester sur WebGL2 par défaut.
 - **Gameplay :** M11 phase 3 touche à la physique couplée au rendu (playing.cpp:495-503). À faire derrière un flag.
 
 ## 7. Décisions ouvertes pour l'utilisateur
