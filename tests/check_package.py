@@ -79,7 +79,7 @@ def check_contents(top, gns):
     lic = os.path.join(top, "licenses")
     have = sorted(os.listdir(lic)) if os.path.isdir(lic) else []
     print("licenses/: " + ", ".join(have))
-    need = ["SDL2.txt", "opus.txt"]
+    need = ["stb_image.txt", "SDL2.txt", "opus.txt"]
     if gns:
         need += ["gamenetworkingsockets.txt", "protobuf.txt", "abseil.txt", "openssl.txt"]
     for n in need:

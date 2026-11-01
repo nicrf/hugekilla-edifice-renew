@@ -9,7 +9,8 @@ project(Edifice VERSION 0.5.4 LANGUAGES C CXX)
 # behind HK_WIN32_NATIVE for reference, but is no longer built.
 # See BUILD.md, or simply run: python3 build.py
 
-set(CMAKE_CXX_STANDARD 11)
+# C++17 for std::filesystem (src/platform/fileio.cpp): macOS 10.15 or later
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 get_property(HK_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
 if(NOT HK_MULTI_CONFIG AND NOT CMAKE_BUILD_TYPE)
@@ -131,6 +132,7 @@ set(SOURCES
   src/render/redrawing.cpp
   src/render/textures.cpp
   src/render/texture_gl.cpp
+  src/render/image.cpp
   src/game/cfgfile.cpp
   src/game/GamePlay.cpp
   src/game/hugekilla.cpp
@@ -160,6 +162,7 @@ set(SOURCES
   src/audio/sound_sdl.cpp
   src/audio/voice.cpp
   src/platform/platform_sdl.cpp
+  src/platform/fileio.cpp
   src/compat/win32compat.cpp
 )
 
@@ -167,6 +170,7 @@ set(SOURCES
 # <StdAfx.h>...), so every module directory is on the include path.
 set(INCLUDE_DIRS
   ${SRC}/game ${SRC}/render ${SRC}/net ${SRC}/ui ${SRC}/audio ${SRC}/platform ${SRC}/compat
+  ${SRC}/third_party   # "stb/stb_image.h" (public domain / MIT, see its LICENSE)
   ${CMAKE_CURRENT_SOURCE_DIR}/win32)   # resource.h (dialog/icon IDs used by the code)
 if(NOT WIN32)
   # Stand-ins for <windows.h>, "gl/gl.h"... (on Windows the real headers are used)
@@ -290,6 +294,10 @@ add_test(NAME anticheat COMMAND anticheat_test)
 add_executable(hmac_test tests/hmac_test.cpp src/net/hmac.cpp)
 target_include_directories(hmac_test PRIVATE ${SRC}/net)
 add_test(NAME hmac COMMAND hmac_test)
+# portable file access and the case-insensitive data lookup (roadmap M12.4)
+add_executable(fileio_test tests/fileio_test.cpp src/platform/fileio.cpp)
+target_include_directories(fileio_test PRIVATE ${SRC}/platform)
+add_test(NAME fileio COMMAND fileio_test)
 set(HK_TEST_INCLUDES ${SRC}/game ${SRC}/net ${SRC}/compat)
 if(NOT WIN32)
   list(APPEND HK_TEST_INCLUDES ${SRC}/compat/include)   # "windows.h": DWORD...

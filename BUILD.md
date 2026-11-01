@@ -37,7 +37,7 @@ python3 build.py --config Debug --run
 python3 build.py --package           # dist/Edifice-<version>-<os>.zip|.tar.gz
 ```
 
-Sous Windows : `py build.py ...`. Options : `--clean`, `--test` (tests unitaires après le build), `--generator <G>`, `EDIFICE_ARCH=Win32` pour du 32 bits, `--universal` (macOS : un binaire arm64 + x86_64, macOS 10.13 minimum, comme la release), `--no-gns` (sans GameNetworkingSockets, donc sans P2P : plus rapide à compiler, mais les parties Internet demandent des ports UDP ouverts ; voir ci-dessous). `EDIFICE_CMAKE_ARGS="-D…"` ajoute des arguments CMake.
+Sous Windows : `py build.py ...`. Options : `--clean`, `--test` (tests unitaires après le build), `--generator <G>`, `EDIFICE_ARCH=Win32` pour du 32 bits, `--universal` (macOS : un binaire arm64 + x86_64, macOS 10.15 minimum, comme la release), `--no-gns` (sans GameNetworkingSockets, donc sans P2P : plus rapide à compiler, mais les parties Internet demandent des ports UDP ouverts ; voir ci-dessous). `EDIFICE_CMAKE_ARGS="-D…"` ajoute des arguments CMake.
 `-DEDIFICE_SYSTEM_SDL2=ON` (CMake) utilise une SDL2 installée au lieu de la compiler.
 La version vient de `project(Edifice VERSION …)` dans `CMakeLists.txt`.
 
@@ -101,18 +101,19 @@ build/fuzz/fuzz_map -max_total_time=60 /tmp/c    # fuzzing (le corpus grandit da
 
 ## Releases automatiques
 
-`.github/workflows/release.yml` : à chaque tag `v*` poussé (`git tag v0.2.0 && git push origin v0.2.0`), GitHub Actions compile macOS, Linux et Windows avec `build.py --config Release --gns --package --test` (`--universal` sur macOS ; vcpkg épinglé par `VCPKG_COMMIT`, cache binaire gardé par `actions/cache`), vérifie chaque archive avec `tests/check_package.py`, puis publie une release GitHub avec les trois archives. À chaque push et PR, les archives sont aussi disponibles comme artefacts, sans release. Minimums : macOS 10.13 (Intel) / 11 (Apple Silicon), glibc 2.35 (Ubuntu 22.04 et plus récentes), Windows 10.
+`.github/workflows/release.yml` : à chaque tag `v*` poussé (`git tag v0.2.0 && git push origin v0.2.0`), GitHub Actions compile macOS, Linux et Windows avec `build.py --config Release --gns --package --test` (`--universal` sur macOS ; vcpkg épinglé par `VCPKG_COMMIT`, cache binaire gardé par `actions/cache`), vérifie chaque archive avec `tests/check_package.py`, puis publie une release GitHub avec les trois archives. À chaque push et PR, les archives sont aussi disponibles comme artefacts, sans release. Minimums : macOS 10.15 (Intel, pour `std::filesystem`) / 11 (Apple Silicon), glibc 2.35 (Ubuntu 22.04 et plus récentes), Windows 10.
 
 ## Arborescence
 
 ```
 src/game/      boucle de jeu, terrain (land*), structures, physique, config, vector, StdAfx.h, hugekilla.cpp
-src/render/    rendu OpenGL (redrawing), textures, modèles .cob (ase)
+src/render/    rendu OpenGL (redrawing), textures (registre textures.h, image.cpp = stb_image), modèles .cob (ase)
 src/net/       sockets UDP (sock), protocole et serveur/client (multiplay*)
 src/ui/        menus en jeu, console, Options, Server Setup, crédits
 src/audio/     sound_sdl.cpp (SDL) ; sound.cpp = DirectSound d'origine, plus compilé
-src/platform/  platform_sdl.cpp : main SDL (fenêtre, contexte GL, entrées)
+src/platform/  platform_sdl.cpp : main SDL (fenêtre, contexte GL, entrées) ; fileio.* : accès aux fichiers (std::filesystem, stdio)
 src/compat/    win32compat.* : émulation Win32 (POSIX) / redirections SDL (Windows) ; include/ = faux windows.h, gl/gl.h… (POSIX)
+src/third_party/ stb/stb_image.h v2.30 (nothings/stb 31c1ad3, domaine public / MIT, licence dans stb/LICENSE)
 win32/         hugekilla.rc, resource.h, icônes ; .sln/.vcproj d'origine pour référence
 data/          données du jeu (ini, textures, sons, objets, Structures)
 ```
@@ -125,7 +126,7 @@ Le code Win32 natif d'origine (WinMain, DirectSound, boîtes de dialogue) reste 
 
 Les réglages que le jeu réécrit (`control.ini`, `net.ini`, `sv.ini`) et les captures d'écran (`screenshot-*.bmp`) sont dans le dossier utilisateur, copiés depuis `data/` au premier lancement : `~/Library/Application Support/Edifice` (macOS), `%APPDATA%\Edifice` (Windows), `~/.local/share/Edifice` (Linux). Le dossier de données (et le `.app` signé) n'est jamais modifié ; supprimez un fichier du dossier utilisateur pour revenir aux valeurs par défaut.
 
-Les données viennent de Windows (insensible à la casse) : hors Windows, `HKPath` retrouve un chemin sans tenir compte de la casse. Les `.ini` et `Structures/*.txt` sont en CRLF et le code s'appuie sur le `\r` : `.gitattributes` marque `data/**` en `-text`.
+Les données viennent de Windows (insensible à la casse) : le code écrit ses chemins en `/` et passe par `src/platform/fileio.h` (`HKReadFile`, `HKFileOpen`, `HKListDir`…), qui hors Windows retrouve un chemin sans tenir compte de la casse quand il n'existe pas tel quel (`structures` → `Structures/`). Les images (`.bmp`, et aussi `.png`/`.tga`) sont décodées par stb_image, les `.pxr` (brut, avec alpha) par `LoadRaw`. Les `.ini` et `Structures/*.txt` sont en CRLF et le code s'appuie sur le `\r` : `.gitattributes` marque `data/**` en `-text`.
 
 ## Écrans ajoutés
 
@@ -173,7 +174,7 @@ Les lettres suivent la disposition du clavier : sur AZERTY, remappez Avancer/Gau
 - `HK_MENU=options|options2|player|credits|join|internet|server|serverstart` ouvre cet écran au démarrage (`internet` : l'onglet Internet de Join) ; `build`, `scores` et `chat` démarrent un serveur local et ouvrent le menu de construction, les scores ou le chat.
 - `HK_LOBBYJOIN=<code>` cherche ce code de partie sur le lobby (`net.ini` `lobby=`) et rejoint la partie, par l'onglet Internet (en P2P si elle a une identité, voir GameNetworkingSockets).
 - `HK_P2P=0|1|relay` remplace `p2p=` de `net.ini` ; `HK_GNS_DEBUG=1` affiche les messages de GameNetworkingSockets. `HK_SIGNAL_TCP=1` : signalisation par le relais TCP même si le lobby propose son relais WebSocket (`wss://`). `EDIFICE_TEST_CA_FILE=cert.pem` (tests seulement) : certificat PEM d'un lobby auto-signé, accepté en plus de ceux du système pour le lobby et la signalisation (la vérification reste faite).
-- `HK_CONSOLE=1` démarre un serveur local et ouvre la console après quelques commandes (`help`, `maps`, …) ; `HK_CONSOLE=scroll` la fait défiler vers le haut, `HK_CONSOLE=notify` la laisse fermée (dernières lignes sur le jeu), toute autre valeur reste tapée à l'invite (`HK_CONSOLE=gr` : complétion).
+- `HK_CONSOLE=1` démarre un serveur local et ouvre la console après quelques commandes (`help`, `maps`, …) ; `HK_CONSOLE=scroll` la fait défiler vers le haut, `HK_CONSOLE=notify` la laisse fermée (dernières lignes sur le jeu), toute autre valeur reste tapée à l'invite (`HK_CONSOLE=gr` : complétion). Avec `HK_CONSOLE`, `HK_CONSOLE_RUN="savemap essai;loadmap essai"` exécute en plus ces commandes (séparées par `;`), par exemple pour vérifier l'aller-retour d'une carte dans `maps/` du dossier utilisateur.
 - `HK_SHOT=fichier.ppm` (et `HK_SHOT_FRAME=N`) enregistre l'image rendue N (sans VSync : sous macOS, l'échange d'images attend sinon indéfiniment quand l'écran est en veille).
 - `HK_USERDIR=<dossier/>` remplace le dossier utilisateur (`control.ini`, `net.ini`, `sv.ini`, cartes) : des essais (captures, taille de fenêtre `screenwidth`/`screenheight`) sans toucher aux vrais réglages.
 - Pixel-diff du rendu (M12.5, M13) : capturer les mêmes écrans (`HK_MENU=…`, `HK_CONSOLE=notify`, `HK_AUTOSTART=1 HK_MAPFILE=…`, avec `HK_SEED`, `HK_SHOT_FRAME` et un `HK_USERDIR` fixes) avec l'ancien et le nouveau binaire, puis `python3 tests/pixel_diff.py avant/ apres/` (tolérance 0 par défaut, `--tolerance N`, `--diff d.ppm` pour une paire). Les écrans 2D doivent être identiques ; les images en jeu varient d'une exécution à l'autre (caméra et animations suivent l'horloge) : `--ignore avant2/` (une deuxième capture de l'ancien binaire, répétable) ignore les pixels qui changent déjà entre deux exécutions de la référence.

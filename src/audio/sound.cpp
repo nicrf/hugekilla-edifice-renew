@@ -196,13 +196,13 @@ void StopSound(int num)
 void LoadGunSounds(char *gun,int num)
 {
 	char fullname[100];
-	strcpy(fullname,"sound\\");
+	strcpy(fullname,"sound/");
 	strcat(fullname,gun);
 	strcat(fullname,"fire");
 	strcat(fullname,".wav");
 	LoadSound(fullname,num*4+1,0);
 	LoadSound(fullname,num*4+2,1);
-	strcpy(fullname,"sound\\");
+	strcpy(fullname,"sound/");
 	strcat(fullname,gun);
 	strcat(fullname,"reload");
 	strcat(fullname,".wav");
@@ -221,29 +221,29 @@ void LoadSounds()
 	LoadGunSounds("beretta",5);
 	LoadGunSounds("sr1000",6);
 
-	LoadSound("sound\\footsteps.wav",100,1);
-	LoadSound("sound\\wallscrape.wav",110,1);
-	LoadSound("sound\\landing.wav",120,1);
-	LoadSound("sound\\thump.wav",130,1);
-	LoadSound("sound\\splash4.wav",140,1);
-	LoadSound("sound\\hit1.wav",150,0);
-	LoadSound("sound\\death.wav",160,0);
-	LoadSound("sound\\hit1.wav",151,1);
-	LoadSound("sound\\death.wav",161,1);
-	LoadSound("sound\\thrust.wav",170,0);
-	LoadSound("sound\\thrust.wav",171,1);
+	LoadSound("sound/footsteps.wav",100,1);
+	LoadSound("sound/wallscrape.wav",110,1);
+	LoadSound("sound/landing.wav",120,1);
+	LoadSound("sound/thump.wav",130,1);
+	LoadSound("sound/splash4.wav",140,1);
+	LoadSound("sound/hit1.wav",150,0);
+	LoadSound("sound/death.wav",160,0);
+	LoadSound("sound/hit1.wav",151,1);
+	LoadSound("sound/death.wav",161,1);
+	LoadSound("sound/thrust.wav",170,0);
+	LoadSound("sound/thrust.wav",171,1);
 	LoadSound("sound\\nade.wav",181,1);
 	
-	LoadSound("sound\\grenadesplat.wav",191,1);
+	LoadSound("sound/grenadesplat.wav",191,1);
 
-	LoadSound("sound\\thunder2.wav",500,0);
+	LoadSound("sound/thunder2.wav",500,0);
 
 
-	LoadSound("sound\\returnflag.wav",RETURNFLAG,0);
-	LoadSound("sound\\stolenflag.wav",STOLENFLAG,0);
-	LoadSound("sound\\capturedflag.wav",CAPTUREDFLAG,0);
-	LoadSound("sound\\redteamwins.wav",REDTEAMWINS,0);
-	LoadSound("sound\\blueteamwins.wav",BLUETEAMWINS,0);
+	LoadSound("sound/returnflag.wav",RETURNFLAG,0);
+	LoadSound("sound/stolenflag.wav",STOLENFLAG,0);
+	LoadSound("sound/capturedflag.wav",CAPTUREDFLAG,0);
+	LoadSound("sound/redteamwins.wav",REDTEAMWINS,0);
+	LoadSound("sound/blueteamwins.wav",BLUETEAMWINS,0);
 }
 
 

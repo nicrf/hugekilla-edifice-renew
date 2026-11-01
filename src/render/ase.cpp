@@ -451,14 +451,9 @@ int AseObj::Load(LPCTSTR fil)
 #endif
 	Release();
 	if(object.numobjs) return 0;
-	HANDLE file=CreateFile(fil,GENERIC_READ,0,0,OPEN_EXISTING,0,0);
-	if(!file) return 0;
-	int filelen=GetFileSize(file,0);
-	if(filelen==-1) return 0;
-	char *buf=new char[filelen];
-	DWORD read=0;
-	ReadFile(file,buf,filelen,&read,NULL);
-	CloseHandle(file);
+	long filelen;
+	char *buf=HKReadFile(fil,&filelen);
+	if(!buf) return 0;
 	if(strncmp(buf,"Caligari",8)==0)
 	{
 		return loaded=LoadCob(buf,filelen);

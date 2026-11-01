@@ -2192,20 +2192,20 @@ void ApplyLand(const LandDefs *defs,const SkySettings *sky)
 	if(strlen(GetSkySettings()->sound))
 	{
 		char soundname[200];
-		snprintf(soundname,sizeof(soundname),"sound\\%s",GetSkySettings()->sound);
+		snprintf(soundname,sizeof(soundname),"sound/%s",GetSkySettings()->sound);
 		LoadSound(soundname,0,0);
 		PlaySound(0,1);
 	}
 	char fullfilename[400];
 	if(strlen(GetSkySettings()->cloudtex))
 	{
-		strcpy(fullfilename,"textures\\clouds\\");
+		strcpy(fullfilename,"textures/clouds/");
 		strcat(fullfilename,GetSkySettings()->cloudtex);
 		LoadTexture(fullfilename,TEX_CLOUDS);
 	}
 	if(strlen(GetSkySettings()->misttex))
 	{
-		strcpy(fullfilename,"textures\\clouds\\");
+		strcpy(fullfilename,"textures/clouds/");
 		strcat(fullfilename,GetSkySettings()->misttex);
 		LoadTexture(fullfilename,TEX_CLOUDMIST);
 	}

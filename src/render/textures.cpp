@@ -36,28 +36,13 @@ int LoadTexture(char *filename,unsigned num)
 		return LoadRaw(filename,num);;
 	}
 	
-	void *himage=LoadImage(NULL,filename,IMAGE_BITMAP,0,0,LR_CREATEDIBSECTION|LR_LOADFROMFILE);
-	BITMAP bm;
-	if(!GetObject(himage,sizeof(bm),&bm)) 
-	{
-		return 0;
-	}
-	char *bits=(char *)bm.bmBits;
-
-	char *newbits=new char[bm.bmHeight*bm.bmWidth*3];
-
-	int totalsize=bm.bmWidth*bm.bmHeight;
-	for(int y=0;y<bm.bmHeight;y++)
-	for(int x=0;x<bm.bmWidth;x++)
-	{
-		newbits[y*bm.bmWidth*3+x*3]=bits[(bm.bmHeight-y-1)*bm.bmWidth*3+x*3+2];
-		newbits[y*bm.bmWidth*3+x*3+1]=bits[(bm.bmHeight-y-1)*bm.bmWidth*3+x*3+1];
-		newbits[y*bm.bmWidth*3+x*3+2]=bits[(bm.bmHeight-y-1)*bm.bmWidth*3+x*3];
-
-	}
-	TexUpload(num,bm.bmWidth,bm.bmHeight,3,newbits,TEXF_MIPNEAREST);
-	DeleteObject(himage);
-	delete []newbits;
+	//stb_image gives RGB with the top row first, as the old BMP reader did by
+	//turning the bottom-up BGR rows of the DIB around
+	int width,height;
+	unsigned char *pixels=LoadImagePixels(filename,&width,&height,3);
+	if(!pixels) return 0;
+	TexUpload(num,width,height,3,pixels,TEXF_MIPNEAREST);
+	FreeImagePixels(pixels);
 #ifndef PLMODEL
 	char consolemessage[5000];
 	strcpy(consolemessage,"Loaded ");
@@ -69,17 +54,18 @@ int LoadTexture(char *filename,unsigned num)
 
 int LoadRaw(char *filename,unsigned num)
 {
-
-	HANDLE file=CreateFile(filename,GENERIC_READ,0,0,OPEN_EXISTING,0,0);
+	//.pxr: a 1024-byte header, then square 8-bit pixels; the size tells the channels.
+	//stb_image doesn't know it, so it keeps its own reader.
+	long filelen;
+	char *file=HKReadFile(filename,&filelen);
 	if(!file) return 0;
-	UINT filelen=GetFileSize(file,0);
-	if(filelen==-1) return 0;
-	char *bits=new char[filelen];
-	DWORD read=0;
-	ReadFile(file,bits,1024,&read,NULL);
+	if(filelen<=1024)
+	{
+		delete []file;
+		return 0;
+	}
+	char *bits=&file[1024];
 	filelen-=1024;
-	ReadFile(file,bits,filelen,&read,NULL);
-	CloseHandle(file);
 
 	int channels=filelen;
 	int size=1;
@@ -89,7 +75,7 @@ int LoadRaw(char *filename,unsigned num)
 		size*=2;
 	}while(channels>4);
 	TexUpload(num,size,size,channels,bits,TEXF_MIPLINEAR);
-	delete []bits;		
+	delete []file;
 #ifndef PLMODEL
 	char consolemessage[5000];
 	strcpy(consolemessage,"Loaded ");
@@ -107,7 +93,7 @@ void LoadBlockTextures()
 	char tname[100];
 	do
 	{
-		strcpy(tname,"textures\\block\\");
+		strcpy(tname,"textures/block/");
 		strcat(tname,"wall");
 		itoa(fnum,&tname[strlen(tname)],10);
 		strcat(tname,".bmp");
@@ -119,41 +105,25 @@ void LoadBlockTextures()
 }
 void LoadSpriteTextures()
 {
-	WIN32_FIND_DATA fd;
-	HANDLE findhand=FindFirstFile("textures\\sprite\\*.bmp",&fd);
+	std::vector<HKDirEntry> files=HKListDir("textures/sprite");
 	int curtex=TEX_SPRITE0;
-	if(findhand==INVALID_HANDLE_VALUE) return;
-	int found;
 	reflecttexnum=-1;
-	do
+	for(size_t f=0;f<files.size();f++)
 	{
-		if(fd.dwFileAttributes!=FILE_ATTRIBUTE_DIRECTORY)
-		{
-			
-			char fullfilename[300]="textures\\sprite\\";
-			strcpy(texname[curtex-TEX_SPRITE0],fd.cFileName);
-			strcat(fullfilename,fd.cFileName);
-			char rawfullfilename[300];
-			strcpy(rawfullfilename,fullfilename);
-			int i;
-			for(i=strlen(rawfullfilename);i>=0;i--)
-			{
-				if(rawfullfilename[i]=='.')
-					break;
-			}
-			if(i>0)
-				strcpy(&rawfullfilename[i+1],"pxr");
-			if(!LoadRaw(rawfullfilename,curtex))
-				LoadTexture(fullfilename,curtex);
-			int len=strlen(fd.cFileName);
-			texused[curtex-TEX_SPRITE0]=0;
-			curtex++;
-		}
-		found=FindNextFile(findhand,&fd);
+		const char *name=files[f].name.c_str();
+		if(files[f].isdir||!HKHasExt(name,".bmp")) continue;
+		char fullfilename[300]="textures/sprite/";
+		strcpy(texname[curtex-TEX_SPRITE0],name);
+		strcat(fullfilename,name);
+		char rawfullfilename[300];
+		strcpy(rawfullfilename,fullfilename);
+		strcpy(&rawfullfilename[strlen(rawfullfilename)-3],"pxr");   //a .pxr next to it wins
+		if(!LoadRaw(rawfullfilename,curtex))
+			LoadTexture(fullfilename,curtex);
+		texused[curtex-TEX_SPRITE0]=0;
+		curtex++;
 	}
-	while (found);
 	numtex=curtex-TEX_SPRITE0;
-	
 }
 int GetTexID(LPCTSTR name)
 {
@@ -176,39 +146,13 @@ int GetTexID(LPCTSTR name)
 //selects a random texture from a directory
 void GetRandom(LPCTSTR dir,char name[255])
 {
-	WIN32_FIND_DATA fd;
-	char wildcard[300];
-	strcpy(wildcard,dir);
-	strcat(wildcard,"*.bmp");
-	HANDLE findhand=FindFirstFile(wildcard,&fd);
-	
-	if(findhand==INVALID_HANDLE_VALUE) return;
-	int found;
-	int num=0;
-	do
-	{
-		found=FindNextFile(findhand,&fd);
-		num++;
-	}
-	while (found);
-	int pick=num*RND;
-	
-	findhand=FindFirstFile(wildcard,&fd);
-	
-	if(findhand==INVALID_HANDLE_VALUE) return;
-	
-	num=0;
-	do
-	{
-		if(num==pick)
-		{
-			strcpy(name,fd.cFileName);
-			return;
-		}
-		found=FindNextFile(findhand,&fd);
-		num++;
-	}
-	while (found);
+	std::vector<HKDirEntry> all=HKListDir(dir),bmps;
+	for(size_t i=0;i<all.size();i++)
+		if(HKHasExt(all[i].name.c_str(),".bmp")) bmps.push_back(all[i]);
+	if(bmps.empty()) return;
+	int pick=bmps.size()*RND;
+	if(pick>=(int)bmps.size()) pick=bmps.size()-1;
+	strcpy(name,bmps[pick].name.c_str());
 }
 void LoadRandom(LPCTSTR dir,int texnum)
 {
@@ -233,11 +177,11 @@ void LoadGuns()
 		itoa(i,&val[3],10);
 		wp=&val[strlen(val)];
 		strcpy(wp,"main");
-		strcpy(fullfilename,"objects\\");
+		strcpy(fullfilename,"objects/");
 		strcat(fullfilename,objcfg.GetValues(val));
 		gun[i].main.Load(fullfilename);
 		strcpy(wp,"part0");
-		strcpy(fullfilename,"objects\\");
+		strcpy(fullfilename,"objects/");
 		const char *sr=objcfg.GetValues(val);
 		if(sr)
 		{
@@ -245,7 +189,7 @@ void LoadGuns()
 			gun[i].part[0].Load(fullfilename);
 		}
 		strcpy(wp,"part1");
-		strcpy(fullfilename,"objects\\");
+		strcpy(fullfilename,"objects/");
 		sr=objcfg.GetValues(val);
 		if(sr)
 		{
@@ -253,7 +197,7 @@ void LoadGuns()
 			gun[i].part[1].Load(fullfilename);
 		}
 		strcpy(wp,"playermodel");
-		strcpy(fullfilename,"objects\\");
+		strcpy(fullfilename,"objects/");
 		sr=objcfg.GetValues(val);
 		if(sr)
 		{
@@ -261,7 +205,7 @@ void LoadGuns()
 			gun[i].playermodel.Load(fullfilename);
 		}
 		strcpy(wp,"explosion0");
-		strcpy(fullfilename,"textures\\explosions\\");
+		strcpy(fullfilename,"textures/explosions/");
 		sr=objcfg.GetValues(val);
 		if(sr)
 		{
@@ -269,7 +213,7 @@ void LoadGuns()
 			LoadRaw(fullfilename,TEX_EXPLOSION0+i*2);
 		}
 		strcpy(wp,"explosionside0");
-		strcpy(fullfilename,"textures\\explosions\\");
+		strcpy(fullfilename,"textures/explosions/");
 		sr=objcfg.GetValues(val);
 		if(sr)
 		{
@@ -304,27 +248,27 @@ void LoadGuns()
 		
 	}
 	
-	torso[0][0].Load("objects\\torso_red_gat.cob");
-	torso[0][1].Load("objects\\torso_red_m16.cob");
-	torso[0][2].Load("objects\\torso_red_acr.cob");
-	torso[0][3].Load("objects\\torso_red_ump.cob");
-	torso[0][4].Load("objects\\torso_red_nade.cob");
-	torso[0][5].Load("objects\\torso_red_beretta.cob");
-	torso[0][6].Load("objects\\torso_red_whiterifle.cob");
+	torso[0][0].Load("objects/torso_red_gat.cob");
+	torso[0][1].Load("objects/torso_red_m16.cob");
+	torso[0][2].Load("objects/torso_red_acr.cob");
+	torso[0][3].Load("objects/torso_red_ump.cob");
+	torso[0][4].Load("objects/torso_red_nade.cob");
+	torso[0][5].Load("objects/torso_red_beretta.cob");
+	torso[0][6].Load("objects/torso_red_whiterifle.cob");
 
-	torso[1][0].Load("objects\\torso_blue_gat.cob");
-	torso[1][1].Load("objects\\torso_blue_m16.cob");
-	torso[1][2].Load("objects\\torso_blue_acr.cob");
-	torso[1][3].Load("objects\\torso_blue_ump.cob");
-	torso[1][4].Load("objects\\torso_blue_nade.cob");
-	torso[1][5].Load("objects\\torso_blue_beretta.cob");
-	torso[1][6].Load("objects\\torso_blue_whiterifle.cob");
+	torso[1][0].Load("objects/torso_blue_gat.cob");
+	torso[1][1].Load("objects/torso_blue_m16.cob");
+	torso[1][2].Load("objects/torso_blue_acr.cob");
+	torso[1][3].Load("objects/torso_blue_ump.cob");
+	torso[1][4].Load("objects/torso_blue_nade.cob");
+	torso[1][5].Load("objects/torso_blue_beretta.cob");
+	torso[1][6].Load("objects/torso_blue_whiterifle.cob");
 
-	leg[0].Load("objects\\run_rightback.cob");
-	leg[1].Load("objects\\run_rightback2.cob");
-	leg[2].Load("objects\\run_neutral.cob");
-	leg[3].Load("objects\\run_leftback2.cob");
-	leg[4].Load("objects\\run_leftback.cob");
+	leg[0].Load("objects/run_rightback.cob");
+	leg[1].Load("objects/run_rightback2.cob");
+	leg[2].Load("objects/run_neutral.cob");
+	leg[3].Load("objects/run_leftback2.cob");
+	leg[4].Load("objects/run_leftback.cob");
 	LoadScenery();
 }
 
@@ -345,25 +289,25 @@ void LoadScenery()
 		filename=objcfg.GetValues(prop);
 		if(filename)
 		{
-			strcpy(fullfilename,"objects\\");
+			strcpy(fullfilename,"objects/");
 			strcat(fullfilename,filename);
 			scenery[numscenery].Load(fullfilename);
 			numscenery++;
 		}
 	} while(filename);
 	
-	plobj[0].Load("objects\\best.cob");
-	projectile[0].Load("objects\\rocket.cob");
-	projectile[1].Load("objects\\roundz.cob");
+	plobj[0].Load("objects/best.cob");
+	projectile[0].Load("objects/rocket.cob");
+	projectile[1].Load("objects/roundz.cob");
 	projectile[2].Load("objects\\nade.cob");
-	servercobs[1][0].Load("objects\\dome.cob");
-	servercobs[2][0].Load("objects\\waterpump.cob");
-	servercobs[2][1].Load("objects\\station_red.cob");
-	servercobs[2][2].Load("objects\\station_blue.cob");
-	servercobs[3][0].Load("objects\\flag_blue.cob");
-	servercobs[3][1].Load("objects\\flag_red.cob");
-	servercobs[3][2].Load("objects\\flag_blue.cob");
-	hangglider.Load("objects\\hangglider.cob");
+	servercobs[1][0].Load("objects/dome.cob");
+	servercobs[2][0].Load("objects/waterpump.cob");
+	servercobs[2][1].Load("objects/station_red.cob");
+	servercobs[2][2].Load("objects/station_blue.cob");
+	servercobs[3][0].Load("objects/flag_blue.cob");
+	servercobs[3][1].Load("objects/flag_red.cob");
+	servercobs[3][2].Load("objects/flag_blue.cob");
+	hangglider.Load("objects/hangglider.cob");
 
 }
 int GetNumScenery()
@@ -379,14 +323,14 @@ void MoveUnnecessaryTextures()
 		if(!texused[i])
 		{
 			char oldfilename[5000],newfilename[5000];
-			strcpy(oldfilename,"textures\\sprite\\");
+			strcpy(oldfilename,"textures/sprite/");
 			strcat(oldfilename,texname[i]);
-			strcpy(newfilename,"textures\\sprite\\unused\\");
+			strcpy(newfilename,"textures/sprite/unused/");
 			strcat(newfilename,texname[i]);
 			char message[10000];
 			sprintf(message,"Moving %s to %s",oldfilename,newfilename);
 			ConsoleDisplayText(message);
-			MoveFileEx(oldfilename,newfilename,MOVEFILE_REPLACE_EXISTING);
+			HKRenameFile(oldfilename,newfilename);
 		}
 	}
 }
@@ -397,7 +341,7 @@ void LoadHighTextures()
 	LoadBlockTextures();
 	LoadGuns();
 	
-	LoadTexture("textures\\mainmenu.pxr",TEX_MENU0);
+	LoadTexture("textures/mainmenu.pxr",TEX_MENU0);
 	int numtexused=0;
 	for(int i=0;i<numtex;i++)
 	{
@@ -413,28 +357,28 @@ void LoadHighTextures()
 //font and splash, which the console and loading screens need before anything else
 void LoadStartupTextures()
 {
-	LoadTexture("textures\\fonts\\courier.pxr",TEX_FONT);
+	LoadTexture("textures/fonts/courier.pxr",TEX_FONT);
 	LoadSplashTexture();
 }
 void LoadSplashTexture()
 {
-	LoadTexture("textures\\startup.bmp",TEX_SPLASH);
+	LoadTexture("textures/startup.bmp",TEX_SPLASH);
 }
 void LoadTextures()
 {
 	glEnable(GL_TEXTURE_2D);
-	LoadTexture("textures\\ammoicon.bmp",TEX_AMMOICON);
-	LoadTexture("textures\\healthicon.bmp",TEX_HEALTHICON);
+	LoadTexture("textures/ammoicon.bmp",TEX_AMMOICON);
+	LoadTexture("textures/healthicon.bmp",TEX_HEALTHICON);
 	
-	LoadTexture("textures\\buildicon.bmp",TEX_CREDIT0);
-	LoadTexture("textures\\stationmoveicon.bmp",TEX_CREDIT0+1);
+	LoadTexture("textures/buildicon.bmp",TEX_CREDIT0);
+	LoadTexture("textures/stationmoveicon.bmp",TEX_CREDIT0+1);
 
 
-	LoadTexture("textures\\sun.bmp",TEX_SUN);
-	LoadTexture("textures\\sunback.bmp",TEX_SUNBACK);
-	LoadTexture("textures\\crosshair.bmp",TEX_CROSSHAIR);
-	LoadTexture("textures\\water\\seamlesswater.bmp",TEX_WATER);
-	LoadTexture("textures\\lillypad.pxr",TEX_LILLYPAD);
-	LoadTexture("textures\\gunnames.pxr",TEX_GUNNAMES);
+	LoadTexture("textures/sun.bmp",TEX_SUN);
+	LoadTexture("textures/sunback.bmp",TEX_SUNBACK);
+	LoadTexture("textures/crosshair.bmp",TEX_CROSSHAIR);
+	LoadTexture("textures/water/seamlesswater.bmp",TEX_WATER);
+	LoadTexture("textures/lillypad.pxr",TEX_LILLYPAD);
+	LoadTexture("textures/gunnames.pxr",TEX_GUNNAMES);
 }
 #endif

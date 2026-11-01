@@ -132,23 +132,13 @@ static const char *KeyName(int vk)
 
 void SetIniValues(const char *filename,const char *keys[],const char *values[],int count)
 {
-	HANDLE file=CreateFile(filename,GENERIC_READ,0,0,OPEN_EXISTING,0,0);
-	char *data=0;
-	DWORD len=0;
-	if(file!=INVALID_HANDLE_VALUE)
-	{
-		len=GetFileSize(file,0);
-		data=new char[len+1];
-		DWORD read;
-		ReadFile(file,data,len,&read,0);
-		len=read;
-		CloseHandle(file);
-	}
-	else
+	long len=0;
+	char *data=HKReadFile(filename,&len);
+	if(!data)
 	{
 		data=new char[1];
+		data[0]=0;
 	}
-	data[len]=0;
 
 	char *out=new char[len+count*200+16];
 	int outlen=0;
@@ -185,12 +175,11 @@ void SetIniValues(const char *filename,const char *keys[],const char *values[],i
 			outlen+=sprintf(&out[outlen],"\r\n");
 		outlen+=sprintf(&out[outlen],"%s=%s\r\n",keys[k],values[k]);
 	}
-	file=CreateFile(filename,GENERIC_WRITE,0,0,CREATE_ALWAYS,0,0);
-	if(file!=INVALID_HANDLE_VALUE)
+	FILE *file=HKFileOpen(filename,"wb");
+	if(file)
 	{
-		DWORD written;
-		WriteFile(file,out,outlen,&written,0);
-		CloseHandle(file);
+		fwrite(out,1,outlen,file);
+		fclose(file);
 	}
 	delete []data;
 	delete []out;

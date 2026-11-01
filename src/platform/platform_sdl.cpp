@@ -16,10 +16,6 @@ extern char menu;   //playing.cpp: BUILDING while placing a structure
 #include "ui.h"
 #include "voice.h"
 #include <SDL.h>
-#ifndef _WIN32
-#include <dirent.h>
-#include <sys/stat.h>
-#endif
 
 extern GraphicsPrefs graphicsprefs;
 extern DWORD curtime;
@@ -393,9 +389,10 @@ static void InitUserDir()
 	{
 		char dst[1200];
 		snprintf(dst, sizeof(dst), "%s%s", userdir, defaults[i]);
-		if (access(dst, R_OK) == 0) continue;
-		FILE *in = fopen(defaults[i], "rb");
-		FILE *out = in ? fopen(dst, "wb") : 0;
+		if (HKFileExists(dst)) continue;
+		// UTF-8 user folder (SDL_GetPrefPath): not for the ANSI fopen of Windows
+		FILE *in = HKFileOpen(defaults[i], "rb");
+		FILE *out = in ? HKFileOpen(dst, "wb") : 0;
 		char buf[4096];
 		size_t n;
 		while (in && out && (n = fread(buf, 1, sizeof(buf), in)) > 0)
@@ -413,73 +410,6 @@ const char *UserFile(const char *name)
 	char *p = paths[next++ & 3];
 	snprintf(p, sizeof(paths[0]), "%s%s", userdir, name);
 	return p;
-}
-
-// Files of the user folder (maps) with UTF-8 paths: SDL_GetPrefPath is UTF-8,
-// which the ANSI file functions of Windows don't take.
-#ifdef _WIN32
-static int Utf8ToWide(const char *in, wchar_t *out, int outsize)
-{
-	return MultiByteToWideChar(CP_UTF8, 0, in, -1, out, outsize) > 0;
-}
-#endif
-
-FILE *HKFileOpen(const char *path, const char *mode)
-{
-#ifdef _WIN32
-	wchar_t wpath[1200], wmode[8];
-	if (!Utf8ToWide(path, wpath, 1200) || !Utf8ToWide(mode, wmode, 8)) return 0;
-	return _wfopen(wpath, wmode);
-#else
-	return fopen(path, mode);
-#endif
-}
-
-int HKMakeDir(const char *path)
-{
-#ifdef _WIN32
-	wchar_t wpath[1200];
-	if (!Utf8ToWide(path, wpath, 1200)) return 0;
-	DWORD attr = GetFileAttributesW(wpath);
-	if (attr != INVALID_FILE_ATTRIBUTES) return (attr & FILE_ATTRIBUTE_DIRECTORY) != 0;
-	return CreateDirectoryW(wpath, 0) != 0;
-#else
-	struct stat st;
-	if (stat(path, &st) == 0) return S_ISDIR(st.st_mode);
-	return mkdir(path, 0755) == 0;
-#endif
-}
-
-int HKListDir(const char *dir, char (*names)[64], int max)
-{
-	int n = 0;
-#ifdef _WIN32
-	char pattern[1200];
-	wchar_t wpattern[1200];
-	snprintf(pattern, sizeof(pattern), "%s\\*", dir);
-	if (!Utf8ToWide(pattern, wpattern, 1200)) return 0;
-	WIN32_FIND_DATAW fd;
-	HANDLE find = FindFirstFileW(wpattern, &fd);
-	if (find == INVALID_HANDLE_VALUE) return 0;
-	do
-	{
-		if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
-		if (WideCharToMultiByte(CP_UTF8, 0, fd.cFileName, -1, names[n], 64, 0, 0) > 0) n++;
-	}
-	while (n < max && FindNextFileW(find, &fd));
-	FindClose(find);
-#else
-	DIR *d = opendir(dir);
-	if (!d) return 0;
-	while (struct dirent *ent = readdir(d))
-	{
-		if (n >= max) break;
-		if (ent->d_name[0] == '.' || strlen(ent->d_name) >= 64) continue;
-		strcpy(names[n++], ent->d_name);
-	}
-	closedir(d);
-#endif
-	return n;
 }
 
 static void EnterDataDir(int argc, char **argv)
@@ -687,6 +617,18 @@ int main(int argc, char **argv)
 		StartServer();
 		const char *cmds[] = { "help", "maps", "gravity", "loadmap ../nope", "drawdistance 60" };
 		for (int i = 0; i < 5; i++) ConsoleExecute(cmds[i]);
+		// HK_CONSOLE_RUN="savemap a;loadmap a": more commands, ';'-separated (map tests)
+		if (const char *run = getenv("HK_CONSOLE_RUN"))
+		{
+			char cmd[256];
+			while (*run)
+			{
+				size_t n = strcspn(run, ";");
+				snprintf(cmd, sizeof(cmd), "%.*s", (int)n, run);
+				if (cmd[0]) ConsoleExecute(cmd);
+				run += n + (run[n] == ';');
+			}
+		}
 		if (!strcmp(c, "scroll")) ConsoleScroll(12);
 		else if (strcmp(c, "1") && strcmp(c, "notify")) ConsoleSetInput(c);
 		consolevisible = strcmp(c, "notify") != 0;

@@ -25,7 +25,7 @@ import zipfile
 ROOT = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(ROOT, "data")
 # --universal: oldest macOS the release runs on (same as cmake/triplets/universal-osx.cmake)
-MACOS_MIN = "10.13"
+MACOS_MIN = "10.15"   # std::filesystem (src/platform/fileio.cpp)
 
 
 def host_os():
@@ -279,10 +279,10 @@ def cache_value(bdir, key):
 
 
 def third_party_licenses(bdir):
-    """(name, license file) of the libraries built into the game: SDL2, opus and
-    (Windows) curl from FetchContent, and with --gns the vcpkg ports
-    (GameNetworkingSockets, protobuf, abseil, OpenSSL...)."""
-    out = []
+    """(name, license file) of the libraries built into the game: stb_image (vendored
+    in src/third_party), SDL2, opus and (Windows) curl from FetchContent, and with
+    --gns the vcpkg ports (GameNetworkingSockets, protobuf, abseil, OpenSSL...)."""
+    out = [("stb_image", os.path.join(ROOT, "src", "third_party", "stb", "LICENSE"))]
     for name, f in (("SDL2", "LICENSE.txt"), ("opus", "COPYING"), ("curl", "COPYING")):
         p = os.path.join(bdir, "_deps", name.lower() + "-src", f)
         if os.path.isfile(p):

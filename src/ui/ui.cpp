@@ -88,8 +88,9 @@ static void DrawCredits()
 		"Protocol Buffers - BSD 3-clause",
 		"Abseil - Apache 2.0",
 		"OpenSSL - Apache 2.0",
+		"stb_image - public domain / MIT",
 	};
-	CreditsSection(rightx,y,colw,"Third-party libraries",libraries,7);
+	CreditsSection(rightx,y,colw,"Third-party libraries",libraries,8);
 	glColor3f(.75f,.75f,.75f);
 	UITextFit(rightx,y+.03f,"Full texts: licenses/ folder of the game",colw,.045f);
 	UIRect(-.02f,-.05f,-.016f,.7f,1,1,1,.12f);   //column separator

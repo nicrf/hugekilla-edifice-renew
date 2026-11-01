@@ -42,7 +42,13 @@ void TexBind(int slot);         //binds the slot to GL_TEXTURE_2D
 void TexUpload(int slot,int width,int height,int channels,const void *pixels,TexFilter filter);
 void TexShutdown();             //frees every texture, before the GL context goes
 
-//file loaders (textures.cpp): .bmp, or .pxr (raw, may carry alpha)
+//image files (image.cpp, stb_image: .bmp, .png, .tga) to 8-bit pixels, top row of the
+//picture first (TexUpload's first row), channels per pixel as asked (1 gray, 3 RGB,
+//4 RGBA); 0 if missing or unreadable
+unsigned char *LoadImagePixels(const char *filename,int *width,int *height,int channels);
+void FreeImagePixels(unsigned char *pixels);
+
+//file loaders (textures.cpp): an image file, or .pxr (raw, may carry alpha)
 int LoadTexture(char *filename,unsigned slot);
 int LoadRaw(char *filename,unsigned slot);
 void LoadStartupTextures();     //font and splash, before the first frame

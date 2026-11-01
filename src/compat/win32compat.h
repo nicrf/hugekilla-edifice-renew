@@ -33,7 +33,6 @@
 #define BeginPaint HK_BeginPaint
 #define EndPaint HK_EndPaint
 
-char *HKPath(const char *in, char *out, size_t outsize);
 BOOL SwapBuffers(HDC dc);
 BOOL DestroyWindow(HWND wnd);
 BOOL GetClientRect(HWND wnd, RECT *rect);
@@ -120,61 +119,7 @@ typedef union { struct { DWORD LowPart; LONG HighPart; } u; int64_t QuadPart; } 
 char *itoa(int value, char *str, int radix);
 #define _itoa itoa
 
-// Files -------------------------------------------------------------------
-
-#define GENERIC_READ 0x80000000u
-#define GENERIC_WRITE 0x40000000u
-#define OPEN_EXISTING 3
-#define OPEN_ALWAYS 4
-#define CREATE_ALWAYS 2
-#define INVALID_HANDLE_VALUE ((HANDLE)(intptr_t)-1)
-#define FILE_ATTRIBUTE_DIRECTORY 0x10
-#define FILE_ATTRIBUTE_NORMAL 0x80
-#define MAX_PATH 260
-
-// Converts a game path ("textures\\foo.bmp") into a host path in place-safe
-// storage; returns out.
-char *HKPath(const char *in, char *out, size_t outsize);
-
-HANDLE CreateFile(LPCTSTR name, DWORD access, DWORD share, void *sec, DWORD disposition, DWORD flags, HANDLE templ);
-BOOL ReadFile(HANDLE file, void *buf, DWORD toread, DWORD *read, void *overlapped);
-BOOL WriteFile(HANDLE file, const void *buf, DWORD towrite, DWORD *written, void *overlapped);
-DWORD GetFileSize(HANDLE file, DWORD *high);
-BOOL CloseHandle(HANDLE file);
-
-typedef struct
-{
-	DWORD dwFileAttributes;
-	char cFileName[MAX_PATH];
-} WIN32_FIND_DATA;
-
-HANDLE FindFirstFile(LPCTSTR pattern, WIN32_FIND_DATA *fd);
-BOOL FindNextFile(HANDLE find, WIN32_FIND_DATA *fd);
-BOOL FindClose(HANDLE find);
-
-#define MOVEFILE_REPLACE_EXISTING 1
-BOOL MoveFileEx(LPCTSTR from, LPCTSTR to, DWORD flags);
-
-// Bitmaps (LoadImage on a .bmp, read back through GetObject) --------------
-
-#define IMAGE_BITMAP 0
-#define LR_CREATEDIBSECTION 0x2000
-#define LR_LOADFROMFILE 0x10
-
-typedef struct
-{
-	LONG bmType;
-	LONG bmWidth;
-	LONG bmHeight;
-	LONG bmWidthBytes;
-	WORD bmPlanes;
-	WORD bmBitsPixel;
-	void *bmBits;
-} BITMAP;
-
-void *LoadImage(HINSTANCE inst, LPCTSTR name, UINT type, int cx, int cy, UINT flags);
-int GetObject(void *obj, int size, void *out);
-BOOL DeleteObject(void *obj);
+// Files: see src/platform/fileio.h (std::filesystem and stdio, every platform)
 
 // Misc --------------------------------------------------------------------
 
