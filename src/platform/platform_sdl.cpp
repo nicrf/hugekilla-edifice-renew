@@ -17,6 +17,7 @@
 #include "ui.h"
 #include "voice.h"
 #include <SDL.h>
+#include <time.h>   //time(), the seed of rand()
 
 HINSTANCE hInst;
 HWND hWnd;

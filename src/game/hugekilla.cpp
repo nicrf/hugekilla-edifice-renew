@@ -20,6 +20,7 @@
 #include "wire.h"
 #include "landwire.h"
 #include "mapfile.h"
+#include <time.h>
 
 #define MAX_LOADSTRING 100
 #define WM_MOUSEWHEEL 0x020A
