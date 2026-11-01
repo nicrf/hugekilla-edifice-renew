@@ -2,17 +2,13 @@
 //while), and an input bar while typing (talk / talkteam keys; Tab switches all/team).
 //Typed text comes from SDL text input, so it follows the keyboard layout.
 
-#include "StdAfx.h"
+#include "gl.h"
 #include "redrawing.h"
 #include "playing.h"
 #include "multiplay.h"
 #include "ui.h"
 #include "voice.h"
 #include <ctype.h>
-
-extern char talktext[1000];
-extern DWORD curtime;
-extern Controls controls;
 
 #define CHATHISTORY 32
 #define CHATMAXLEN 120          //characters typed in one message

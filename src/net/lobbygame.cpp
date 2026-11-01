@@ -7,7 +7,7 @@
 //The host also announces its LAN addresses: the lobby gives them only to players
 //from its own public address (behind the same router), who join it there.
 
-#include "StdAfx.h"
+#include "platform.h"
 #include "cfgfile.h"
 #include "playing.h"
 #include "multiplay.h"
@@ -21,9 +21,6 @@
 #include <ifaddrs.h>
 #include <net/if.h>
 #endif
-
-extern NetSettings netsettings;
-extern ServerVars sv;
 
 //---- settings and session ----
 

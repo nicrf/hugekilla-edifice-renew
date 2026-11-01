@@ -1,5 +1,6 @@
 #ifndef LANDH
 #define LANDH
+#include "win32compat.h"
 #include "vector.h"
 #define BLOCKSIZE 2
 #define WATERBLOCKSIZE 4
@@ -107,5 +108,21 @@ char GetWater(int x,int y);
 float *GetWaterLight(int x,int y);
 Scenery *GetScenery(int num);
 int GetNumSceneries();
+
+//land.cpp: the terrain, its lighting and water, the blocks, the sky
+extern float land[LANDGRIDSIZE][LANDGRIDSIZE];
+extern float landmip[6][LANDGRIDSIZE][LANDGRIDSIZE];
+extern float lighting[LANDGRIDSIZE][LANDGRIDSIZE];
+extern char landtex[LANDTEXGRIDSIZE][LANDTEXGRIDSIZE];
+extern char drawwater[WATERGRIDSIZE][WATERGRIDSIZE];
+extern float waterlight[WATERGRIDSIZE][WATERGRIDSIZE];
+extern Block blocks[BLOCKGRIDSIZE][BLOCKGRIDHEIGHT][BLOCKGRIDSIZE];
+extern char nextblock[BLOCKGRIDSIZE][BLOCKGRIDHEIGHT][BLOCKGRIDSIZE];
+extern SkySettings skysettings;
+extern char clouds[1024*1024];
+//server setup overrides (serversetup.cpp); the defaults keep the original random land
+extern int hkforcedsky;         //sky index from skies.ini, -1 = random
+extern float hkreliefscale;     //multiplies the hill heights of land.ini
+extern int hksceneryoverride;   //number of scenery objects, -1 = land.ini
 
 #endif

@@ -1,6 +1,6 @@
 //map save files: format 2 writer and reader, legacy reader (see mapfile.h)
 
-#include "windows.h"   //DWORD (src/compat/include outside Windows)
+#include "win32compat.h"   //DWORD
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>

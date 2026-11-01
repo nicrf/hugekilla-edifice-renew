@@ -1,6 +1,9 @@
 #ifndef REDRAWINGH
 #define REDRAWINGH
 
+#include "win32compat.h"
+#include "vector.h"
+
 #define MAXSCENERY 100
 #define RND ((float)rand()/RAND_MAX)
 #define MAXPARTICLES 3000
@@ -25,7 +28,6 @@ void DrawConsole();
 void LoadScenery();
 void MoveUnnecessaryTextures();
 float DrawText(float,float,const char *);
-float HKPixelScale();   //pixels per window point (2 on Retina), platform_sdl.cpp
 void Draw(float offset);
 
 #include "ase.h"
@@ -65,6 +67,12 @@ struct LillyPad
 	float size;
 	char type;
 };
+
+//redrawing.cpp (the 3D models: models.h)
+extern GraphicsPrefs graphicsprefs;
+extern Particle particle[MAXPARTICLES];
+extern int numlillypad;
+extern LillyPad lillypad[200];
 
 
 #endif

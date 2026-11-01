@@ -2,6 +2,9 @@
 #ifndef ASE
 #define ASE
 
+#include "win32compat.h"
+#include "vector.h"
+
 struct spoint
 {
 	Vector vctr;
@@ -29,7 +32,8 @@ struct texinfo
 	uv repeat;
 };
 	
-struct sobject
+//one object of a model (it was "sobject", the name of the server objects array of playing.h)
+struct asemesh
 {
 	spoint *pnt;
 	uv *tex;
@@ -41,7 +45,7 @@ struct sobject
 struct aseobj
 {
 	int nummats,numobjs;
-	sobject *objs;
+	asemesh *objs;
 };
 class AseObj
 {
@@ -62,5 +66,9 @@ private:
 	
 	int LoadCob(char *buf,int buflen);
 };
+
+//faces drawn (ase.cpp), for the statistics overlay (redrawing.cpp)
+extern int totalfaces;
+extern int facesthissec;
 
 #endif

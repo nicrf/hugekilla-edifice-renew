@@ -3,7 +3,7 @@
 // skipped (MAPREAD_NOCRC) so that the fuzzer reaches the structure checks.
 // A map that is accepted saves again into a file that reads back the same.
 // Original saves have a fixed size of ~55 MB: fuzz_map_legacy.cpp covers them.
-#include "windows.h"
+#include "win32compat.h"   //DWORD
 #include "vector.h"
 #include "land.h"
 #include "mapfile.h"

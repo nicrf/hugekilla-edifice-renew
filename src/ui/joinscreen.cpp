@@ -9,7 +9,9 @@
 //gives its LAN addresses, see lobby.h) is also asked there, from the start: whichever
 //answers first is joined (routers seldom loop back to their LAN from their public IP).
 
-#include "StdAfx.h"
+#include "gl.h"
+#include "platform.h"
+#include "cfgfile.h"
 #include "redrawing.h"
 #include "playing.h"
 #include "multiplay.h"
@@ -17,9 +19,6 @@
 #include "lobbygame.h"
 #include "netlink.h"
 #include <SDL.h>
-
-extern Vector mousepos;
-extern DWORD curtime;
 
 #define MAXRECENT 5
 #define MAXLOCALLIST_UI 128     //MAXLOCALLIST in multiplay.cpp

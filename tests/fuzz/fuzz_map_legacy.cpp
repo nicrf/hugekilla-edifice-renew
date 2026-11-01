@@ -3,7 +3,7 @@
 // uint8 layout (bit 0: /Zp1 packed, bit 1: one byte short) then the start of
 // the file after "edifice" (SkySettings, LandDefs, first blocks); the rest of
 // the file is zero (empty blocks).
-#include "windows.h"
+#include "win32compat.h"   //DWORD
 #include "vector.h"
 #include "land.h"
 #include "mapfile.h"

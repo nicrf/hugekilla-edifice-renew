@@ -1,16 +1,13 @@
 //used to read structures (forts, ramps, etc.) and to place and build them them.
 
 
-#include <StdAfx.h>
+#include "fileio.h"
 #include "land.h"
 #include "redrawing.h"
 #include "multiplay.h"
 
 #define MAXSTRUCTSIZE 40
 char curstructure[MAXSTRUCTSIZE][MAXSTRUCTSIZE][MAXSTRUCTSIZE];
-
-extern char menutext[5000];
-extern char menu;
 
 char curstructurepath[1000];
 

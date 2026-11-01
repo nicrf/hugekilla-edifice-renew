@@ -1,20 +1,16 @@
 //used to load various textures from .bmp and .pxr files  (pxr files can store an alpha channel)
 
-#include "StdAfx.h"
+#include "gl.h"
+#include "fileio.h"
+#include "cfgfile.h"
+#include "models.h"
+#include "playing.h"
 #include "redrawing.h"
 #include "textures.h"
 #include "stdio.h"
 
 #define MAXSPRITETEX 100
 
-
-extern GunDrawInfo gun[10];
-extern AseObj scenery[MAXSCENERY];
-extern AseObj plobj[MAXSCENERY];
-extern AseObj projectile[10];
-extern int numscenery;
-extern AseObj servercobs[50][3];
-extern AseObj hangglider;
 
 AseObj torso[2][10];
 AseObj leg[5];

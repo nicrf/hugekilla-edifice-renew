@@ -1,3 +1,9 @@
+#ifndef SOUNDH
+#define SOUNDH
+
+#include "win32compat.h"
+#include "vector.h"
+
 #ifdef PlaySound
 #undef PlaySound	// <mmsystem.h> maps it to PlaySoundA
 #endif
@@ -17,3 +23,5 @@ void SoundVoicePush(int stream,const float *pcm,int n);
 int SoundVoiceQueued(int stream);
 void SoundVoiceSource(int stream,Vector pos,float gain);
 void SoundVoiceClear(int stream);
+
+#endif

@@ -2,7 +2,6 @@
 //from multiplay.cpp so that the parsers can be tested and fuzzed without the
 //game (tests/fuzz/). Every Read* only decodes and bounds what it reads: the
 //caller still validates indices (players, objects) against the game state.
-//Include after the game headers (StdAfx.h, multiplaystruct.h).
 
 #ifndef NETMSGH
 #define NETMSGH

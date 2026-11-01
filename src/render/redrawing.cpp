@@ -1,7 +1,12 @@
 //functions to draw everything in the 3d world, and some 2d overlays
 
 
-#include "StdAfx.h"
+#include "gl.h"
+#include "platform.h"
+#include "fileio.h"
+#include "models.h"
+#include "gameplay.h"
+#include "sock.h"
 #include "stdio.h"
 #include "land.h"
 #include "vector.h"
@@ -11,7 +16,6 @@
 #include "cfgfile.h"
 #include "redrawing.h"
 #include "math.h"
-#include "mmsystem.h" 
 #include "multiplay.h"
 #include "sound.h"
 #include "ui.h"
@@ -23,16 +27,12 @@ float cloudmistposx,cloudmistposy;
 #define TEXMULT ((float)1/GTEXREPEAT)
 #define BTEXMULT ((float)96/512)
 #define MAXSCENERY 100
-extern char landtex[LANDTEXGRIDSIZE][LANDTEXGRIDSIZE];
-extern ServerVars sv;
 Vector camup;
-extern RemoteGameData rgd;
 
 int curfps;
 int framefps;
 float sunflarebright;
 
-extern Object object[MAXOBJS];
 Particle particle[MAXPARTICLES];
 
 int numscenery;
@@ -44,43 +44,11 @@ AseObj hangglider;
 GraphicsPrefs graphicsprefs;
 GunDrawInfo gun[10];
 
-extern AseObj leg[5];
-extern AseObj torso[2][10];
-
-extern char menutext[5000];
-extern char menu;
-extern char consoletext[100][500];
-extern char consolecommand[500];
-extern int consolevisible;
-extern int datasendthissec;
-extern int datarecvthissec;
-extern int datasendthisframe;
-extern int datarecvthisframe;
-
-extern int numplayers;
-extern DWORD consolescrolltime;
-extern int consolepartvisible;
-extern char talktext[1000];
-extern float landmip[6][LANDGRIDSIZE][LANDGRIDSIZE];
-extern float land[LANDGRIDSIZE][LANDGRIDSIZE];
-extern float lighting[LANDGRIDSIZE][LANDGRIDSIZE];
-extern char drawwater[WATERGRIDSIZE][WATERGRIDSIZE];
-extern float waterlight[WATERGRIDSIZE][WATERGRIDSIZE];
-extern SkySettings skysettings;
-extern char clouds[1024*1024];
-extern Block blocks[BLOCKGRIDSIZE][BLOCKGRIDHEIGHT][BLOCKGRIDSIZE];
-extern char nextblock[BLOCKGRIDSIZE][BLOCKGRIDHEIGHT][BLOCKGRIDSIZE];
-extern ServerObject sobject[MAXSERVEROBJS];
-extern int totalfaces;
-extern int facesthissec;
-
 int landfaces;
 int blockfaces;
 
 int cursendrate;
 int currecvrate;
-
-extern DWORD curtime;
 
 
 int numlillypad;
@@ -98,9 +66,6 @@ DWORD nextlightning;
 Vector lightningpos[500];
 Vector lightningend[500];
 int numlightning;
-
-extern char curobjective[1000];
-extern char curscore[1000];
 
 
 

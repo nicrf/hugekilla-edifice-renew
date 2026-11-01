@@ -3,21 +3,15 @@
 
 #ifndef HK_WIN32_NATIVE
 
-#include "StdAfx.h"
+#include "gl.h"
+#include "platform.h"
+#include "fileio.h"
+#include "cfgfile.h"
 #include "redrawing.h"
 #include "playing.h"
 #include "sound.h"
 #include "ui.h"
 #include "voice.h"
-
-extern Controls controls;
-extern GraphicsPrefs graphicsprefs;
-extern Vector mousepos;
-
-void HKSetFullscreen(int on);
-int HKGetFullscreen();
-void HKSetVSync(int on);
-int HKGetVSync();
 
 int showoptions;
 static int optionstab;     //0 controls, 1 video/audio, 2 player

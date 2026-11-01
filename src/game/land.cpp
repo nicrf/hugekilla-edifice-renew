@@ -2,20 +2,17 @@
 //buildings, and various other things
 
 
-#include "StdAfx.h"
+#include "platform.h"
+#include "gameplay.h"
 #include "math.h"
 #include "land.h"
 #include "worldrandom.h"
 #include "cfgfile.h"
 #include "redrawing.h"
 #include "time.h"
-#ifdef _WIN32
-#include <GL/gl.h>
-#endif
 #include "vector.h"
 #include "hugekilla.h"
 #include "playing.h"
-#include "mmsystem.h"
 #include "sound.h"
 
 #define RND ((float)rand()/RAND_MAX)
@@ -30,10 +27,6 @@ float waterlight[WATERGRIDSIZE][WATERGRIDSIZE];
 //float landblocklighting[LANDGRIDSIZE][LANDGRIDSIZE];
 int numsceneries;
 static Scenery scenery[5000];  // distinct from redrawing.cpp's AseObj scenery (MSVC kept them apart by type)
-
-extern int numlillypad;
-extern LillyPad lillypad[200];
-extern ServerObject sobject[MAXSERVEROBJS];
 
 UINT cloudsize;
 

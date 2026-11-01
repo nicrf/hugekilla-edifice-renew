@@ -1,17 +1,20 @@
 //used to draw menus (only the main menu now), see if they are clicked, and take the appropriate action
 
 
-#include "StdAfx.h"
+#include "gl.h"
+#include "platform.h"
 #include "multiplay.h"
 #include "ui.h"
 #include "vector.h"
+#ifdef HK_WIN32_NATIVE
+#include "resource.h"   //IDD_MULTIPLAY of the original Win32 dialog
+#endif
 #include "redrawing.h"
 
 Button button[50];
 int numbuttons;
 int uicurmenu;
 int showcredits;
-extern Vector mousepos;
 
 //text button that opens the credits screen
 #define CREDITSX1 -.1f
@@ -100,9 +103,6 @@ static void DrawCredits()
 	UIButton(BTN_CREDITSCLOSE,"Close",1);
 	glColor3f(1,1,1);
 }
-
-extern Vector mousepos;
-extern DWORD curtime;
 
 //---- menu screen text and widgets ----
 
@@ -335,9 +335,6 @@ void UIField(float x1,float y1,float x2,float y2,const char *text,int focused,co
 }
 
 
-extern HDC hdc;
-extern HINSTANCE hInst;
-
 //adds a button to the screen
 
 void AddButton(int handler, int tex, int texpos,float x1,float y1,float x2,float y2)
@@ -481,8 +478,6 @@ void MenuMouseDown()
 	if(over>=0)
 		HandleButton(button[over].handler);
 }
-extern LandDefs ldfs;
-extern HWND hWnd;
 
 void HandleButton(int handler)
 {

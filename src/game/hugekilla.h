@@ -1,23 +1,15 @@
+//hugekilla.cpp: the land of the game and the map files (the window and input are in
+//src/platform/platform.h)
 
+#ifndef HUGEKILLAH
+#define HUGEKILLAH
 
-#if !defined(AFX_HUGEKILLA_H__08A8C965_E458_11D2_87C8_444553540001__INCLUDED_)
-#define AFX_HUGEKILLA_H__08A8C965_E458_11D2_87C8_444553540001__INCLUDED_
+#include "vector.h"
+#include "land.h"
 
-#if _MSC_VER > 1000
-#pragma once
-#endif // _MSC_VER > 1000
-
-#include "resource.h"
-
-
-#endif // !defined(AFX_HUGEKILLA_H__08A8C965_E458_11D2_87C8_444553540001__INCLUDED_)
-HWND GetHWND();
-void GetMouseChange(int &x,int &y);
-struct LandDefs;
+extern LandDefs ldfs;       //the current land (sent in LANDINFO, saved in map files)
 LandDefs *GetDefs();
-HDC GetGlHDC();
 int MakeClose(Vector *pos);
-void LockCursor(int lock);
 
 //map save files (maps/<name>.map in the user folder, format in mapfile.h)
 #define MAXMAPNAME 32
@@ -28,3 +20,5 @@ int SaveMapPath(const char *path,char *err,int errsize);
 int LoadMapPath(const char *path,char *err,int errsize);
 int StartServerMap();
 int ReloadServerMap();
+
+#endif

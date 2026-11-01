@@ -3,16 +3,12 @@
 //ping, packet loss), sorted by team and kills. A host listed on the lobby also sees
 //its game code.
 
-#include "StdAfx.h"
+#include "gl.h"
 #include "redrawing.h"
 #include "playing.h"
 #include "multiplay.h"
 #include "ui.h"
 #include "lobbygame.h"
-
-extern ServerVars sv;
-extern char curscore[1000];
-extern char curobjective[1000];
 
 #define BOARDX1 -.96f
 #define BOARDX2 .96f

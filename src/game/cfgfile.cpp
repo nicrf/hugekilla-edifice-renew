@@ -1,6 +1,6 @@
 //a loader of config files, which are used for land, controls, network settings, etc.
 
-#include "StdAfx.h"
+#include "fileio.h"
 #include "cfgfile.h"
 #include "vector.h"
 

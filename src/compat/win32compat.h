@@ -1,5 +1,6 @@
 // Minimal Win32 emulation so the original sources build on macOS (and other
 // POSIX systems) on top of SDL2 + legacy OpenGL. Only what the game uses.
+// OpenGL itself: src/platform/gl.h.
 
 #ifndef WIN32COMPAT_H
 #define WIN32COMPAT_H
@@ -8,6 +9,9 @@
 
 // Windows: the real Win32 API is available. Only the calls that must go
 // through SDL (the window is an SDL_Window, not an HWND) are redirected.
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN   // as StdAfx.h had it: none of the rarely used headers
+#endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
@@ -20,8 +24,6 @@
 #include <math.h>
 #include <mmsystem.h>
 #undef PlaySound   // the game has its own PlaySound(int,int) (sound.h)
-#include <GL/gl.h>
-#include <GL/glu.h>
 
 #undef MessageBox
 #define SwapBuffers HK_SwapBuffers
@@ -52,8 +54,6 @@ typedef ULONG in_addr_t;
 
 #else // POSIX
 
-#define GL_SILENCE_DEPRECATION
-
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -66,14 +66,6 @@ typedef ULONG in_addr_t;
 #include <sys/select.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-
-#ifdef __APPLE__
-#include <OpenGL/gl.h>
-#include <OpenGL/glu.h>
-#else
-#include <GL/gl.h>
-#include <GL/glu.h>
-#endif
 
 // Basic types. DWORD must stay 32 bits: it is written to save files and sent
 // over the network inside packed structs.

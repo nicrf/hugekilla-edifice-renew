@@ -7,6 +7,7 @@
 #include "fuzz.h"
 #include "sock.h"
 #include "mapfile.h"
+#include "gameplay.h"   //DOME, FLAG
 #include <sys/stat.h>
 #include <string>
 #include <vector>

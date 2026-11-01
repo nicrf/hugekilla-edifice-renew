@@ -2,19 +2,13 @@
 //on the left, their structures on the right, picked with the mouse. Picking one loads it
 //as a preview in the world (menu BUILDING): left click builds it, right click cancels.
 
-#include "StdAfx.h"
+#include "gl.h"
+#include "platform.h"
+#include "fileio.h"
 #include "redrawing.h"
 #include "playing.h"
 #include "ui.h"
 #include <ctype.h>
-
-extern Vector mousepos;
-extern char menutext[5000];
-extern char menu;
-extern Controls controls;
-extern DWORD curtime;
-
-void LockCursor(int lock);
 
 #define MAXENTRIES 64
 #define NAMELEN 64

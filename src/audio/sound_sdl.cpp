@@ -4,7 +4,7 @@
 
 #ifndef HK_WIN32_NATIVE
 
-#include "StdAfx.h"
+#include "fileio.h"
 #include "vector.h"
 #include "sound.h"
 #include "gameplay.h"

@@ -5,7 +5,7 @@
 //   map_test               runs the checks
 //   map_test --write MAPDIR LEGACYDIR   also writes seeds for tests/fuzz/fuzz_map
 //                                       and fuzz_map_legacy into these folders
-#include "windows.h"
+#include "win32compat.h"   //DWORD
 #include "vector.h"
 #include "land.h"
 #include "wire.h"

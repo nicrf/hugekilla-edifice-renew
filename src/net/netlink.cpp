@@ -1,6 +1,7 @@
 //Which DatagramLink each Sock gets: UDP, or GameNetworkingSockets (see netlink.h)
 
-#include <StdAfx.h>
+#include "platform.h"
+#include "cfgfile.h"
 #include "netlink.h"
 #include "udplink.h"
 #ifdef EDIFICE_GNS

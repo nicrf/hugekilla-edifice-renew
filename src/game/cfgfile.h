@@ -1,5 +1,6 @@
 #ifndef CFGFILEH
 #define CFGFILEH
+#include "win32compat.h"   //LPCTSTR
 #include "vector.h"
 class CfgFile
 {
