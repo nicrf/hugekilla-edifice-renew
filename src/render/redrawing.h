@@ -23,7 +23,7 @@ void LoadLogoTextures();
 void RedrawSplash(int texnum,char *text,int drawlogo);
 void GetRandom(const char *dir,char name[255]);
 int GetNumScenery();
-void DrawBlock(int x,int y,int z,char ds,char type,int &px,int &py,int &pz,char red);
+void DrawBlock(int x,int y,int z,unsigned char ds,char type,int &px,int &py,int &pz,char red);
 void DrawConsole();
 void LoadScenery();
 void MoveUnnecessaryTextures();

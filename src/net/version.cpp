@@ -34,7 +34,8 @@ void ReadVersionTrailer(const char *buf,int len,PeerVersion *out)
 	int n=p[10];
 	if(n>15) n=15;
 	if(n>len-11) n=len-11;
-	for(int i=0;i<n;i++)
+	//i<15 again: GCC's -O3 loses the bound above and warns of an overflow (-Wstringop-overflow)
+	for(int i=0;i<n&&i<15;i++)
 		out->version[i]=(p[11+i]>=32&&p[11+i]<127)?p[11+i]:'?';
 	out->version[n]=0;
 }

@@ -85,7 +85,10 @@ jobs:
         shell: bash
         # macOS: one universal binary for Intel and Apple Silicon (static vcpkg
         # libraries, cmake/triplets/universal-osx.cmake); Linux: static too;
-        # Windows: GameNetworkingSockets and its DLLs + the C++ runtime DLLs
+        # Windows: GameNetworkingSockets and its DLLs + the C++ runtime DLLs.
+        # A warning in the game code or its tests fails the build (not in SDL, opus...)
+        env:
+          EDIFICE_CMAKE_ARGS: -DEDIFICE_WERROR=ON
         run: python build.py --config Release --gns --package --test ${{ matrix.name == 'macos' && '--universal' || '' }}
 
       # saved right after the build, so that a failing check below keeps it
