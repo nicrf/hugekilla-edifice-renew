@@ -1,7 +1,7 @@
 //screen shown after creating or joining a capture the flag game, until the player
 //first spawns (which used to take a shot at a blank screen): the players of each
 //team, whether the game has started, how to play with the current key bindings, and
-//a Play button. The mouse stays captured (freed, the game shows its pause menu):
+//a Play button. The player can't move or look around meanwhile. The mouse stays captured (freed, the game shows its pause menu):
 //a click anywhere fires, which spawns, as the button says; Enter or Space too.
 
 #ifndef HK_WIN32_NATIVE
@@ -57,6 +57,17 @@ int SpawnScreenHandleKey(int vk)
 		return 1;
 	}
 	return 0;
+}
+
+//keys the game ignores while the screen is up: only playing (fire, Enter, Space),
+//talking, the scores, the console and the function keys get through
+int SpawnScreenBlocksKey(int vk)
+{
+	if(!IsSpawnScreenOpen()||GetLocalPlayer()->talking) return 0;
+	if(vk==controls.fire||vk==controls.talk||vk==controls.talkteam||vk==controls.pushtotalk||
+		vk==controls.showscores||vk==192||(vk>=VK_F1&&vk<=VK_F12))
+		return 0;
+	return 1;
 }
 
 //a key binding as shown to players

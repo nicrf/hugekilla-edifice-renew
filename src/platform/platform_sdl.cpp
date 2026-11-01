@@ -228,6 +228,8 @@ static void KeyDown(int vk, int repeat)
 			LockCursor(1);
 		return;
 	}
+	if (SpawnScreenBlocksKey(vk))
+		return;
 	if (vk == VK_F6 && !repeat)
 	{
 		fullscreen = 1 - fullscreen;
@@ -313,7 +315,7 @@ static void HandleEvent(const SDL_Event &ev)
 		else if (ev.button.button == SDL_BUTTON_RIGHT)
 		{
 			HKSetKeyDown(VK_RBUTTON, 1);
-			if (OptionsHandleKey(VK_RBUTTON) || BuildMenuHandleKey(VK_RBUTTON)) break;
+			if (OptionsHandleKey(VK_RBUTTON) || BuildMenuHandleKey(VK_RBUTTON) || SpawnScreenBlocksKey(VK_RBUTTON)) break;
 			HandleKey(VK_RBUTTON, 0);
 		}
 		break;
@@ -358,6 +360,7 @@ static void HandleEvent(const SDL_Event &ev)
 			ConsoleScroll(ud * 3);
 			break;
 		}
+		if (IsSpawnScreenOpen()) break;   // no weapon change before playing
 		if (ud < 0) SwitchGun(50);
 		if (ud > 0) SwitchGun(51);
 		break;
