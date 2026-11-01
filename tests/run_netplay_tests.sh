@@ -22,9 +22,13 @@ export ASAN_OPTIONS=detect_leaks=0
 export HK_AUTOSTART=1 HK_SHOT=/dev/null HK_SHOT_FRAME=999999
 
 status=0
-for t in net_handshake net_identity net_join net_fuzz net_voice net_map; do
-	log="$LOGDIR/$t.log"
+# name@N: the same test in the world of HK_SEED=N, on top of the random one
+for run in net_handshake net_identity net_join net_fuzz net_voice net_voice@1 net_voice@2 \
+		net_voice@3 net_voice@4 net_voice@5 net_map; do
+	t="${run%@*}"
+	log="$LOGDIR/$run.log"
 	args=()
+	if [ "$run" != "$t" ]; then export HK_SEED="${run#*@}"; else unset HK_SEED; fi
 	if [ "$t" = net_map ]; then
 		# a server started with a saved map (HK_MAPFILE), written by the test itself;
 		# absolute path: the game runs from its data folder
@@ -36,16 +40,16 @@ for t in net_handshake net_identity net_join net_fuzz net_voice net_map; do
 		"$BIN" >"$log" 2>&1 &
 	fi
 	pid=$!
-	echo "== $t"
+	echo "== $run"
 	python3 "tests/$t.py" "${args[@]+"${args[@]}"}" || status=1
 	if ! kill -0 "$pid" 2>/dev/null; then
-		echo "server died during $t"
+		echo "server died during $run"
 		status=1
 	fi
 	kill "$pid" 2>/dev/null
 	wait "$pid" 2>/dev/null
 	if grep -q "ERROR: AddressSanitizer" "$log"; then
-		echo "AddressSanitizer report during $t:"
+		echo "AddressSanitizer report during $run:"
 		cat "$log"
 		status=1
 	fi

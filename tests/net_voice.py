@@ -1,8 +1,9 @@
 """Proximity voice chat relay (VOICE message, src/net/voicemsg.h):
     HK_AUTOSTART=1 <Edifice binary> &  then  python3 tests/net_voice.py
 Three clients join a local server like net_join.py and report positions:
-A at x=5, B at x=500 (17 units away across the world's edge, which wraps), C
-far away. A sends VOICE frames with a spoofed player field: B must get them as
+A at x=1, B at x=511 (2 units away across the world's edge, which wraps), C
+far away. The host keeps players above the ground, so A and B stand side by side:
+the terrain under them, random in every world, can't lift one out of range. A sends VOICE frames with a spoofed player field: B must get them as
 coming from A's slot, C must get nothing. Then B moves away and gets nothing
 either; malformed VOICE messages are never relayed. Last, A stands next to the
 host and sends garbage frames, which the host decodes (opus must reject them)."""
@@ -198,7 +199,7 @@ def check(cond, what):
     ok &= bool(cond)
 
 
-bpos = [500]
+bpos = [511]
 
 
 def place(bx):
@@ -206,7 +207,7 @@ def place(bx):
     for _ in range(5):
         b.send(position(bx, 60, 100))
         c.send(position(5, 60, 350))
-        a.send(position(5, 60, 100))
+        a.send(position(1, 60, 100))
         time.sleep(0.03)
         for cl in clients:
             cl.drain()
@@ -216,7 +217,7 @@ def talk(first, count, extra=()):
     for k in range(count):
         b.send(position(bpos[0], 60, 100))
         c.send(position(5, 60, 350))
-        a.send(position(5, 60, 100), voice(c.slot, first + k, bytes([0x40 + k]) * 40), *extra)
+        a.send(position(1, 60, 100), voice(c.slot, first + k, bytes([0x40 + k]) * 40), *extra)
         time.sleep(0.02)
         for cl in clients:
             cl.drain()
@@ -227,7 +228,7 @@ for cl in clients:
     cl.voices = []
 
 # near (across the world edge) and far
-place(500)
+place(511)
 talk(100, 10)
 for cl in clients:
     cl.pump(0.5)
@@ -248,7 +249,7 @@ bad = [
     struct.pack("<BBHH", VOICE, 0, 5, 20) + b"Z" * 30,
 ]
 for m in bad:
-    a.send(position(5, 60, 100), m)
+    a.send(position(1, 60, 100), m)
     time.sleep(0.02)
 for cl in clients:
     cl.pump(0.4)
@@ -262,7 +263,7 @@ for cl in clients:
 check(not b.voices, "player out of range got nothing (%d)" % len(b.voices))
 
 # back in range
-place(500)
+place(511)
 b.voices = []
 talk(300, 5)
 for cl in clients:
