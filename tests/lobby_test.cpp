@@ -141,6 +141,32 @@ static void Parsers()
 	char withbody[400];
 	CHECK(LobbyAnnouncementJSON(&withid,withbody,sizeof(withbody))&&
 		strstr(withbody,"\"identity\":\"str:edifice-1\",\"session\":\"ab01\""));
+	CHECK(!strstr(withbody,"lan"));   // no LAN address: no field (what older games send)
+
+	// LAN addresses (same network): only private IPv4 written and read, never a reason
+	// to drop the game
+	CHECK(LobbyLANAddress("10.0.0.1")&&LobbyLANAddress("172.16.0.1")&&LobbyLANAddress("172.31.9.9")&&
+		LobbyLANAddress("192.168.1.20"));
+	CHECK(!LobbyLANAddress("172.32.0.1")&&!LobbyLANAddress("8.8.8.8")&&!LobbyLANAddress("127.0.0.1")&&
+		!LobbyLANAddress("192.169.0.1")&&!LobbyLANAddress("192.168.1")&&!LobbyLANAddress("010.0.0.1")&&
+		!LobbyLANAddress("")&&!LobbyLANAddress(0)&&!LobbyLANAddress("100.64.0.1"));
+	LobbyAnnouncement withlan=withid;
+	withlan.numlan=3;
+	withlan.lan[0]="192.168.1.20";
+	withlan.lan[1]="8.8.8.8";
+	withlan.lan[2]="10.0.0.5";
+	char lanbody[500];
+	CHECK(LobbyAnnouncementJSON(&withlan,lanbody,sizeof(lanbody))&&
+		strstr(lanbody,",\"lan\":[\"192.168.1.20\",\"10.0.0.5\"],\"port\":27020"));
+	const char *lan="{\"id\":\"L1\",\"name\":\"n\",\"address\":\"203.0.113.7\",\"port\":27020,\"protocol\":5,"
+		"\"lan\":[\"192.168.1.20\",\"1.2.3.4\",7,{\"a\":1},\"192.168.1.20\",\"10.0.0.5\",\"10.0.0.0.1\","
+		"\"172.16.0.1\",\"172.16.0.2\",\"172.16.0.3\"]}";
+	CHECK(LobbyParseGame(lan,(int)strlen(lan),&g)==1&&g.numlan==LOBBY_MAXLAN&&!strcmp(g.lan[0],"192.168.1.20")&&
+		!strcmp(g.lan[1],"10.0.0.5")&&!strcmp(g.lan[2],"172.16.0.1")&&!strcmp(g.lan[3],"172.16.0.2"));
+	const char *lanbad="{\"id\":\"L2\",\"name\":\"n\",\"address\":\"203.0.113.7\",\"port\":27020,\"protocol\":5,\"lan\":\"10.0.0.1\"}";
+	CHECK(LobbyParseGame(lanbad,(int)strlen(lanbad),&g)==1&&g.numlan==0);
+	const char *nolan="{\"id\":\"L3\",\"name\":\"n\",\"address\":\"203.0.113.7\",\"port\":27020,\"protocol\":5}";
+	CHECK(LobbyParseGame(nolan,(int)strlen(nolan),&g)==1&&g.numlan==0);
 
 	// error
 	char msg[40];
@@ -250,6 +276,8 @@ static void Online(const char *url)
 	LobbyAnnouncement priv=pub;
 	priv.name="lobby_test private";
 	priv.visibility="private";
+	priv.numlan=1;
+	priv.lan[0]="192.168.1.20";   // given back to us: same address as the host (127.0.0.1)
 	LobbyAnnouncementJSON(&priv,body,sizeof(body));
 	CHECK(Request("POST","/v1/servers",body,0,&reply)==201);
 	CHECK(LobbyParseAnnounced(reply.data(),(int)reply.size(),privid,sizeof(privid),privtoken,sizeof(privtoken),&refresh));
@@ -271,7 +299,8 @@ static void Online(const char *url)
 	snprintf(path,sizeof(path),"/v1/servers/%s",code);
 	LobbyGame g;
 	CHECK(Request("GET",path,0,0,&reply)==200);
-	CHECK(LobbyParseGame(reply.data(),(int)reply.size(),&g)&&!strcmp(g.id,privid)&&!strcmp(g.visibility,"private"));
+	CHECK(LobbyParseGame(reply.data(),(int)reply.size(),&g)&&!strcmp(g.id,privid)&&!strcmp(g.visibility,"private")&&
+		g.numlan==1&&!strcmp(g.lan[0],"192.168.1.20"));
 
 	// renewal with new details
 	pub.players=4;

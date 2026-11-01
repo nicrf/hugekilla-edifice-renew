@@ -5,7 +5,9 @@
 //lobbygame.cpp) and joins private ones by their game code. A game with an identity
 //is joined P2P (M7d: a lobby session first, then GameNetworkingSockets through the
 //NATs, netlink.h); otherwise, or when that fails, through the direct UDP one, to
-//the address the lobby saw the host at.
+//the address the lobby saw the host at. A host on our own network (the lobby then
+//gives its LAN addresses, see lobby.h) is also asked there, from the start: whichever
+//answers first is joined (routers seldom loop back to their LAN from their public IP).
 
 #include "StdAfx.h"
 #include "redrawing.h"
@@ -60,7 +62,7 @@ enum { JOINING_OFF, JOINING_SESSION, JOINING_QUERY };
 static LobbyGame joining;
 static int joiningactive;
 static int joiningp2p;          //asked through a P2P connection
-static DWORD joiningsince,joininglastquery;
+static DWORD joiningsince,joininglastquery,joininglanquery;
 
 //columns: x of each, header label, sort mode it sets
 static const float colx[6]={-.9f,-.38f,.1f,.3f,.5f,.7f};
@@ -167,7 +169,9 @@ static void FromLobby(JoinGame *game,const LobbyGame *g)
 {
 	memset(game,0,sizeof(*game));
 	snprintf(game->name,sizeof(game->name),"%s",g->name);
-	snprintf(game->address,sizeof(game->address),"%s",g->address);
+	//on our network (the lobby gives the LAN addresses only then): joined there
+	if(g->numlan) snprintf(game->address,sizeof(game->address),"LAN %s",g->lan[0]);
+	else snprintf(game->address,sizeof(game->address),"%s",g->address);
 	snprintf(game->version,sizeof(game->version),"%s",g->version);
 	PeerVersion peer;
 	memset(&peer,0,sizeof(peer));
@@ -213,6 +217,7 @@ static void JoinInternet(const LobbyGame *g)
 	joiningp2p=0;
 	joiningsince=GetTickCount();
 	joininglastquery=joiningsince-1000;
+	joininglanquery=joiningsince-1000;
 	snprintf(status,sizeof(status),"Contacting %s at %s:%d...",g->name,g->address,g->port);
 	//P2P if the host listens for it (it then has an identity) and we can
 	if(g->identity[0]&&NetP2PMode()&&LobbySessionStart()>=0)
@@ -220,6 +225,35 @@ static void JoinInternet(const LobbyGame *g)
 		joiningactive=JOINING_SESSION;
 		snprintf(status,sizeof(status),"Connecting to %s (P2P)...",g->name);
 	}
+	if(g->numlan)
+		snprintf(status,sizeof(status),"Contacting %s on your network (%s)...",g->name,g->lan[0]);
+}
+
+//the host's LAN addresses (it is on our network): asked directly from the start,
+//beside P2P or its public address, every second; -1, or the index in the server
+//list of the first one that answered
+static int JoinInternetLAN(DWORD now)
+{
+	for(int k=0;k<joining.numlan;k++)
+	{
+		int i=JoinNetFind(joining.lan[k],joining.port);
+		if(i>=0) return i;
+	}
+	if(joining.numlan&&now-joininglanquery>=1000u)
+	{
+		for(int k=0;k<joining.numlan;k++) JoinNetQuery(joining.lan[k],joining.port);
+		joininglanquery=now;
+	}
+	return -1;
+}
+
+static void JoinInternetConnect(int i)
+{
+	joiningactive=0;
+	status[0]=0;
+	char reason[200];
+	if(JoinNetConnect(i,reason,sizeof(reason))) joinscreen=0;
+	else snprintf(status,sizeof(status),"Can't join: %s",reason);
 }
 
 //the session is there (or not): P2P if it can be, else directly
@@ -234,7 +268,8 @@ static void JoinInternetQuery(int sessionok)
 	if(!joiningp2p)
 	{
 		joininglastquery=joiningsince-1000;
-		snprintf(status,sizeof(status),"Contacting %s at %s:%d...",joining.name,joining.address,joining.port);
+		if(!joining.numlan)
+			snprintf(status,sizeof(status),"Contacting %s at %s:%d...",joining.name,joining.address,joining.port);
 	}
 }
 
@@ -282,7 +317,13 @@ static void Update()
 		if(r>0) JoinInternet(&g);
 		else if(r<0) snprintf(status,sizeof(status),"%s",err);
 	}
-	if(joiningactive==JOINING_SESSION)
+	int lan=joiningactive?JoinInternetLAN(GetTickCount()):-1;
+	if(lan>=0)
+	{
+		fprintf(stderr,"join: %s answered on the LAN at %s\n",joining.name,JoinGameAt(lan)->address);
+		JoinInternetConnect(lan);
+	}
+	else if(joiningactive==JOINING_SESSION)
 	{
 		int r=LobbySessionResult(err,sizeof(err));
 		if(r<0) fprintf(stderr,"%s\n",err);
@@ -293,22 +334,18 @@ static void Update()
 	{
 		DWORD now=GetTickCount();
 		int i=JoinNetFind(joining.address,joining.port);
-		if(i>=0)
-		{
-			joiningactive=0;
-			status[0]=0;
-			char reason[200];
-			if(JoinNetConnect(i,reason,sizeof(reason))) joinscreen=0;
-			else snprintf(status,sizeof(status),"Can't join: %s",reason);
-		}
+		if(i>=0) JoinInternetConnect(i);
 		else if(now-joiningsince>(joiningp2p?20000u:6000u))
 		{
 			joiningactive=0;
+			char where[60]="";
+			if(joining.numlan) snprintf(where,sizeof(where),"on your network (%s) ",joining.lan[0]);
 			if(joiningp2p)
-				snprintf(status,sizeof(status),"No answer from %s, neither P2P nor directly",joining.name);
+				snprintf(status,sizeof(status),"No answer from %s, neither %sP2P nor directly",joining.name,
+					joining.numlan?"on your network, ":"");
 			else
-				snprintf(status,sizeof(status),"No answer from %s:%d (the host may have to open its UDP ports)",
-					joining.address,joining.port);
+				snprintf(status,sizeof(status),"No answer from %s %sor at %s:%d (the host may have to open its UDP ports)",
+					joining.name,where,joining.address,joining.port);
 		}
 		else if(now-joininglastquery>=(joiningp2p?2000u:1000u))   //UDP: asked again every second
 		{

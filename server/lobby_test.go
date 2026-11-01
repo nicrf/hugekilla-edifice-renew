@@ -28,10 +28,10 @@ func TestRegistryLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if list := r.List(3); len(list) != 1 || list[0].Address != "1.2.3.4" || list[0].Name != "Fort" {
+	if list := r.List(3, ""); len(list) != 1 || list[0].Address != "1.2.3.4" || list[0].Name != "Fort" {
 		t.Fatalf("list = %+v", list)
 	}
-	if list := r.List(4); len(list) != 0 {
+	if list := r.List(4, ""); len(list) != 0 {
 		t.Fatalf("protocol filter: %+v", list)
 	}
 	if err := r.Refresh(id, "wrong", announcement("Fort")); err != ErrBadToken {
@@ -42,11 +42,11 @@ func TestRegistryLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	clock = clock.Add(50 * time.Second) // 50 s after the refresh: still there
-	if list := r.List(0); len(list) != 1 || list[0].Name != "Fort 2" {
+	if list := r.List(0, ""); len(list) != 1 || list[0].Name != "Fort 2" {
 		t.Fatalf("after refresh: %+v", list)
 	}
 	clock = clock.Add(20 * time.Second) // 70 s without refresh: gone
-	if list := r.List(0); len(list) != 0 {
+	if list := r.List(0, ""); len(list) != 0 {
 		t.Fatalf("not expired: %+v", list)
 	}
 }
@@ -71,7 +71,7 @@ func TestRegistryLimitsAndValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s, _ := r.Get(id); s.Name != "caf <b>" {
+	if s, _ := r.Get(id, ""); s.Name != "caf <b>" {
 		t.Fatalf("name not cleaned to printable ASCII: %q", s.Name)
 	}
 }
@@ -84,10 +84,10 @@ func TestPrivateGamesAreNotListed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(r.List(0)) != 0 {
+	if len(r.List(0, "")) != 0 {
 		t.Fatal("private game listed")
 	}
-	if s, ok := r.Get(id); !ok || s.Name != "secret" {
+	if s, ok := r.Get(id, ""); !ok || s.Name != "secret" {
 		t.Fatal("private game not reachable by id")
 	}
 }
@@ -102,7 +102,7 @@ func TestGameCodes(t *testing.T) {
 		t.Fatalf("game code %q", id)
 	}
 	typed := strings.ToLower(id[:3]) + "-" + id[3:] + " "
-	if s, ok := r.Get(typed); !ok || s.ID != id {
+	if s, ok := r.Get(typed, ""); !ok || s.ID != id {
 		t.Fatalf("lookup of %q failed", typed)
 	}
 }
