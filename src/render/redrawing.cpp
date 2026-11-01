@@ -50,6 +50,7 @@ AseObj projectile[10];
 AseObj servercobs[50][3];
 AseObj hangglider;
 GraphicsPrefs graphicsprefs;
+FxPrefs fxprefs={1};
 GunDrawInfo gun[10];
 
 int landfaces;
@@ -1038,15 +1039,75 @@ void DrawSun()
 	REnd();
 }
 
-//draws the explosion coming out from the gun
+//the local player's gun (the model in front of the camera), where the scene's
+//matrices put it
 
-void DrawGunExplosions()
+static void DrawLocalGun(Player *cur)
+{
+	Vector pos,front,top,right;
+	Vector gunup,partup,partright,partfront;
+	int closetime=curtime-cur->gundowntime;
+	if(fabs((float)(cur->nextfiretime-curtime))<closetime)closetime=fabs((float)(cur->nextfiretime-curtime))<closetime;
+	if(!cur->gundowntime) closetime=0;
+	if(closetime>500)closetime=500;
+	top=GetRight(cur->dir,camup);
+	front=Normalize(cur->dir-top*(float)closetime*.003);
+	top=GetRight(front,top);
+	right=CrossProduct(top,front);
+	top=VectMult(cur->gunmainup,front,top,right);
+	pos=cur->pos+cur->fwd*.03+cur->gunoffset-top*(float)closetime*.0015;
+	
+	
+	partup=VectMult(gun[cur->weapon].partup[0],front,top,right);
+	partright=VectMult(gun[cur->weapon].partright[0],front,top,right);
+	partfront=front;
+	
+	gunup=VectMult(cur->gunup,partfront,partup,partright);
+	pos+=cur->dir*(1-cur->gunkick)*.5;
+	pos+=VectMult(gun[cur->weapon].offset,front,top,right);
+	Vector partpos=pos+VectMult(gun[cur->weapon].partoffset[0],front,top,right);
+	gun[cur->weapon].part[0].Draw(partpos,partfront,gunup);
+	gun[cur->weapon].main.Draw(pos,front,top);
+}
+
+static void DrawGunExplosions(int local);
+
+//The weapon pass (M13.5): the gun and its muzzle flash last, over a cleared depth
+//buffer, so no wall or hill in front of the camera ever cuts into them. Its own
+//projection has a fixed field of view (the zoom magnifies the world, not the gun
+//held at the eye) and a short near plane (the gun is half a unit away, inside the
+//scene's .15). The modelview and fog stay the scene's, and the model keeps its
+//world-space sun lighting, so it is lit and fogged like everything around it
+//(underwater too).
+
+static void DrawViewModel(Player *cur)
+{
+	Mat4 proj=RProjection();
+	RPushAttrib(RATTR_ENABLE|RATTR_COLOR|RATTR_POLYGON|RATTR_TEXTURE);
+	REnable(RCAP_TEXTURE|RCAP_BLEND|RCAP_DEPTHTEST|RCAP_CULL);
+	RDisable(RCAP_SCISSOR);
+	RBlendFunc(RBLEND_ALPHA);
+	RCullFace(RFACE_FRONT);   //as the scene draws models (DrawMip leaves it so)
+	RDepthMask(1);
+	RClear(0,1);              //depth only: the gun's own depth range
+	RSetProjection(Mat4Perspective(70,1.2,.02,20));
+	DrawLocalGun(cur);
+	DrawGunExplosions(1);     //the flash at the muzzle, over the gun as before
+	RSetProjection(proj);
+	RPopAttrib();
+}
+
+//draws the explosion coming out from the gun: of every player but the local one
+//(local 0), or of the local one alone (local 1), which the weapon pass draws
+
+static void DrawGunExplosions(int local)
 {
 	Vector pos,front,top,right;
 	for(int i=0;i<GetNumPlayers();i++)
 	{
 		
 		Player *pl=GetPlayer(i);
+		if((pl==GetLocalPlayer())!=(local!=0)) continue;
 	
 		if(curtime-pl->lastfiretime<200)
 		{
@@ -1654,39 +1715,14 @@ void Draw(float offset)
 	REnable(RCAP_BLEND);
 	osize=0;
 	
-	Vector pos,front,top,right;
-	Vector gunup,partup,partright,partfront;
 	int i;
 	for(i=0;i<GetNumPlayers();i++)  //draws all the players
 	{
 		Player *cur=GetPlayer(i);
 		if(cur->playstate==10)
 		{
-			if(cur==GetLocalPlayer())
-			{
-				int closetime=curtime-cur->gundowntime;
-				if(fabs((float)(cur->nextfiretime-curtime))<closetime)closetime=fabs((float)(cur->nextfiretime-curtime))<closetime;
-				if(!cur->gundowntime) closetime=0;
-				if(closetime>500)closetime=500;
-				top=GetRight(cur->dir,camup);
-				front=Normalize(cur->dir-top*(float)closetime*.003);
-				top=GetRight(front,top);
- 				right=CrossProduct(top,front);
-				top=VectMult(cur->gunmainup,front,top,right);
-				pos=cur->pos+cur->fwd*.03+cur->gunoffset-top*(float)closetime*.0015;
-				
-				
-				partup=VectMult(gun[cur->weapon].partup[0],front,top,right);
-				partright=VectMult(gun[cur->weapon].partright[0],front,top,right);
-				partfront=front;
-				
-				gunup=VectMult(cur->gunup,partfront,partup,partright);
-				pos+=cur->dir*(1-cur->gunkick)*.5;
-				pos+=VectMult(gun[cur->weapon].offset,front,top,right);
-				Vector partpos=pos+VectMult(gun[cur->weapon].partoffset[0],front,top,right);
-				gun[cur->weapon].part[0].Draw(partpos,partfront,gunup);
-				gun[cur->weapon].main.Draw(pos,front,top);
-			}
+			//without the weapon pass, the gun is part of the scene, as it was
+			if(cur==GetLocalPlayer()&&!fxprefs.viewmodel) DrawLocalGun(cur);
 			if(GetLocalPlayer()!=cur)
 			if(MakeClose(&cur->pos))
 			{
@@ -1932,7 +1968,8 @@ void Draw(float offset)
 	}
 	REnd();
 	REnable(RCAP_TEXTURE);
-	DrawGunExplosions();
+	DrawGunExplosions(0);
+	if(!fxprefs.viewmodel) DrawGunExplosions(1);
 	
 	
 	
@@ -1993,6 +2030,8 @@ void Draw(float offset)
 	
 	}
 	
+	if(fxprefs.viewmodel&&cur->playstate==10) DrawViewModel(cur);
+
 	//crosshair
 	RCullFace(RFACE_BACK);
 	

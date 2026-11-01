@@ -54,6 +54,12 @@ struct GraphicsPrefs
 	float stereoseparation;
 };
 
+//visual effects of M13.5, client side only, each switchable in Options (control.ini)
+struct FxPrefs
+{
+	int viewmodel;        //the gun in its own pass: never inside walls or terrain
+};
+
 struct Particle
 {
 	char type;
@@ -70,6 +76,7 @@ struct LillyPad
 
 //redrawing.cpp (the 3D models: models.h)
 extern GraphicsPrefs graphicsprefs;
+extern FxPrefs fxprefs;
 extern Particle particle[MAXPARTICLES];
 extern int numlillypad;
 extern LillyPad lillypad[200];

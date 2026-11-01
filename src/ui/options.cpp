@@ -48,11 +48,11 @@ static Binding bindings[]=
 };
 #define NUMBINDINGS (int)(sizeof(bindings)/sizeof(bindings[0]))
 
-#define NUMSETTINGS 8
+#define NUMSETTINGS 9
 static const char *settinglabels[NUMSETTINGS]=
 {
 	"Fullscreen","VSync","Draw distance","Mouse sensitivity","Invert mouse","Volume",
-	"Voice volume","Microphone"
+	"Voice volume","Microphone","Gun over walls"
 };
 
 //layout, in screen units (-1..1), like the server setup screen (serversetup.cpp)
@@ -182,9 +182,10 @@ void SetIniValues(const char *filename,const char *keys[],const char *values[],i
 
 static void SaveOptions()
 {
-	const char *keys[NUMBINDINGS+8];
-	const char *values[NUMBINDINGS+8];
-	char numbers[8][32];
+#define NUMNUMBERS 9
+	const char *keys[NUMBINDINGS+NUMNUMBERS];
+	const char *values[NUMBINDINGS+NUMNUMBERS];
+	char numbers[NUMNUMBERS][32];
 	int n=0;
 	for(int i=0;i<NUMBINDINGS;i++)
 	{
@@ -203,9 +204,10 @@ static void SaveOptions()
 	sprintf(numbers[5],"%d",(int)(volume*100+.5f));
 	sprintf(numbers[6],"%d",(int)(VoiceGetVolume()*100+.5f));
 	sprintf(numbers[7],"%d",VoiceGetMic());
-	const char *numberkeys[8]={"changeres","vsync","drawdistance","mousesensitivity","mousereverse","volume",
-		"voicevolume","voicemic"};
-	for(int i=0;i<8;i++)
+	sprintf(numbers[8],"%d",fxprefs.viewmodel);
+	const char *numberkeys[NUMNUMBERS]={"changeres","vsync","drawdistance","mousesensitivity","mousereverse","volume",
+		"voicevolume","voicemic","fxviewmodel"};
+	for(int i=0;i<NUMNUMBERS;i++)
 	{
 		keys[n]=numberkeys[i];
 		values[n]=numbers[i];
@@ -233,6 +235,7 @@ void LoadOptions()
 	SetMasterVolume(volume);
 	if(ini.GetValues("voicevolume")) VoiceSetVolume(ini.GetValuei("voicevolume")/100.0f);
 	if(ini.GetValues("voicemic")) VoiceSetMic(ini.GetValuei("voicemic"));
+	if(ini.GetValues("fxviewmodel")) fxprefs.viewmodel=ini.GetValuei("fxviewmodel")!=0;
 }
 
 void OpenOptions()
@@ -315,6 +318,7 @@ static void ChangeSetting(int row,int dir)
 		break;
 	case 6: VoiceSetVolume(VoiceGetVolume()+dir*.1f); break;
 	case 7: VoiceSetMic(!VoiceGetMic()); break;
+	case 8: fxprefs.viewmodel=!fxprefs.viewmodel; break;
 	}
 }
 
@@ -335,6 +339,7 @@ static void SettingText(int row,char *text)
 	case 5: sprintf(text,"%d%%",(int)(volume*100+.5f)); break;
 	case 6: sprintf(text,"%d%%",(int)(VoiceGetVolume()*100+.5f)); break;
 	case 7: strcpy(text,VoiceGetMic()?"On":"Off"); break;
+	case 8: strcpy(text,fxprefs.viewmodel?"On":"Off"); break;
 	}
 }
 
