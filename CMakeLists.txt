@@ -242,6 +242,7 @@ set(DATA_DIR ${CMAKE_CURRENT_SOURCE_DIR}/data)
 set(SOURCES
   src/render/ase.cpp
   src/render/redrawing.cpp
+  src/render/effects.cpp
   src/render/textures.cpp
   src/render/renderer.cpp
   ${HK_RENDER_SOURCES}

@@ -16,6 +16,7 @@
 #include "voice.h"
 #include "hkkeys.h"
 #include "hktime.h"
+#include "effects.h"
 
 
 char menutext[5000];
@@ -389,6 +390,9 @@ void TickObjects(float sf)
 						}
 					}
 					i2=0;
+					//the new explosion (M13.5), or the original burst of particles
+					if(fxprefs.explosions) FxExplosion(object[i].pos);
+					else
 					for(int i3=0;i3<200;i3++)
 					{
 						for(;i2<MAXPARTICLES;i2++)

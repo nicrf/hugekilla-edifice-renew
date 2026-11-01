@@ -58,6 +58,7 @@ struct GraphicsPrefs
 struct FxPrefs
 {
 	int viewmodel;        //the gun in its own pass: never inside walls or terrain
+	int explosions;       //grenades: fireball, flash, sparks, debris (effects.cpp)
 };
 
 struct Particle
