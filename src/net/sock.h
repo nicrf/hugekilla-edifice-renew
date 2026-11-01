@@ -40,6 +40,8 @@ int ReadSimple(const void *in,int len,SimpleMessage *out);    //0 if too short
 #define RELIABLEMAXRESEND 2000
 #define RELIABLEGIVEUP 30               //resends of one packet before the link is declared dead
 
+class DatagramLink;
+
 class Sock
 {
 public:
@@ -91,7 +93,12 @@ private:
 	DWORD GetCheckSum(char *buf,int size);
 public:
 	Sock();
-	SOCKET sock;
+	//what the datagrams go through (datagramlink.h), owned by the Sock; 0 when closed.
+	//A Sock is copied and zeroed with CopyMemory/ZeroMemory (multiplay.cpp), so it only
+	//holds a pointer: the copy takes the link over.
+	DatagramLink *link;
+	void Open(DatagramLink *l);   //closes the current link first
+	void Close();
 	SOCKADDR_IN dest;
 	void CheckReliableResend();
 	int Send(const void *data,int size);
@@ -100,7 +107,7 @@ public:
 	int fromack;   //last Receive returned a local reliable-ack callback (not peer data)
 	//tests and fuzzing (tests/fuzz/fuzz_sock.cpp): the next datagram Receive reads is
 	//this one (type byte included) instead of one from the socket; data must stay valid
-	//until Receive has used it. Works without a socket (sock 0: nothing is sent).
+	//until Receive has used it. Works without a link (none open: nothing is sent).
 	void Feed(const void *datagram,int size) { feeddata=(const char *)datagram; feedsize=size; }
 	const char *feeddata;
 	int feedsize;

@@ -18,6 +18,7 @@
 #include "stdio.h"
 #include "gameplay.h"
 #include "sock.h"
+#include "udplink.h"
 #include "version.h"
 #include "wire.h"
 #include "netmsg.h"
@@ -239,15 +240,7 @@ void StartServer()
 	LoadNetSettings();
 	numplayers=1;
 	
-	SOCKADDR_IN self;
-	ZeroMemory(&self,sizeof(self));
-	infosock.sock=WSASocket(AF_INET,SOCK_DGRAM,0,0,0,WSA_FLAG_OVERLAPPED);
-	
-	self=MakeSockAddr(0,0,0,0,netsettings.infosendport);
-	bind(infosock.sock,(SOCKADDR *)&self,sizeof(self));
-
-	BOOL broadcast=TRUE;
-	setsockopt(infosock.sock,SOL_SOCKET,SO_BROADCAST,(char *)&broadcast,sizeof(broadcast));
+	infosock.Open(UdpLink::Open(netsettings.infosendport,1));
 
 	SetLocalNum(0);
 	GetLocalPlayer()->playstate=10;
@@ -281,21 +274,10 @@ void StartServer()
 void Disconnect()
 {
 	LockCursor(0);
-	if(infosock.sock) 
-	{
-		closesocket(infosock.sock);
-		infosock.sock=0;
-	}
-	if(datasock.sock) 
-	{
-		closesocket(datasock.sock);
-		datasock.sock=0;
-	}
+	infosock.Close();
+	datasock.Close();
 	for(int i=1;i<numplayers;i++)
-	{
-		if(clientsock[i].sock) closesocket(clientsock[i].sock);
-		clientsock[i].sock=0;
-	}
+		clientsock[i].Close();
 	server=0;
 	connected=0;
 	numplayers=0;
@@ -531,27 +513,26 @@ void ServerLoop()
 				
 				//each client gets its own server port: the first free one after datasendport
 				int baseport=ntohs(netsettings.datasendport);
-				SOCKET newsock=WSASocket(AF_INET,SOCK_DGRAM,0,0,0,WSA_FLAG_OVERLAPPED);
+				UdpLink *newlink=new UdpLink;
 				int port=0;
-				for(int p=baseport+1;p<=baseport+2*MAXPLAYERS&&!port&&newsock;p++)
+				for(int p=baseport+1;p<=baseport+2*MAXPLAYERS&&!port;p++)
 				{
 					int used=0;
 					for(int c=1;c<numplayers;c++)
-						if(clientsock[c].sock&&clientsock[c].localport==p) used=1;
+						if(clientsock[c].link&&clientsock[c].localport==p) used=1;
 					if(used) continue;
-					SOCKADDR_IN self=MakeSockAddr(0,0,0,0,htons(p));
-					if(bind(newsock,(SOCKADDR *)&self,sizeof(self))==0) port=p;
+					if(newlink->Bind(htons(p))) port=p;
 				}
 				if(!port)
 				{
-					if(newsock) closesocket(newsock);
+					delete newlink;
 					ConsoleDisplayText("no free port for a new client");
 					RefuseClient(source,SERVERFULL,"The server has no free port.");
 					break;
 				}
 
 				strcpy(GetPlayer(addplayer)->name,reqname);
-				clientsock[addplayer].sock=newsock;
+				clientsock[addplayer].Open(newlink);
 				clientsock[addplayer].dest=source;
 				clientsock[addplayer].dest.sin_port=htons(port);   //the client binds the same port
 				clientsock[addplayer].localport=port;
@@ -759,18 +740,13 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 					GetLocalPlayer()->playstate=1;
 					GetLocalPlayer()->timeout=curtime+70000;
 					numplayers=msg2+1;
-					datasock.sock=WSASocket(AF_INET,SOCK_DGRAM,0,0,0,WSA_FLAG_OVERLAPPED);
-					SOCKADDR_IN self;
-					//ZeroMemory(&self,sizeof(self));
-					self=MakeSockAddr(0,0,0,0,msg);
-					int g=bind(datasock.sock,(SOCKADDR *)&self,sizeof(self));
+					datasock.Open(UdpLink::Open(msg,0));
 					datasock.dest=source;
 					datasock.dest.sin_port=msg;
 					datasock.filterip=1;   //from now on, only the server's IP
 					SimpleBuf portack=MakeSimple(PORTACK,msg,0);
 					datasock.SendReliable(portack.b,sizeof(portack.b),0);
-					closesocket(infosock.sock);
-					infosock.sock=0;
+					infosock.Close();
 					ConsoleDisplayText("connection accepted");
 					datasock.packetssent=0;
 					datasock.packetsreceived=0;
@@ -1092,13 +1068,7 @@ LRESULT CALLBACK Multiplay(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
 		case WM_SHOWWINDOW:
 			if(wParam)
 			{
-				SOCKADDR_IN self;
-				infosock.sock=WSASocket(AF_INET,SOCK_DGRAM,0,0,0,WSA_FLAG_OVERLAPPED);
-				
-				self=MakeSockAddr(0,0,0,0,netsettings.infosendport);
-				bind(infosock.sock,(SOCKADDR *)&self,sizeof(self));
-				BOOL broadcast=TRUE;
-				setsockopt(infosock.sock,SOL_SOCKET,SO_BROADCAST,(char *)&broadcast,sizeof(broadcast));
+				infosock.Open(UdpLink::Open(netsettings.infosendport,1));
 			}
 
 				return 1;
@@ -1175,24 +1145,14 @@ static DWORD lastinfoquery;   //GetTickCount() of the last info request, for the
 void JoinNetOpen()
 {
 	LoadNetSettings();
-	if(!infosock.sock)
-	{
-		infosock.sock=WSASocket(AF_INET,SOCK_DGRAM,0,0,0,WSA_FLAG_OVERLAPPED);
-		SOCKADDR_IN self=MakeSockAddr(0,0,0,0,netsettings.infosendport);
-		bind(infosock.sock,(SOCKADDR *)&self,sizeof(self));
-		BOOL broadcast=TRUE;
-		setsockopt(infosock.sock,SOL_SOCKET,SO_BROADCAST,(char *)&broadcast,sizeof(broadcast));
-	}
+	if(!infosock.link)
+		infosock.Open(UdpLink::Open(netsettings.infosendport,1));
 }
 
 void JoinNetClose()
 {
 	GetLocalPlayer()->playstate=0;
-	if(infosock.sock)
-	{
-		closesocket(infosock.sock);
-		infosock.sock=0;
-	}
+	infosock.Close();
 }
 
 void JoinNetClearList()
@@ -1361,7 +1321,7 @@ void DeletePlayer(int num,int reason)
 			clientsock[i].SendReliable(deleteplayer.b,sizeof(deleteplayer.b),0);
 		}
 		
-		closesocket(clientsock[num].sock);
+		clientsock[num].Close();
 		
 		clientsock[num].ResetReliable();
 		

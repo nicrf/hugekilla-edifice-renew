@@ -1,4 +1,4 @@
-//Sock is a class that makes use of windows sockets, uses udp.  It can be used to send 
+//Sock is a class that sends datagrams through a DatagramLink (UDP: UdpLink).  It can be used to send 
 //anything needed, and can also send data reliably in case of packetloss.  The reliable
 //transfer can be used to send large amounts of data also.  If many small packets are being
 //sent, it can group them together to save bandwidth.
@@ -10,6 +10,7 @@
 #include "sock.h"
 #include "redrawing.h"
 #include "wire.h"
+#include "datagramlink.h"
 
 #define RELIABLE -1
 #define LASTRELIABLE -2
@@ -52,13 +53,25 @@ Sock::Sock()
 	reliablesenddata=0;
 }
 
+void Sock::Open(DatagramLink *l)
+{
+	Close();
+	link=l;
+}
+
+void Sock::Close()
+{
+	delete link;
+	link=0;
+}
+
 //sends all data waiting to be sent
 
 void Sock::Flush()
 {
 	sendbuf.type=0;
 	if(!sendbufpos) return;
-	if(sock) sendto(sock,(char *)&sendbuf,sendbufpos+1,0,(SOCKADDR*)&dest,sizeof(dest));
+	if(link) link->SendTo(&sendbuf,sendbufpos+1,&dest);
 	packetssent++;
 	datasendthissec+=sendbufpos+1+16;
 	datasendthisframe+=sendbufpos+1+16;
@@ -84,7 +97,7 @@ int Sock::Send(const void *data,int size)
 int Sock::Receive(void *data,SOCKADDR_IN *source,int maxsize)
 {
 	fromack=0;
-	if(!sock&&!feeddata) return 0;
+	if(!link&&!feeddata) return 0;
 	for(;;)
 	{
 		//messages left from the last complete reliable transfer
@@ -129,22 +142,9 @@ int Sock::Receive(void *data,SOCKADDR_IN *source,int maxsize)
 		}
 		else
 		{
-			if(!sock) return 0;
-			fd_set recv;
-			FD_ZERO(&recv);
-			FD_SET(sock,&recv);
-			timeval tm;
-			tm.tv_sec=0;
-			tm.tv_usec=0;
-			int readit;
-			readit=select(sock+1,&recv,0,0,&tm);
-			if(readit<=0) return 0;
-#ifdef _WIN32
-			int addrsize=sizeof(SOCKADDR_IN);
-#else
-			socklen_t addrsize=sizeof(SOCKADDR_IN);
-#endif
-			received=recvfrom(sock,(char *)&recvbuf,sizeof(recvbuf),0,(SOCKADDR*)source,&addrsize);
+			if(!link) return 0;
+			received=link->ReceiveFrom(&recvbuf,sizeof(recvbuf),source);
+			if(received==0) return 0;   //nothing waiting
 		}
 		packetsreceived++;
 		if(received<=0) return 0;
@@ -218,7 +218,7 @@ int Sock::Receive(void *data,SOCKADDR_IN *source,int maxsize)
 			buf ack;
 			ack.type=ACK;
 			memcpy(&ack.data[0],&recvbuf.data[4],4);   //id, part number
-			if(sock) sendto(sock,(char *)&ack,1+4,0,(SOCKADDR *)&dest,sizeof(SOCKADDR));
+			if(link) link->SendTo(&ack,1+4,&dest);
 			packetssent++;
 			WORD id=WireGetU16(&recvbuf.data[4]);
 			if(id!=(WORD)(lastreliableid+1))   //WORD: keeps working after 65535 transfers
@@ -253,7 +253,7 @@ int Sock::Receive(void *data,SOCKADDR_IN *source,int maxsize)
 
 void Sock::ResendReliable(rbuf *curbuf)
 {
-	if(sock) sendto(sock,(char *)&curbuf->data,curbuf->size,0,(SOCKADDR*)&dest,sizeof(dest));
+	if(link) link->SendTo(&curbuf->data,curbuf->size,&dest);
 	packetssent++;
 	datasendthissec+=RELIABLEPACKETSIZE+1+16;
 	datasendthisframe+=RELIABLEPACKETSIZE+1+16;
