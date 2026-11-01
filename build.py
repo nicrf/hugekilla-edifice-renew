@@ -178,6 +178,9 @@ def main():
                          "vcpkg: VCPKG_ROOT, else one fetched into build/vcpkg")
     ap.add_argument("--no-gns", dest="gns", action="store_false",
                     help="without GameNetworkingSockets: no P2P, Internet games need open UDP ports")
+    ap.add_argument("--sokol", action="store_true",
+                    help="render with sokol_gfx (Metal on macOS, D3D11 on Windows, GL 4.1 core on Linux) "
+                         "instead of fixed-function OpenGL (roadmap M13)")
     ap.add_argument("--universal", action="store_true",
                     help="macOS: one binary for Apple Silicon and Intel (macOS %s or later)" % MACOS_MIN)
     args, game_args = ap.parse_known_args()
@@ -188,6 +191,8 @@ def main():
     name = "%s-%s" % (OS, args.config.lower())
     if args.gns:
         name += "-gns"
+    if args.sokol:
+        name += "-sokol"
     if args.universal:
         name += "-universal"
     bdir = os.path.join(ROOT, "build", name)
@@ -223,6 +228,8 @@ def main():
         extra = shlex.split(os.environ.get("EDIFICE_CMAKE_ARGS", ""))
         if args.universal:
             cfg += ["-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64", "-DCMAKE_OSX_DEPLOYMENT_TARGET=" + MACOS_MIN]
+        if args.sokol:
+            cfg += ["-DHK_RENDER_SOKOL=ON"]
         if args.gns:
             cfg += gns_args(args, extra)
         cfg += extra
@@ -279,10 +286,13 @@ def cache_value(bdir, key):
 
 
 def third_party_licenses(bdir):
-    """(name, license file) of the libraries built into the game: stb_image (vendored
-    in src/third_party), SDL2, opus and (Windows) curl from FetchContent, and with
-    --gns the vcpkg ports (GameNetworkingSockets, protobuf, abseil, OpenSSL...)."""
+    """(name, license file) of the libraries built into the game: stb_image and, with
+    --sokol, sokol_gfx (vendored in src/third_party), SDL2, opus and (Windows) curl from
+    FetchContent, and with --gns the vcpkg ports (GameNetworkingSockets, protobuf,
+    abseil, OpenSSL...)."""
     out = [("stb_image", os.path.join(ROOT, "src", "third_party", "stb", "LICENSE"))]
+    if cache_value(bdir, "HK_RENDER_SOKOL").upper() in ("ON", "1", "TRUE"):
+        out.append(("sokol", os.path.join(ROOT, "src", "third_party", "sokol", "LICENSE")))
     for name, f in (("SDL2", "LICENSE.txt"), ("opus", "COPYING"), ("curl", "COPYING")):
         p = os.path.join(bdir, "_deps", name.lower() + "-src", f)
         if os.path.isfile(p):

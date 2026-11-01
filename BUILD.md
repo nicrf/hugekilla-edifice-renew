@@ -1,6 +1,6 @@
 # Build d'Edifice (HugeKilla)
 
-Un seul code pour les trois systèmes : **SDL2** (fenêtre, entrées, audio) + **OpenGL 2.1** (profil legacy, fixed-function).
+Un seul code pour les trois systèmes : **SDL2** (fenêtre, entrées, audio) + **OpenGL 2.1** (profil legacy, fixed-function), ou **sokol_gfx** avec `--sokol` (Metal sous macOS, OpenGL 4.1 core sous Linux ; voir « Rendu sokol_gfx »).
 SDL2 est téléchargée et compilée **en statique** par CMake (`FetchContent`, SDL 2.32.10), de même que libopus 1.5.2 (codec du chat vocal, licence BSD) : les binaires ne dépendent que du système.
 
 | OS | Résultat |
@@ -37,7 +37,7 @@ python3 build.py --config Debug --run
 python3 build.py --package           # dist/Edifice-<version>-<os>.zip|.tar.gz
 ```
 
-Sous Windows : `py build.py ...`. Options : `--clean`, `--test` (tests unitaires après le build), `--generator <G>`, `EDIFICE_ARCH=Win32` pour du 32 bits, `--universal` (macOS : un binaire arm64 + x86_64, macOS 10.15 minimum, comme la release), `--no-gns` (sans GameNetworkingSockets, donc sans P2P : plus rapide à compiler, mais les parties Internet demandent des ports UDP ouverts ; voir ci-dessous). `EDIFICE_CMAKE_ARGS="-D…"` ajoute des arguments CMake.
+Sous Windows : `py build.py ...`. Options : `--clean`, `--test` (tests unitaires après le build), `--generator <G>`, `EDIFICE_ARCH=Win32` pour du 32 bits, `--universal` (macOS : un binaire arm64 + x86_64, macOS 10.15 minimum, comme la release), `--no-gns` (sans GameNetworkingSockets, donc sans P2P : plus rapide à compiler, mais les parties Internet demandent des ports UDP ouverts ; voir ci-dessous), `--sokol` (rendu sokol_gfx, dans `build/<os>-<config>[-gns]-sokol`). `EDIFICE_CMAKE_ARGS="-D…"` ajoute des arguments CMake.
 `-DEDIFICE_SYSTEM_SDL2=ON` (CMake) utilise une SDL2 installée au lieu de la compiler.
 La version vient de `project(Edifice VERSION …)` dans `CMakeLists.txt`.
 
@@ -73,6 +73,17 @@ EDIFICE_CMAKE_ARGS="-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -DCMAKE_EXE_L
 Puis `ctest` (dans `build/<os>-debug-gns`), `tests/run_netplay_tests.sh <binaire>` (échoue sur un rapport AddressSanitizer ; chercher aussi `runtime error` dans les logs) et une courte partie (`HK_CONSOLE=notify HK_SHOT=… HK_SHOT_FRAME=600`, avec un `HK_USERDIR` à part). Sous macOS, le `.app` ne trouve pas `libclang_rt.asan_osx_dynamic.dylib` : la copier de `$(xcrun --find clang)/../../lib/clang/*/lib/darwin/` dans `Edifice.app/Contents/MacOS/`.
 
 `-DEDIFICE_WERROR=ON` fait de tout avertissement du jeu et de ses tests une erreur (`-Werror`, `/WX` sous MSVC) ; le code tiers (SDL, opus, curl, GNS) a ses propres cibles et n'est pas concerné. La CI compile ainsi sur les trois systèmes (`EDIFICE_CMAKE_ARGS` dans `release.yml`) ; hors CI l'option est désactivée, un compilateur plus récent pouvant avertir davantage. Restent désactivés, sur du code des années 2000 : `-Wno-write-strings`, `-Wno-parentheses`, `-Wno-dangling-else`… (liste dans `CMakeLists.txt`), `/W1` sous MSVC, `-fpermissive` sous GCC.
+
+## Rendu sokol_gfx (M13)
+
+`python3 build.py --sokol` (CMake : `-DHK_RENDER_SOKOL=ON`) remplace le backend OpenGL fixe (`renderer_gl.cpp`) par [sokol_gfx](https://github.com/floooh/sokol) (`renderer_sokol.cpp`) sur l'API du système : **Metal** sous macOS, **OpenGL 4.1 core** sous Linux ; **Direct3D 11** sous Windows est l'étape suivante (en attendant, CMake refuse `--sokol` sous Windows). `-DHK_SOKOL_BACKEND=GLCORE` compile aussi le chemin Linux sous macOS, pour l'essayer. Le reste du jeu ne change pas : il dessine par `renderer.h` dans les deux cas.
+
+- `src/third_party/sokol/sokol_gfx.h` : en-tête unique, licence zlib (`LICENSE`), commit `170136d` de floooh/sokol (12 octobre 2026), sans modification ; compilé seul dans `sokol_gfx_impl.cpp` (en Objective-C++ avec ARC sous macOS), sans `-Werror`.
+- Shaders : `src/render/shaders/edifice.glsl`, en GLSL annoté de `sokol-shdc`, converti au build en `build/…/shaders/edifice.glsl.h` (Metal, HLSL 5, GLSL 4.10, et déjà GLSL ES 3.00 et WGSL pour le web, M14). CMake télécharge `sokol-shdc` une fois pour la machine qui compile, depuis floooh/sokol-tools-bin au commit `b975d56` (celui du 11 octobre 2026, accordé à `sokol_gfx.h`), et vérifie son SHA-256 ; `-DHK_SOKOL_SHDC=<chemin>` en utilise un déjà installé (build hors ligne). Metal et HLSL sont compilés au lancement du jeu (pas d'outils Xcode nécessaires au build).
+- `sokol_native.cpp` fait ce que sokol_gfx laisse à l'application : la fenêtre SDL (`SDL_WINDOW_METAL` et une `CAMetalLayer` ; un contexte GL 4.1 core), la présentation, la VSync, la taille en pixels (Retina), et les relectures (`HK_SHOT`, captures d'écran, profondeur sous le soleil) : sokol_gfx n'en a pas, elles passent par l'API (blit Metal vers un buffer partagé, `glReadPixels` sur un framebuffer à nous).
+- Une image est d'abord enregistrée (sommets convertis en listes de triangles et de lignes, une commande par lot avec son pipeline et ses uniformes), puis dessinée dans une image hors écran quand elle est présentée ou relue ; la fenêtre en reçoit une copie. Lignes larges et points (que seul OpenGL dessinait) deviennent des quads face à l'écran ; `glClear` devient un quad au plan lointain. Les textures sont générées avec les mêmes mipmaps que `gluBuild2DMipmaps` (`texture_sokol.cpp`).
+- Une build Debug valide chaque appel sokol_gfx (et chaque erreur GL sous Linux) : les messages commencent par `sokol_gfx` sur stderr. `python3 tests/render_smoke.py <binaire ou .app> [--out dossier] [--ref dossier]` dessine les menus, la console et une partie, et échoue sur un message de sokol_gfx, une image unie ou un jeu qui s'arrête (la CI le fait, en Debug).
+- Non reproduit : l'antialiasing des lignes (`RCAP_LINESMOOTH`, les étincelles) ; ces lignes sont dessinées pleines.
 
 ## GameNetworkingSockets (M7, dans les releases)
 
@@ -121,23 +132,26 @@ build/fuzz/fuzz_map -max_total_time=60 /tmp/c    # fuzzing (le corpus grandit da
 ```
 src/game/      boucle de jeu, terrain (land*), structures, physique, config, vector, hugekilla.cpp
 src/render/    rendu (redrawing), renderer.h (API du rendu : primitives en lots, états, matrices ; renderer.cpp),
-               backend OpenGL fixe renderer_gl.cpp + texture_gl.cpp (seuls fichiers qui appellent gl*, rbackend.h),
+               backend OpenGL fixe renderer_gl.cpp + texture_gl.cpp + rcontext_gl.cpp (seuls fichiers qui appellent gl*, rbackend.h),
+               ou sokol_gfx (HK_RENDER_SOKOL) renderer_sokol.cpp + texture_sokol.cpp + sokol_native.cpp (rsokol.h), shaders/ ;
+               rcontext.h : ce que la fenêtre demande au backend (drapeaux SDL, contexte ou device, présentation),
                rmath.h (matrices 4x4), textures (registre textures.h, image.cpp = stb_image), modèles .cob (ase, models.h)
 src/net/       sockets UDP (sock), protocole et serveur/client (multiplay*)
 src/ui/        menus en jeu, console, Options, Server Setup, crédits
 src/audio/     sound_sdl.cpp (son SDL), voice.cpp (chat vocal opus)
-src/platform/  platform_sdl.cpp : main SDL (fenêtre, contexte GL, entrées, dossiers ; platform.h) ;
+src/platform/  platform_sdl.cpp : main SDL (fenêtre et son contexte par rcontext.h, entrées, dossiers ; platform.h) ;
                system_sdl.cpp : horloges (hktime.h), touches tenues (hkkeys.h), boîtes de message ;
                hktypes.h : DWORD/WORD/BYTE ; hksocket.h : sockets (Winsock / POSIX) ;
                gl.h : OpenGL et GLU (pour le seul backend du rendu) ; fileio.* : accès aux fichiers (std::filesystem, stdio) ;
                windows/ : edifice.rc et icônes de Edifice.exe
 src/third_party/ stb/stb_image.h v2.30 (nothings/stb 31c1ad3, domaine public / MIT, licence dans stb/LICENSE)
+               sokol/sokol_gfx.h (floooh/sokol 170136d, zlib, licence dans sokol/LICENSE)
 data/          données du jeu (ini, textures, sons, objets, Structures)
 ```
 
 Un seul chemin de code : `main()` est celui de SDL sur les trois systèmes (`SDL2main` fournit `WinMain` sous Windows). Le build Win32 natif d'origine (WinMain/WndProc, DirectSound, boîtes de dialogue, menus, variante serveur dédié `HKDS`, projet Visual Studio 2003) n'était plus compilé : il a été retiré (M12.3), il reste dans l'historique git.
 
-Chaque `.cpp` inclut ce qu'il utilise (plus de `StdAfx.h` ni d'émulation Win32) : les types `DWORD`/`WORD`/`BYTE` par `hktypes.h` (gardés : `DWORD` fait 32 bits dans les structs réseau et les sauvegardes), l'horloge par `hktime.h` (`HKTicks`, `HKPerfCounter`, `HKSleep`), les codes de touches par `hkkeys.h` (`KEY_TAB`, `KEY_F1`… : les valeurs des codes VK de Windows, que `control.ini` désigne par leur nom), les sockets par `hksocket.h`, le rendu par `renderer.h` (OpenGL, par `gl.h`, n'est inclus que par `renderer_gl.cpp` et `texture_gl.cpp`), et les globales partagées par le header du module qui les définit (`land.h`, `playing.h`, `multiplay.h`, `redrawing.h`, `models.h`, `ui.h`, `platform.h`…), déclarées une seule fois : pas d'`extern` local dans un `.cpp`.
+Chaque `.cpp` inclut ce qu'il utilise (plus de `StdAfx.h` ni d'émulation Win32) : les types `DWORD`/`WORD`/`BYTE` par `hktypes.h` (gardés : `DWORD` fait 32 bits dans les structs réseau et les sauvegardes), l'horloge par `hktime.h` (`HKTicks`, `HKPerfCounter`, `HKSleep`), les codes de touches par `hkkeys.h` (`KEY_TAB`, `KEY_F1`… : les valeurs des codes VK de Windows, que `control.ini` désigne par leur nom), les sockets par `hksocket.h`, le rendu par `renderer.h` (OpenGL, par `gl.h`, n'est inclus que par `renderer_gl.cpp` et `texture_gl.cpp` ; les API de sokol_gfx que par `sokol_native.cpp` et `sokol_gfx_impl.cpp`), et les globales partagées par le header du module qui les définit (`land.h`, `playing.h`, `multiplay.h`, `redrawing.h`, `models.h`, `ui.h`, `platform.h`…), déclarées une seule fois : pas d'`extern` local dans un `.cpp`.
 
 ## Données
 
@@ -195,6 +209,8 @@ Les lettres suivent la disposition du clavier : sur AZERTY, remappez Avancer/Gau
 - `HK_P2P=0|1|relay` remplace `p2p=` de `net.ini` ; `HK_GNS_DEBUG=1` affiche les messages de GameNetworkingSockets. `HK_SIGNAL_TCP=1` : signalisation par le relais TCP même si le lobby propose son relais WebSocket (`wss://`). `EDIFICE_TEST_CA_FILE=cert.pem` (tests seulement) : certificat PEM d'un lobby auto-signé, accepté en plus de ceux du système pour le lobby et la signalisation (la vérification reste faite).
 - `HK_CONSOLE=1` démarre un serveur local et ouvre la console après quelques commandes (`help`, `maps`, …) ; `HK_CONSOLE=scroll` la fait défiler vers le haut, `HK_CONSOLE=notify` la laisse fermée (dernières lignes sur le jeu), toute autre valeur reste tapée à l'invite (`HK_CONSOLE=gr` : complétion). Avec `HK_CONSOLE`, `HK_CONSOLE_RUN="savemap essai;loadmap essai"` exécute en plus ces commandes (séparées par `;`), par exemple pour vérifier l'aller-retour d'une carte dans `maps/` du dossier utilisateur.
 - `HK_SHOT=fichier.ppm` (et `HK_SHOT_FRAME=N`) enregistre l'image rendue N (sans VSync : sous macOS, l'échange d'images attend sinon indéfiniment quand l'écran est en veille).
+- `HK_PLAY=1` : apparaît en jeu dès que l'écran d'apparition s'ouvre, comme son bouton Play (captures en jeu sans le panneau, avec `HK_AUTOSTART=1`).
+- `HK_FRAMETIME=N` : affiche sur stderr le temps moyen des N images (300 par défaut) qui suivent l'image `HK_SHOT_FRAME` (120 par défaut), sans VSync, à l'horloge réelle même avec `HK_FIXEDCLOCK` (comparaison des rendus).
 - `HK_FIXEDCLOCK=N` : l'horloge du jeu avance de N ms par image dessinée au lieu de suivre le temps réel (caméra, nuages, animations et compteur d'images répétables d'une exécution à l'autre, pour les pixel-diffs du rendu ; `16` ≈ 60 images/s). Le réseau garde l'horloge réelle.
 - `HK_USERDIR=<dossier/>` remplace le dossier utilisateur (`control.ini`, `net.ini`, `sv.ini`, cartes) : des essais (captures, taille de fenêtre `screenwidth`/`screenheight`) sans toucher aux vrais réglages.
 - Pixel-diff du rendu (M12.5, M13) : capturer les mêmes écrans (`HK_MENU=…`, `HK_CONSOLE=notify`, `HK_AUTOSTART=1 HK_MAPFILE=…`, avec `HK_SEED`, `HK_SHOT_FRAME` et un `HK_USERDIR` fixes) avec l'ancien et le nouveau binaire, puis `python3 tests/pixel_diff.py avant/ apres/` (tolérance 0 par défaut, `--tolerance N`, `--diff d.ppm` pour une paire). Les écrans 2D doivent être identiques ; les images en jeu varient d'une exécution à l'autre (caméra et animations suivent l'horloge) : `--ignore avant2/` (une deuxième capture de l'ancien binaire, répétable) ignore les pixels qui changent déjà entre deux exécutions de la référence. Avec `HK_FIXEDCLOCK=16`, la plupart des captures en jeu deviennent identiques d'une exécution à l'autre (il reste des écarts quand la souris bouge sur la fenêtre, ou quand le ciel tiré au hasard change) : comparer plusieurs exécutions de chaque binaire et retenir, pour chaque image, la capture de référence la plus proche.

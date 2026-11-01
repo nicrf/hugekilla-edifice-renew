@@ -1,0 +1,336 @@
+//sokol_gfx's window side (rcontext.h, rsokol.h), one 3D API per platform: Metal on
+//macOS (compiled as Objective-C++ with ARC), a GL 4.1 core context elsewhere (or
+//anywhere with HK_SOKOL_BACKEND=GLCORE); D3D11 on Windows is the next step. Here is
+//what sokol_gfx leaves to the application: the device, the window's swapchain and its
+//presentation, and reading an image back (HK_SHOT, screenshots, the sun's depth).
+
+#if defined(SOKOL_GLCORE)
+#if defined(__APPLE__)
+#include <OpenGL/gl3.h>
+#else
+#define GL_GLEXT_PROTOTYPES
+#include <GL/gl.h>
+#endif
+#endif
+#include "rsokol.h"
+#include "rcontext.h"
+#include "renderer.h"
+#include <SDL.h>
+#include <stdio.h>
+#include <string.h>
+#include <vector>
+
+static SDL_Window *window;
+static int vsync=1;
+
+//---- Metal ----------------------------------------------------------------------
+#if defined(SOKOL_METAL)
+#import <Cocoa/Cocoa.h>
+#import <Metal/Metal.h>
+#import <QuartzCore/CAMetalLayer.h>
+#include <SDL_metal.h>
+#include <SDL_syswm.h>
+
+//libobjc's, what @autoreleasepool compiles to: a pool per frame, since the game's
+//loop isn't Cocoa's (the drawables and command buffers are autoreleased)
+extern "C" void *objc_autoreleasePoolPush(void);
+extern "C" void objc_autoreleasePoolPop(void *pool);
+
+static SDL_MetalView metalview;
+static CAMetalLayer *layer;
+static id<MTLDevice> device;
+static id<CAMetalDrawable> drawable;
+static void *framepool;
+static NSWindow *nswindow;
+
+unsigned RWindowFlags()
+{
+	return SDL_WINDOW_METAL;
+}
+
+int RCreateContext(SDL_Window *w)
+{
+	window=w;
+	framepool=objc_autoreleasePoolPush();
+	metalview=SDL_Metal_CreateView(window);
+	if(!metalview)
+	{
+		fprintf(stderr,"SDL_Metal_CreateView failed: %s\n",SDL_GetError());
+		return 0;
+	}
+	layer=(__bridge CAMetalLayer *)SDL_Metal_GetLayer(metalview);
+	device=MTLCreateSystemDefaultDevice();
+	if(!layer||!device)
+	{
+		fprintf(stderr,"no Metal device\n");
+		return 0;
+	}
+	layer.device=device;
+	layer.pixelFormat=MTLPixelFormatBGRA8Unorm;   //not sRGB: the colors go out as GL wrote them
+	layer.framebufferOnly=YES;
+	layer.displaySyncEnabled=vsync?YES:NO;
+	SDL_SysWMinfo wm;
+	SDL_VERSION(&wm.version);
+	if(SDL_GetWindowWMInfo(window,&wm)) nswindow=wm.info.cocoa.window;
+	return 1;
+}
+
+void RDestroyContext()
+{
+	RSokolShutdown();
+	drawable=nil;
+	layer=nil;
+	device=nil;
+	nswindow=nil;
+	if(metalview) SDL_Metal_DestroyView(metalview);
+	metalview=0;
+	if(framepool) objc_autoreleasePoolPop(framepool);
+	framepool=0;
+}
+
+void RDrawableSize(int *w,int *h)
+{
+	*w=*h=0;
+	if(window) SDL_Metal_GetDrawableSize(window,w,h);
+}
+
+void RSetSwapInterval(int on)
+{
+	vsync=on;
+	if(layer) layer.displaySyncEnabled=on?YES:NO;
+}
+
+const char *RBackendName()
+{
+	return "sokol_gfx Metal";
+}
+
+sg_environment RSokolEnvironment()
+{
+	sg_environment env;
+	memset(&env,0,sizeof(env));
+	env.defaults.color_format=SG_PIXELFORMAT_BGRA8;
+	env.defaults.depth_format=SG_PIXELFORMAT_NONE;
+	env.defaults.sample_count=1;
+	env.metal.device=(__bridge const void *)device;
+	return env;
+}
+
+sg_swapchain RSokolSwapchain()
+{
+	sg_swapchain sc;
+	memset(&sc,0,sizeof(sc));
+	int w,h;
+	RDrawableSize(&w,&h);
+	if(w>0&&h>0&&(layer.drawableSize.width!=w||layer.drawableSize.height!=h))
+		layer.drawableSize=CGSizeMake(w,h);
+	//hidden (behind other windows, the display asleep): no drawable comes back, and
+	//nextDrawable would wait a second for each
+	if(nswindow&&!(nswindow.occlusionState&NSWindowOcclusionStateVisible))
+	{
+		sc.invalid=true;
+		return sc;
+	}
+	drawable=[layer nextDrawable];
+	if(!drawable)
+	{
+		sc.invalid=true;
+		return sc;
+	}
+	sc.width=(int)drawable.texture.width;
+	sc.height=(int)drawable.texture.height;
+	sc.sample_count=1;
+	sc.color_format=SG_PIXELFORMAT_BGRA8;
+	sc.depth_format=SG_PIXELFORMAT_NONE;
+	sc.metal.current_drawable=(__bridge const void *)drawable;
+	return sc;
+}
+
+void RSokolPresentNative()
+{
+	drawable=nil;   //presented by sokol_gfx at the end of the pass
+}
+
+int RSokolOriginTopLeft()
+{
+	return 1;
+}
+
+//copies a region of a (private) texture to a shared buffer and waits: the frame was
+//committed before, and the queue runs command buffers in order
+static void ReadTexture(sg_image image,int x,int y,int w,int h,int pixelsize,unsigned char *out)
+{
+	@autoreleasepool
+	{
+		sg_mtl_image_info info=sg_mtl_query_image_info(image);
+		id<MTLTexture> tex=(__bridge id<MTLTexture>)info.tex[info.active_slot];
+		id<MTLCommandQueue> queue=(__bridge id<MTLCommandQueue>)sg_mtl_command_queue();
+		if(!tex||!queue) return;
+		NSUInteger rowbytes=(NSUInteger)w*pixelsize;
+		id<MTLBuffer> buf=[device newBufferWithLength:rowbytes*h options:MTLResourceStorageModeShared];
+		id<MTLCommandBuffer> cb=[queue commandBuffer];
+		id<MTLBlitCommandEncoder> blit=[cb blitCommandEncoder];
+		[blit copyFromTexture:tex sourceSlice:0 sourceLevel:0
+			sourceOrigin:MTLOriginMake(x,tex.height-y-h,0) sourceSize:MTLSizeMake(w,h,1)
+			toBuffer:buf destinationOffset:0 destinationBytesPerRow:rowbytes destinationBytesPerImage:rowbytes*h];
+		[blit endEncoding];
+		[cb commit];
+		[cb waitUntilCompleted];
+		//top-down there, bottom-up for the game
+		const unsigned char *src=(const unsigned char *)buf.contents;
+		for(int r=0;r<h;r++)
+			memcpy(out+(size_t)(h-1-r)*rowbytes,src+(size_t)r*rowbytes,rowbytes);
+	}
+}
+
+void RSokolReadColor(sg_image image,int x,int y,int w,int h,unsigned char *rgba)
+{
+	ReadTexture(image,x,y,w,h,4,rgba);
+}
+
+int RSokolReadDepth(sg_image image,int x,int y,float *depth)
+{
+	ReadTexture(image,x,y,1,1,4,(unsigned char *)depth);   //Depth32Float
+	return 1;
+}
+
+static void NewFramePool()
+{
+	if(framepool) objc_autoreleasePoolPop(framepool);
+	framepool=objc_autoreleasePoolPush();
+}
+
+//---- GL 4.1 core ----------------------------------------------------------------
+#elif defined(SOKOL_GLCORE)
+
+static SDL_GLContext glcontext;
+static GLuint readfbo;
+
+unsigned RWindowFlags()
+{
+	//4.1: what sokol-shdc's GLSL (glsl410) and macOS need; no depth here, the frame
+	//is drawn offscreen
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION,4);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION,1);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,SDL_GL_CONTEXT_PROFILE_CORE);
+#ifdef __APPLE__
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS,SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG);
+#endif
+	SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER,1);
+	SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE,0);
+	return SDL_WINDOW_OPENGL;
+}
+
+int RCreateContext(SDL_Window *w)
+{
+	window=w;
+	glcontext=SDL_GL_CreateContext(window);
+	if(!glcontext)
+	{
+		fprintf(stderr,"SDL_GL_CreateContext (4.1 core) failed: %s\n",SDL_GetError());
+		return 0;
+	}
+	SDL_GL_MakeCurrent(window,glcontext);
+	return 1;
+}
+
+void RDestroyContext()
+{
+	if(readfbo) glDeleteFramebuffers(1,&readfbo);
+	readfbo=0;
+	RSokolShutdown();
+	if(glcontext) SDL_GL_DeleteContext(glcontext);
+	glcontext=0;
+}
+
+void RDrawableSize(int *w,int *h)
+{
+	*w=*h=0;
+	if(window) SDL_GL_GetDrawableSize(window,w,h);
+}
+
+void RSetSwapInterval(int on)
+{
+	vsync=on;
+	SDL_GL_SetSwapInterval(on);
+}
+
+const char *RBackendName()
+{
+	return "sokol_gfx GL 4.1 core";
+}
+
+sg_environment RSokolEnvironment()
+{
+	sg_environment env;
+	memset(&env,0,sizeof(env));
+	env.defaults.color_format=SG_PIXELFORMAT_RGBA8;
+	env.defaults.depth_format=SG_PIXELFORMAT_NONE;
+	env.defaults.sample_count=1;
+	return env;
+}
+
+sg_swapchain RSokolSwapchain()
+{
+	sg_swapchain sc;
+	memset(&sc,0,sizeof(sc));
+	RDrawableSize(&sc.width,&sc.height);
+	sc.sample_count=1;
+	sc.color_format=SG_PIXELFORMAT_RGBA8;
+	sc.depth_format=SG_PIXELFORMAT_NONE;
+	sc.gl.framebuffer=0;   //the window's
+	return sc;
+}
+
+void RSokolPresentNative()
+{
+	SDL_GL_SwapWindow(window);
+}
+
+int RSokolOriginTopLeft()
+{
+	return 0;
+}
+
+//glReadPixels through a framebuffer of our own on the image (sokol_gfx then
+//forgets what it thinks GL's state is)
+static void ReadGL(sg_image image,GLenum attachment,int x,int y,int w,int h,GLenum format,GLenum type,void *out)
+{
+	sg_gl_image_info info=sg_gl_query_image_info(image);
+	if(!readfbo) glGenFramebuffers(1,&readfbo);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER,readfbo);
+	glFramebufferTexture2D(GL_READ_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,0,0);
+	glFramebufferTexture2D(GL_READ_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,GL_TEXTURE_2D,0,0);
+	glFramebufferTexture2D(GL_READ_FRAMEBUFFER,attachment,info.tex_target,info.tex[info.active_slot],0);
+	glReadBuffer(attachment==GL_COLOR_ATTACHMENT0?GL_COLOR_ATTACHMENT0:GL_NONE);
+	glPixelStorei(GL_PACK_ALIGNMENT,1);
+	glReadPixels(x,y,w,h,format,type,out);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER,0);
+	sg_reset_state_cache();
+}
+
+void RSokolReadColor(sg_image image,int x,int y,int w,int h,unsigned char *rgba)
+{
+	ReadGL(image,GL_COLOR_ATTACHMENT0,x,y,w,h,GL_RGBA,GL_UNSIGNED_BYTE,rgba);
+}
+
+int RSokolReadDepth(sg_image image,int x,int y,float *depth)
+{
+	ReadGL(image,GL_DEPTH_ATTACHMENT,x,y,1,1,GL_DEPTH_COMPONENT,GL_FLOAT,depth);
+	return 1;
+}
+
+static void NewFramePool()
+{
+}
+
+#else
+#error "HK_RENDER_SOKOL: SOKOL_METAL or SOKOL_GLCORE (no D3D11 backend yet)"
+#endif
+
+void RPresent()
+{
+	RFlush();   //the end of the frame may still be batched
+	RSokolEndFrame();
+	NewFramePool();
+}

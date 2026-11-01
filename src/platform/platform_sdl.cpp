@@ -1,9 +1,10 @@
-// The game's main(), on SDL2 everywhere: window, OpenGL context, input and main
+// The game's main(), on SDL2 everywhere: window, GPU context (rcontext.h), input and main
 // loop. Input is translated to the game's key codes (hkkeys.h, the Windows
 // virtual-key values of the original code).
 
 
 #include "renderer.h"
+#include "rcontext.h"
 #include "platform.h"
 #include "hkkeys.h"
 #include "hktime.h"
@@ -27,7 +28,6 @@ char status[10][200];
 int timetotick = 10;
 
 static SDL_Window *window;
-static SDL_GLContext glcontext;
 static int quitrequested;
 static int fullscreen;
 static int vsync = 1;
@@ -41,7 +41,7 @@ void HKQuit()
 void HKWindowSize(int *w, int *h)
 {
 	*w = *h = 0;
-	if (window) SDL_GL_GetDrawableSize(window, w, h);
+	if (window) RDrawableSize(w, h);
 }
 
 // Debug aid: HK_SHOT=file.ppm saves the HK_SHOT_FRAME-th frame (default 120).
@@ -68,23 +68,41 @@ static void DebugScreenshot()
 	delete[] px;
 }
 
+// Debug aid: HK_FRAMETIME=N prints the mean time of the N frames (default 300) after
+// the HK_SHOT_FRAME-th (default 120), without VSync: to compare renderers (M13)
+static void DebugFrameTime()
+{
+	static const char *ft = getenv("HK_FRAMETIME");
+	static int frame;
+	static int64_t start;
+	if (!ft) return;
+	int first = getenv("HK_SHOT_FRAME") ? atoi(getenv("HK_SHOT_FRAME")) : 120;
+	int n = atoi(ft) > 0 ? atoi(ft) : 300;
+	frame++;
+	// the real clock: HKPerfCounter follows HK_FIXEDCLOCK
+	if (frame == first) start = (int64_t)SDL_GetPerformanceCounter();
+	if (frame == first + n)
+		fprintf(stderr, "frame ms: %.3f (%d frames)\n",
+			(double)((int64_t)SDL_GetPerformanceCounter() - start) * 1000 / (double)SDL_GetPerformanceFrequency() / n, n);
+}
+
 void HKSwapWindow()
 {
 	DebugScreenshot();
+	DebugFrameTime();
 	HKFrameDrawn();
-	RFlush();   // the end of the frame may still be batched
-	if (window) SDL_GL_SwapWindow(window);
+	if (window) RPresent();
 }
 
 // The window is created high-DPI aware: its size (and the mouse) is in points, the
-// GL drawable in pixels (2x on Retina). Everything draws in the viewport, so the
+// drawable in pixels (2x on Retina). Everything draws in the viewport, so the
 // layout stays the same and only gets sharper.
 static float pixelscale = 1;
 
 static void UpdateViewport()
 {
 	int w, h, ww, wh;
-	SDL_GL_GetDrawableSize(window, &w, &h);
+	RDrawableSize(&w, &h);
 	SDL_GetWindowSize(window, &ww, &wh);
 	pixelscale = ww > 0 && w > ww ? (float)w / ww : 1;
 	RViewport(0, 0, w, h);
@@ -116,7 +134,7 @@ int HKGetFullscreen()
 void HKSetVSync(int on)
 {
 	vsync = on != 0;
-	SDL_GL_SetSwapInterval(vsync);
+	RSetSwapInterval(vsync);
 }
 
 int HKGetVSync()
@@ -481,37 +499,26 @@ int main(int argc, char **argv)
 	// Debug aid: HK_SEED=N makes the world (land, sky, spawn) the same every run
 	srand(getenv("HK_SEED") ? (unsigned)atoi(getenv("HK_SEED")) : (unsigned)time(NULL));
 
-	// Legacy (compatibility) profile: the renderer uses fixed-function GL.
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
-	SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-	SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
 	window = SDL_CreateWindow("Edifice", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-		width, height, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI |
+		width, height, RWindowFlags() | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI |
 		(fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0));
 	if (!window)
 	{
 		fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
 		return 1;
 	}
-	glcontext = SDL_GL_CreateContext(window);
-	if (!glcontext)
-	{
-		fprintf(stderr, "SDL_GL_CreateContext failed: %s\n", SDL_GetError());
-		return 1;
-	}
-	SDL_GL_MakeCurrent(window, glcontext);
+	if (!RCreateContext(window)) return 1;
 	RInit();
 	// HK_SHOT captures: no vsync, whose swap waits forever while the display sleeps (macOS)
-	if (getenv("HK_SHOT")) vsync = 0;
-	SDL_GL_SetSwapInterval(vsync);
+	if (getenv("HK_SHOT") || getenv("HK_FRAMETIME")) vsync = 0;
+	RSetSwapInterval(vsync);
 	UpdateViewport();
 	SDL_StartTextInput();
 
 	InitConsole();
 	{
 		char version[100];
-		snprintf(version, sizeof(version), "Edifice %s (protocol %d)", EDIFICE_VERSION_STRING, EDIFICE_PROTOCOL_VERSION);
+		snprintf(version, sizeof(version), "Edifice %s (protocol %d, %s)", EDIFICE_VERSION_STRING, EDIFICE_PROTOCOL_VERSION, RBackendName());
 		ConsoleDisplayText(version);
 	}
 
@@ -644,6 +651,10 @@ int main(int argc, char **argv)
 		consolevisible = strcmp(c, "notify") != 0;
 	}
 
+	// Debug aid: HK_PLAY=1 spawns as soon as the spawn screen opens, as its Play button
+	// does (in-game captures without the panel, M13)
+	int autoplay = getenv("HK_PLAY") != 0;
+
 	DWORD nexttimertick = 0;
 	while (!quitrequested)
 	{
@@ -651,6 +662,11 @@ int main(int argc, char **argv)
 		while (SDL_PollEvent(&ev))
 			HandleEvent(ev);
 		if (quitrequested) break;
+		if (autoplay && IsSpawnScreenOpen())
+		{
+			autoplay = 0;
+			HandleKey(::controls.fire, 0);   // the game's keys, not main's control.ini
+		}
 		// HK_JOIN: joins the first server that answered, like a click on the join screen
 		if (autojoin && GetLocalPlayer()->playstate == 0 && JoinGameCount() > 0)
 		{
@@ -712,7 +728,7 @@ int main(int argc, char **argv)
 	VoiceShutdown();
 	UnInitSound();
 	TexShutdown();
-	SDL_GL_DeleteContext(glcontext);
+	RDestroyContext();
 	SDL_DestroyWindow(window);
 	SDL_Quit();
 	return 0;

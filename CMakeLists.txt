@@ -2,7 +2,8 @@ cmake_minimum_required(VERSION 3.16)
 project(Edifice VERSION 0.5.4 LANGUAGES C CXX)
 
 # Edifice (HugeKilla) - one build, one code path for every platform:
-#   SDL2 (window, input, audio) + legacy OpenGL on macOS, Linux and Windows.
+#   SDL2 (window, input, audio) + legacy OpenGL on macOS, Linux and Windows,
+#   or sokol_gfx (Metal, D3D11, GL 4.1 core) with HK_RENDER_SOKOL (roadmap M13).
 # SDL2 is downloaded and linked statically, so the game has no runtime
 # dependency besides the OS (set EDIFICE_SYSTEM_SDL2=ON to use an installed SDL2).
 # main() is SDL's on every platform (src/platform/platform_sdl.cpp); the original
@@ -121,7 +122,97 @@ if(EDIFICE_LOBBY)
   endif()
 endif()
 
-find_package(OpenGL REQUIRED)
+# ---- Renderer backend (roadmap M13) -------------------------------------------
+# Fixed-function OpenGL 2.1 (renderer_gl.cpp), or sokol_gfx (renderer_sokol.cpp,
+# src/third_party/sokol, zlib license) on the platform's API: Metal on macOS, D3D11 on
+# Windows, GL 4.1 core on Linux. HK_SOKOL_BACKEND=GLCORE also builds the Linux path
+# on macOS (to test it there).
+option(HK_RENDER_SOKOL "Draw with sokol_gfx (Metal, D3D11, GL 4.1 core) instead of fixed-function OpenGL" OFF)
+set(HK_SOKOL_BACKEND "" CACHE STRING "sokol_gfx backend: METAL, D3D11 or GLCORE (empty: the platform's)")
+if(HK_RENDER_SOKOL)
+  if(NOT HK_SOKOL_BACKEND)
+    if(APPLE)
+      set(HK_SOKOL_BACKEND METAL)
+    elseif(WIN32)
+      set(HK_SOKOL_BACKEND D3D11)
+    else()
+      set(HK_SOKOL_BACKEND GLCORE)
+    endif()
+  endif()
+  if(NOT HK_SOKOL_BACKEND MATCHES "^(METAL|D3D11|GLCORE)$")
+    message(FATAL_ERROR "HK_SOKOL_BACKEND must be METAL, D3D11 or GLCORE (not ${HK_SOKOL_BACKEND})")
+  endif()
+  if(HK_SOKOL_BACKEND STREQUAL "D3D11")
+    message(FATAL_ERROR "HK_RENDER_SOKOL: the D3D11 backend (Windows) isn't there yet")
+  endif()
+  if(HK_SOKOL_BACKEND STREQUAL "GLCORE")
+    find_package(OpenGL REQUIRED)
+  endif()
+  message(STATUS "Renderer: sokol_gfx ${HK_SOKOL_BACKEND}")
+
+  # The shaders (src/render/shaders/*.glsl, sokol-shdc's annotated GLSL) become a C
+  # header at build time with sokol-shdc, downloaded once for the host from the
+  # sokol-tools-bin repository at a pinned commit and checked against its SHA-256
+  # (HK_SOKOL_SHDC: an installed one instead, e.g. for an offline build).
+  set(HK_SOKOL_SHDC "" CACHE FILEPATH "sokol-shdc to use instead of downloading it")
+  set(HK_SHDC ${HK_SOKOL_SHDC})
+  if(NOT HK_SHDC)
+    set(HK_SHDC_COMMIT b975d5642093d62e76a1e088bdae945d6d8b8ff2)   # 2026-10-11, matches sokol_gfx.h
+    set(HK_SHDC_EXE sokol-shdc)
+    if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
+      set(HK_SHDC_DIR win32)
+      set(HK_SHDC_EXE sokol-shdc.exe)
+      set(HK_SHDC_SHA256 43d42c2e477bcc5012420f8d9ff641fedc41d552d165397fff4f2e60ba0d2ebb)
+    elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
+      set(HK_SHDC_DIR osx_arm64)
+      set(HK_SHDC_SHA256 2a807d62dffcc67a50a6ab51df57cde2fc8b23a3daf6207177d79e00fbd4086b)
+    elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
+      set(HK_SHDC_DIR osx)
+      set(HK_SHDC_SHA256 67e5c841a4ca58488e6592560dd8795c7b232a8805d2350ca346028541716252)
+    elseif(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
+      set(HK_SHDC_DIR linux_arm64)
+      set(HK_SHDC_SHA256 c31155b7d340cd561b6fac8d8580c2377abd9140b25d7403c085cb1e700cea14)
+    else()
+      set(HK_SHDC_DIR linux)
+      set(HK_SHDC_SHA256 f227db5b282dcaa8085796ba83cda217d3114cf34913ca6ba4b0103f25ccc779)
+    endif()
+    set(HK_SHDC ${CMAKE_CURRENT_BINARY_DIR}/sokol-shdc/${HK_SHDC_EXE})
+    if(NOT EXISTS ${HK_SHDC})
+      set(dl ${CMAKE_CURRENT_BINARY_DIR}/sokol-shdc-download/${HK_SHDC_EXE})
+      file(DOWNLOAD https://raw.githubusercontent.com/floooh/sokol-tools-bin/${HK_SHDC_COMMIT}/bin/${HK_SHDC_DIR}/${HK_SHDC_EXE}
+        ${dl} EXPECTED_HASH SHA256=${HK_SHDC_SHA256} STATUS dlstatus)
+      list(GET dlstatus 0 dlcode)
+      if(NOT dlcode EQUAL 0)
+        message(FATAL_ERROR "sokol-shdc download failed: ${dlstatus} (set HK_SOKOL_SHDC to a local copy)")
+      endif()
+      # a download isn't executable
+      file(COPY ${dl} DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/sokol-shdc
+        FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+      file(REMOVE_RECURSE ${CMAKE_CURRENT_BINARY_DIR}/sokol-shdc-download)
+    endif()
+  endif()
+  set(HK_SHADER_DIR ${CMAKE_CURRENT_BINARY_DIR}/shaders)
+  if(MSVC)
+    set(HK_SHDC_ERRFMT msvc)   # errors that Visual Studio links to the line
+  else()
+    set(HK_SHDC_ERRFMT gcc)
+  endif()
+  # Metal and HLSL as source (compiled when the game starts: no Xcode or Windows tools
+  # needed here), GLSL 4.10 and the web's GLSL ES 3.00 and WGSL (M14) too
+  add_custom_command(OUTPUT ${HK_SHADER_DIR}/edifice.glsl.h
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${HK_SHADER_DIR}
+    COMMAND ${HK_SHDC} --input ${CMAKE_CURRENT_SOURCE_DIR}/src/render/shaders/edifice.glsl
+            --output ${HK_SHADER_DIR}/edifice.glsl.h --slang glsl410:glsl300es:hlsl5:metal_macos:wgsl
+            --ifdef --no-log-cmdline --errfmt ${HK_SHDC_ERRFMT}
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/render/shaders/edifice.glsl ${HK_SHDC}
+    COMMENT "sokol-shdc: src/render/shaders/edifice.glsl"
+    VERBATIM)
+  set(HK_RENDER_SOURCES src/render/renderer_sokol.cpp src/render/texture_sokol.cpp
+    src/render/sokol_native.cpp src/render/sokol_gfx_impl.cpp ${HK_SHADER_DIR}/edifice.glsl.h)
+else()
+  find_package(OpenGL REQUIRED)
+  set(HK_RENDER_SOURCES src/render/renderer_gl.cpp src/render/texture_gl.cpp src/render/rcontext_gl.cpp)
+endif()
 
 # ---- Sources -----------------------------------------------------------------
 set(SRC ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -131,9 +222,8 @@ set(SOURCES
   src/render/ase.cpp
   src/render/redrawing.cpp
   src/render/textures.cpp
-  src/render/texture_gl.cpp
   src/render/renderer.cpp
-  src/render/renderer_gl.cpp
+  ${HK_RENDER_SOURCES}
   src/render/image.cpp
   src/game/cfgfile.cpp
   src/game/GamePlay.cpp
@@ -258,20 +348,47 @@ else()
   endif()
 endif()
 
-target_link_libraries(Edifice PRIVATE ${HK_SDL_LIBS} Opus::opus OpenGL::GL)
+target_link_libraries(Edifice PRIVATE ${HK_SDL_LIBS} Opus::opus)
 if(HK_CURL_LIB)
   target_link_libraries(Edifice PRIVATE ${HK_CURL_LIB})
   target_compile_definitions(Edifice PRIVATE EDIFICE_LOBBY_CURL)
 endif()
-if(APPLE)
-  target_link_libraries(Edifice PRIVATE "-framework OpenGL")
-elseif(WIN32)
-  target_link_libraries(Edifice PRIVATE glu32 ws2_32 winmm)
-else()
-  if(TARGET OpenGL::GLU)
-    target_link_libraries(Edifice PRIVATE OpenGL::GLU)
+if(WIN32)
+  target_link_libraries(Edifice PRIVATE ws2_32 winmm)
+endif()
+if(HK_RENDER_SOKOL)
+  target_include_directories(Edifice PRIVATE ${SRC}/third_party/sokol ${HK_SHADER_DIR})
+  target_compile_definitions(Edifice PRIVATE SOKOL_${HK_SOKOL_BACKEND} HK_RENDER_SOKOL)
+  if(APPLE)
+    # sokol_gfx's Metal backend is Objective-C; ARC, as its samples
+    set_source_files_properties(src/render/sokol_native.cpp src/render/sokol_gfx_impl.cpp
+      PROPERTIES COMPILE_OPTIONS "-xobjective-c++;-fobjc-arc")
+    target_link_libraries(Edifice PRIVATE "-framework Foundation" "-framework QuartzCore")
+  endif()
+  # third-party code: its warnings stay warnings (EDIFICE_WERROR, below)
+  set_property(SOURCE src/render/sokol_gfx_impl.cpp APPEND PROPERTY COMPILE_OPTIONS
+    $<IF:$<CXX_COMPILER_ID:MSVC>,/WX-,-Wno-error>)
+  if(HK_SOKOL_BACKEND STREQUAL "METAL")
+    target_link_libraries(Edifice PRIVATE "-framework Metal")
+  elseif(HK_SOKOL_BACKEND STREQUAL "D3D11")
+    target_link_libraries(Edifice PRIVATE d3d11 dxgi)
+  elseif(APPLE)
+    target_link_libraries(Edifice PRIVATE "-framework OpenGL")
   else()
-    message(FATAL_ERROR "GLU not found (Debian/Ubuntu: sudo apt install libglu1-mesa-dev)")
+    target_link_libraries(Edifice PRIVATE OpenGL::GL)
+  endif()
+else()
+  target_link_libraries(Edifice PRIVATE OpenGL::GL)
+  if(APPLE)
+    target_link_libraries(Edifice PRIVATE "-framework OpenGL")
+  elseif(WIN32)
+    target_link_libraries(Edifice PRIVATE glu32)
+  else()
+    if(TARGET OpenGL::GLU)
+      target_link_libraries(Edifice PRIVATE OpenGL::GLU)
+    else()
+      message(FATAL_ERROR "GLU not found (Debian/Ubuntu: sudo apt install libglu1-mesa-dev)")
+    endif()
   endif()
 endif()
 
