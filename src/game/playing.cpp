@@ -350,7 +350,11 @@ void TickObjects(float sf)
 			}
 			if(object[i].type==4)
 			{
+				float prevy=object[i].pos.y;
 				object[i].pos+=object[i].vel*mysf;
+				//into the water (M13.5): a splash where it went in
+				if(fxprefs.impacts&&prevy>=WATERHEIGHT&&object[i].pos.y<WATERHEIGHT&&GetLandSmooth(object[i].pos.x,object[i].pos.z)<WATERHEIGHT)
+					FxWaterSplash(object[i].pos,2);
 				object[i].vel.y-=sv.gravity*mysf;
 				if(object[i].pos.y<GetHeight(object[i].pos)) 
 				{
@@ -417,6 +421,15 @@ void TickObjects(float sf)
 				if(object[i].pos.y<GetHeight(object[i].pos)) 
 				{
 					i2=0;
+					//dust and grains (M13.5), or the original brown specks
+					if(fxprefs.impacts)
+					{
+						Vector b=object[i].pos/BLOCKSIZE;
+						int onblock=object[i].pos.y>GetLandSmooth(object[i].pos.x,object[i].pos.z)+.05f&&
+							GetBlock((int)b.x,(int)b.y,(int)b.z)->type;
+						FxBulletImpact(object[i].pos,Normalize(object[i].vel),onblock);
+					}
+					else
 					for(int i3=0;i3<20;i3++)
 					{
 						for(;i2<MAXPARTICLES;i2++)
@@ -439,6 +452,16 @@ void TickObjects(float sf)
 				Vector prev=object[i].pos;
 				object[i].pos+=Normalize(object[i].vel)*20*mysf;
 				AcBulletTick(&object[i],prev);   //server: the players it hits (M11)
+				//the water (M13.5): a splash where it goes in, then a wake of bubbles
+				//(the bullet itself keeps its speed: what it hits is the game's)
+				if(fxprefs.impacts&&object[i].type&&object[i].pos.y<WATERHEIGHT)
+				{
+					Vector &now=object[i].pos;
+					if(prev.y>=WATERHEIGHT&&GetLandSmooth(now.x,now.z)<WATERHEIGHT)
+						FxWaterSplash(prev+(now-prev)*((prev.y-WATERHEIGHT)/(prev.y-now.y)),1);
+					else
+						FxBulletWake(prev,now);
+				}
 				if((GetPlayer(object[i].pnum)->team!=GetLocalPlayer()->team)||GetPlayer(object[i].pnum)->team==0)
 				if(object[i].pnum!=GetLocalNum())
 				{
