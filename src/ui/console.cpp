@@ -75,6 +75,8 @@ static void SetLineKind()
 
 void ConsoleDisplayText(char *text)
 {
+	static int log=getenv("HK_CONSOLE_LOG")!=0;   //debug aid: the console on stderr (tests)
+	if(log) fprintf(stderr,"console: %s\n",text);
 	int len=strlen(text);
 	char *curtext=text;
 	for(int i=0;i<len;i++)

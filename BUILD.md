@@ -52,7 +52,14 @@ Avec les presets CMake : `cmake --preset macos-release && cmake --build --preset
   - `python3 tests/net_voice.py` : trois clients ; la voix n'est relayée qu'au joueur proche (y compris de l'autre côté du bord du monde), sous le numéro de l'émetteur, et jamais si le message est malformé ;
   - `python3 tests/net_map.py --write /tmp/test.map`, puis `HK_AUTOSTART=1 HK_MAPFILE=/tmp/test.map <binaire> &` et `python3 tests/net_map.py /tmp/test.map` : un client qui rejoint un serveur lancé avec une carte reçoit son relief, son ciel et tous ses blocs.
   - `tests/run_netplay_tests.sh <binaire>` lance les six, un serveur neuf par test (sous Linux avec Xvfb si aucun écran) ; la CI le fait à chaque push contre un build AddressSanitizer, et une release n'est publiée que s'ils passent.
-- Partie à deux sur une machine : `HK_AUTOSTART=1 <binaire> &` puis `HK_JOIN=127.0.0.1 <binaire>` (le second rejoint le premier serveur qui répond).
+- Partie à deux sur une machine : `HK_AUTOSTART=1 <binaire> &` puis `HK_JOIN=127.0.0.1 <binaire>` (le second rejoint le premier serveur qui répond). `HK_CONSOLE_LOG=1` recopie la console sur stderr.
+
+## GameNetworkingSockets (expérimental, M7)
+
+Build avec vcpkg : `cmake -S . -B build/gns -DEDIFICE_GNS=ON -DVCPKG_MANIFEST_FEATURES=gns -DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake` (Windows : `-DVCPKG_TARGET_TRIPLET=x64-windows -A x64`, tout le jeu passe alors au runtime C++ partagé `/MD`). Sans l'option, rien ne change, sur le fil non plus.
+
+- `transport=gns` dans `net.ini` (ou `HK_TRANSPORT=gns`) : les parties par IP directe passent par une connexion GameNetworkingSockets chiffrée (`src/net/gnslink.cpp`, choix des liens dans `src/net/netlink.cpp`). L'hôte écoute en plus sur `gnsport` (défaut : `datasendport`, 27021) ; un client se connecte au `gnsport` du serveur qu'il interroge par IP. La recherche LAN et les pairs en UDP simple restent en UDP : un serveur en mode gns accepte aussi les clients UDP. Défaut : `transport=udp`.
+- `tests/run_gns_netplay_test.sh build/gns/Edifice build/gns/gns_netplay_test` : deux clients C++ (`tests/gns_netplay_test.cpp`, `Sock` sur `GnsLink`) rejoignent un serveur en mode gns, reçoivent LANDINFO, jouent et parlent près de l'hôte ; puis une deuxième instance du jeu le rejoint (`HK_JOIN`) ; puis les tests UDP (`run_netplay_tests.sh`) contre des serveurs en mode gns. Lancé par le job CI `gns` sous Linux.
 
 Format réseau (protocole 5) : aucun struct n'est copié tel quel sur le fil ; chaque message a ses fonctions d'écriture et de lecture explicites (`Sync*` dans `src/net/netmsg.h` et `landwire.h`, `WriteSimple`/`ReadSimple` dans `src/net/sock.cpp`, primitives dans `src/net/wire.h`). Changer un de ces formats impose d'incrémenter `EDIFICE_PROTOCOL_VERSION` (`src/net/version.h`).
 
