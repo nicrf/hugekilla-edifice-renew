@@ -21,6 +21,10 @@
 #include "voice.h"
 #include <SDL.h>
 #include <time.h>   //time(), the seed of rand()
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#include <emscripten/html5.h>
+#endif
 
 int lockedcursor;
 Vector mousepos;
@@ -405,6 +409,12 @@ static void InitUserDir()
 	// Debug aid: HK_USERDIR=<folder/> keeps test runs away from the real settings
 	if (const char *dir = getenv("HK_USERDIR"))
 		snprintf(userdir, sizeof(userdir), "%s", dir);
+#ifdef __EMSCRIPTEN__
+	// web: SDL's pref path is in memory; /user is the IndexedDB folder that
+	// web/pre.js mounts and loads before main()
+	else if (HKFileExists("/user"))
+		snprintf(userdir, sizeof(userdir), "/user/");
+#endif
 	else
 	{
 		char *pref = SDL_GetPrefPath("", "Edifice");
@@ -469,6 +479,150 @@ static void EnterDataDir(int argc, char **argv)
 		fprintf(stderr, "Edifice data folder not found; pass its path as the first argument.\n");
 }
 
+static void Shutdown()
+{
+	CloseSocks();
+	VoiceShutdown();
+	UnInitSound();
+	TexShutdown();
+	RDestroyContext();
+	SDL_DestroyWindow(window);
+	SDL_Quit();
+}
+
+#ifdef __EMSCRIPTEN__
+// Web build (roadmap M14). What the game writes in the user folder (/user, in
+// IndexedDB) is saved back at most once a second: FS.syncfs is asynchronous.
+static int syncing, syncedwrites;
+static uint32_t lastsync;
+
+extern "C" EMSCRIPTEN_KEEPALIVE void HKWebSynced()
+{
+	syncing = 0;
+}
+
+// for tests/web_smoke.py: 0 in the menu, 11 on the spawn screen (or dead), 10 playing
+extern "C" EMSCRIPTEN_KEEPALIVE int HKWebPlayState()
+{
+	return GetLocalPlayer()->playstate;
+}
+
+static void WebFrame()
+{
+	// Esc makes the browser leave pointer lock before the game sees the key: back to
+	// the menu then, as Esc does natively (polled: SDL owns the lock callbacks)
+	static int waslocked;
+	EmscriptenPointerlockChangeEvent pl;
+	int locked = emscripten_get_pointerlock_status(&pl) == EMSCRIPTEN_RESULT_SUCCESS && pl.isActive;
+	if (waslocked && !locked && lockedcursor == 1)
+		LockCursor(0);
+	waslocked = locked;
+
+	int writes = HKFilesWritten();
+	if (userdir[0] && writes != syncedwrites && !syncing && HKTicks() - lastsync >= 1000)
+	{
+		syncedwrites = writes;
+		syncing = 1;
+		lastsync = HKTicks();
+		EM_ASM(FS.syncfs(false, function(err) {
+			if (err) console.warn("Edifice: saving the settings failed", err);
+			Module._HKWebSynced();
+		}););
+	}
+
+	if (quitrequested)
+	{
+		emscripten_cancel_main_loop();
+		Shutdown();
+		EM_ASM(if (Module.onQuit) Module.onQuit(););
+	}
+}
+#endif
+
+// One pass of the main loop: events, game, network, drawing. Native: main() calls
+// it until the player quits; web: the browser calls it once per animation frame
+// (emscripten_set_main_loop), as a page can't block in a loop of its own.
+static int autojoin;            // HK_JOIN: joins the first server that answers
+static int autoplay;            // HK_PLAY
+static DWORD nexttimertick;
+
+static void Frame()
+{
+	SDL_Event ev;
+	while (SDL_PollEvent(&ev))
+		HandleEvent(ev);
+#ifdef __EMSCRIPTEN__
+	WebFrame();
+#endif
+	if (quitrequested) return;
+	if (autoplay && IsSpawnScreenOpen())
+	{
+		autoplay = 0;
+		HandleKey(::controls.fire, 0);   // the game's keys, not main's control.ini
+	}
+	// HK_JOIN: joins the first server that answered, like a click on the join screen
+	if (autojoin && GetLocalPlayer()->playstate == 0 && JoinGameCount() > 0)
+	{
+		char reason[200];
+		autojoin = 0;
+		if (!JoinNetConnect(0, reason, sizeof(reason)))
+			fprintf(stderr, "HK_JOIN: %s\n", reason);
+	}
+
+	curtime = HKPerfMillis();
+
+	// Was a 200ms WM_TIMER: scrolls the status lines.
+	if (curtime >= nexttimertick)
+	{
+		nexttimertick = curtime + 200;
+		timetotick--;
+		if (timetotick < 0)
+		{
+			timetotick = 5;
+			for (int i = 0; i < 9; i++)
+				strcpy(status[i], status[i + 1]);
+		}
+	}
+
+	int redraw = 0;
+#ifdef __EMSCRIPTEN__
+	// the browser pauses a hidden tab's animation frames itself, and a page can't
+	// sleep without freezing
+	redraw = 1;
+#else
+	Uint32 flags = SDL_GetWindowFlags(window);
+	if (((flags & SDL_WINDOW_INPUT_FOCUS) || getenv("HK_SHOT")) && !(flags & SDL_WINDOW_MINIMIZED))
+		redraw = 1;
+	else
+		HKSleep(4);
+#endif
+	// The build menu frees the mouse but keeps drawing the game behind it.
+	if (GetLocalPlayer()->playstate == 0 || (lockedcursor == 0 && !IsBuildMenuOpen()))
+	{
+		consoleoverlay = 0;   // the console log draws its own frames while loading
+		if (redraw)
+			DrawMenu();
+		if (GetLocalPlayer()->playstate != 0)
+			Playloop();
+		SockLoop();
+	}
+	else
+	{
+		if (GetLocalPlayer()->playstate == 1)
+		{
+			Playloop();
+			SockLoop();
+			if (redraw) DrawConsole();
+		}
+		else
+		{
+			Playloop();
+			SockLoop();
+			if (redraw) Redraw();
+		}
+	}
+}
+
 int main(int argc, char **argv)
 {
 	EnterDataDir(argc, argv);
@@ -494,6 +648,17 @@ int main(int argc, char **argv)
 		width = 1024;
 		height = 700;
 	}
+#ifdef __EMSCRIPTEN__
+	// web: the canvas fills the page (web/shell.html), and fullscreen needs a click
+	// (F6), never at startup
+	double cw, ch;
+	if (emscripten_get_element_css_size("#canvas", &cw, &ch) == EMSCRIPTEN_RESULT_SUCCESS && cw >= 1 && ch >= 1)
+	{
+		width = (int)cw;
+		height = (int)ch;
+	}
+	fullscreen = 0;
+#endif
 	graphicsprefs.stereoseparation = controls.GetValuef("stereoseparation");
 
 	// Debug aid: HK_SEED=N makes the world (land, sky, spawn) the same every run
@@ -581,7 +746,6 @@ int main(int argc, char **argv)
 	}
 	// Debug aid: HK_JOIN=<host> joins that server as soon as it answers (a game
 	// client against a local HK_AUTOSTART server).
-	int autojoin = 0;
 	if (const char *host = getenv("HK_JOIN"))
 	{
 		JoinNetOpen();
@@ -653,84 +817,17 @@ int main(int argc, char **argv)
 
 	// Debug aid: HK_PLAY=1 spawns as soon as the spawn screen opens, as its Play button
 	// does (in-game captures without the panel, M13)
-	int autoplay = getenv("HK_PLAY") != 0;
+	autoplay = getenv("HK_PLAY") != 0;
 
-	DWORD nexttimertick = 0;
+#ifdef __EMSCRIPTEN__
+	// the browser owns the loop: one Frame() per animation frame (vsync); main
+	// returns at once and the runtime stays alive
+	emscripten_set_main_loop(Frame, 0, 0);
+#else
 	while (!quitrequested)
-	{
-		SDL_Event ev;
-		while (SDL_PollEvent(&ev))
-			HandleEvent(ev);
-		if (quitrequested) break;
-		if (autoplay && IsSpawnScreenOpen())
-		{
-			autoplay = 0;
-			HandleKey(::controls.fire, 0);   // the game's keys, not main's control.ini
-		}
-		// HK_JOIN: joins the first server that answered, like a click on the join screen
-		if (autojoin && GetLocalPlayer()->playstate == 0 && JoinGameCount() > 0)
-		{
-			char reason[200];
-			autojoin = 0;
-			if (!JoinNetConnect(0, reason, sizeof(reason)))
-				fprintf(stderr, "HK_JOIN: %s\n", reason);
-		}
-
-		curtime = HKPerfMillis();
-
-		// Was a 200ms WM_TIMER: scrolls the status lines.
-		if (curtime >= nexttimertick)
-		{
-			nexttimertick = curtime + 200;
-			timetotick--;
-			if (timetotick < 0)
-			{
-				timetotick = 5;
-				for (int i = 0; i < 9; i++)
-					strcpy(status[i], status[i + 1]);
-			}
-		}
-
-		int redraw = 0;
-		Uint32 flags = SDL_GetWindowFlags(window);
-		if (((flags & SDL_WINDOW_INPUT_FOCUS) || getenv("HK_SHOT")) && !(flags & SDL_WINDOW_MINIMIZED))
-			redraw = 1;
-		else
-			HKSleep(4);
-		// The build menu frees the mouse but keeps drawing the game behind it.
-		if (GetLocalPlayer()->playstate == 0 || (lockedcursor == 0 && !IsBuildMenuOpen()))
-		{
-			consoleoverlay = 0;   // the console log draws its own frames while loading
-			if (redraw)
-				DrawMenu();
-			if (GetLocalPlayer()->playstate != 0)
-				Playloop();
-			SockLoop();
-		}
-		else
-		{
-			if (GetLocalPlayer()->playstate == 1)
-			{
-				Playloop();
-				SockLoop();
-				if (redraw) DrawConsole();
-			}
-			else
-			{
-				Playloop();
-				SockLoop();
-				if (redraw) Redraw();
-			}
-		}
-	}
-
-	CloseSocks();
-	VoiceShutdown();
-	UnInitSound();
-	TexShutdown();
-	RDestroyContext();
-	SDL_DestroyWindow(window);
-	SDL_Quit();
+		Frame();
+	Shutdown();
+#endif
 	return 0;
 }
 

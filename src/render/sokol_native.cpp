@@ -1,6 +1,7 @@
 //sokol_gfx's window side (rcontext.h, rsokol.h), one 3D API per platform: Metal on
 //macOS (compiled as Objective-C++ with ARC), D3D11 on Windows,
-//a GL 4.1 core context elsewhere (or anywhere with HK_SOKOL_BACKEND=GLCORE). Here is
+//a GL 4.1 core context elsewhere (or anywhere with HK_SOKOL_BACKEND=GLCORE), WebGL2
+//(GLES3) in the web build (Emscripten, roadmap M14). Here is
 //what sokol_gfx leaves to the application: the device, the window's swapchain and its
 //presentation, and reading an image back (HK_SHOT, screenshots, the sun's depth).
 
@@ -19,6 +20,8 @@
 #define GL_GLEXT_PROTOTYPES
 #include <GL/gl.h>
 #endif
+#elif defined(SOKOL_GLES3)
+#include <GLES3/gl3.h>
 #endif
 #include "rsokol.h"
 #include "rcontext.h"
@@ -453,13 +456,22 @@ static void NewFramePool()
 }
 
 //---- GL 4.1 core ----------------------------------------------------------------
-#elif defined(SOKOL_GLCORE)
+#elif defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
 
 static SDL_GLContext glcontext;
 static GLuint readfbo;
 
 unsigned RWindowFlags()
 {
+#if defined(SOKOL_GLES3)
+	//WebGL2 (sokol-shdc's glsl300es); no depth, the frame is drawn offscreen, and
+	//no alpha: the page would show through what the game leaves transparent
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION,3);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION,0);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,SDL_GL_CONTEXT_PROFILE_ES);
+	SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE,0);
+	SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE,0);
+#else
 	//4.1: what sokol-shdc's GLSL (glsl410) and macOS need; no depth here, the frame
 	//is drawn offscreen
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION,4);
@@ -467,6 +479,7 @@ unsigned RWindowFlags()
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,SDL_GL_CONTEXT_PROFILE_CORE);
 #ifdef __APPLE__
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS,SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG);
+#endif
 #endif
 	SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER,1);
 	SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE,0);
@@ -504,12 +517,20 @@ void RDrawableSize(int *w,int *h)
 void RSetSwapInterval(int on)
 {
 	vsync=on;
+#if !defined(SOKOL_GLES3)
+	//web: the browser's animation frames pace the game (SDL would make this the
+	//main loop's timing, before there is one)
 	SDL_GL_SetSwapInterval(on);
+#endif
 }
 
 const char *RBackendName()
 {
+#if defined(SOKOL_GLES3)
+	return "sokol_gfx WebGL2";
+#else
 	return "sokol_gfx GL 4.1 core";
+#endif
 }
 
 sg_environment RSokolEnvironment()
@@ -568,8 +589,14 @@ void RSokolReadColor(sg_image image,int x,int y,int w,int h,unsigned char *rgba)
 
 int RSokolReadDepth(sg_image image,int x,int y,float *depth)
 {
+#if defined(SOKOL_GLES3)
+	//WebGL2 reads no depth back: the sun keeps its last depth (1, never hidden)
+	(void)image;(void)x;(void)y;(void)depth;
+	return 0;
+#else
 	ReadGL(image,GL_DEPTH_ATTACHMENT,x,y,1,1,GL_DEPTH_COMPONENT,GL_FLOAT,depth);
 	return 1;
+#endif
 }
 
 static void NewFramePool()
@@ -577,7 +604,7 @@ static void NewFramePool()
 }
 
 #else
-#error "HK_RENDER_SOKOL: define SOKOL_METAL, SOKOL_D3D11 or SOKOL_GLCORE"
+#error "HK_RENDER_SOKOL: define SOKOL_METAL, SOKOL_D3D11, SOKOL_GLCORE or SOKOL_GLES3"
 #endif
 
 void RPresent()

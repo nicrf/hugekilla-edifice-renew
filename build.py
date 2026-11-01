@@ -2,12 +2,15 @@
 """Build Edifice (HugeKilla) on macOS, Linux or Windows.
 
     python3 build.py [--config Debug|Release] [--clean] [--run] [--package] [--test]
-                     [--no-gns] [--universal]
+                     [--no-gns] [--universal] [--web]
 
 Configures into build/<os>-<config>[-gns][-universal], builds, and optionally runs
 the game or its unit tests, or packages it into dist/Edifice-<version>-<os>.(zip|tar.gz).
 GameNetworkingSockets (P2P Internet games) is in by default, as in the releases,
 through vcpkg (VCPKG_ROOT, else fetched into build/vcpkg); --no-gns leaves it out.
+--web builds the web version instead (Emscripten: EMSDK, else build/emsdk at the
+version of release.yml) into build/web[-debug]: --run serves it on localhost,
+--package zips the site into dist/Edifice-<version>-web.zip.
 Python 3 stdlib only.
 """
 import argparse
@@ -134,6 +137,44 @@ def local_vcpkg():
     return root
 
 
+def local_emsdk():
+    """emsdk: EMSDK (set by emsdk_env), else build/emsdk at the version the CI uses
+    (EMSDK_VERSION of release.yml), fetched and installed the first time"""
+    if os.environ.get("EMSDK"):
+        return os.environ["EMSDK"]
+    wf = open(os.path.join(ROOT, ".github", "workflows", "release.yml")).read()
+    m = re.search(r"EMSDK_VERSION:\s*'?([0-9.]+)", wf)
+    if not m:
+        die("EMSDK_VERSION not found in release.yml", hint=False)
+    version = m.group(1)
+    root = os.path.join(ROOT, "build", "emsdk")
+    tool = os.path.join(root, "emsdk.bat" if OS == "windows" else "emsdk")
+    stamp = os.path.join(root, "upstream", "emscripten", "emscripten-version.txt")
+    if os.path.isfile(stamp) and version in open(stamp).read():
+        return root
+    if not os.path.isfile(tool):
+        if not shutil.which("git"):
+            die("the web build needs emsdk (git to fetch it, or EMSDK set by emsdk_env)", hint=False)
+        print("Fetching emsdk into %s" % root, flush=True)
+        if subprocess.call(["git", "clone", "-q", "--depth", "1",
+                            "https://github.com/emscripten-core/emsdk.git", root]) != 0:
+            die("could not fetch emsdk", hint=False)
+    for cmd in ([tool, "install", version], [tool, "activate", version]):
+        if subprocess.call(cmd, cwd=root) != 0:
+            die("emsdk %s failed (%s)" % (version, " ".join(cmd)), hint=False)
+    return root
+
+
+def web_env(emsdk):
+    """the environment emsdk_env would give: emcc and Emscripten's Node.js (which
+    runs the unit tests) first in PATH"""
+    env = dict(os.environ, EMSDK=emsdk)
+    paths = [os.path.join(emsdk, "upstream", "emscripten")]
+    paths += sorted(glob.glob(os.path.join(emsdk, "node", "*", "bin")))[-1:]
+    env["PATH"] = os.pathsep.join(paths + [env.get("PATH", "")])
+    return env
+
+
 def gns_args(args, extra):
     """CMake arguments of a GameNetworkingSockets build: vcpkg toolchain, the
     "gns" feature of vcpkg.json, and the triplet of the releases."""
@@ -185,7 +226,11 @@ def main():
                     help="render with the fixed-function OpenGL 2.1 backend instead (kept for one release, M13)")
     ap.add_argument("--universal", action="store_true",
                     help="macOS: one binary for Apple Silicon and Intel (macOS %s or later)" % MACOS_MIN)
+    ap.add_argument("--web", action="store_true",
+                    help="the web version (Emscripten, WebGL2) in build/web; --run serves it on localhost")
     args, game_args = ap.parse_known_args()
+    if args.web:
+        return main_web(args)
     if args.universal and OS != "macos":
         die("--universal is for macOS only", hint=False)
 
@@ -257,6 +302,83 @@ def main():
         launch(exe_dir, exe, game_args)
 
 
+def main_web(args):
+    """--web: Emscripten's toolchain, as the CMake preset "web" (solo and offline)"""
+    if args.universal or not args.sokol:
+        die("--web draws with sokol_gfx on WebGL2: no --universal nor --gl", hint=False)
+    cmake = find_cmake()
+    emsdk = local_emsdk()
+    env = web_env(emsdk)
+    toolchain = os.path.join(emsdk, "upstream", "emscripten", "cmake", "Modules", "Platform", "Emscripten.cmake")
+    if not os.path.isfile(toolchain):
+        die("no Emscripten in %s (EMSDK)" % emsdk, hint=False)
+    bdir = os.path.join(ROOT, "build", "web" + ("-debug" if args.config == "Debug" else ""))
+    if args.clean and os.path.isdir(bdir):
+        print("Removing " + bdir)
+        shutil.rmtree(bdir)
+    if not os.path.exists(os.path.join(bdir, "CMakeCache.txt")):
+        if not shutil.which("ninja"):
+            die("the web build needs ninja (brew install ninja, apt install ninja-build)", hint=False)
+        cfg = [cmake, "-S", ROOT, "-B", bdir, "-G", "Ninja", "-DCMAKE_TOOLCHAIN_FILE=" + toolchain,
+               "-DCMAKE_BUILD_TYPE=" + args.config]
+        cfg += shlex.split(os.environ.get("EDIFICE_CMAKE_ARGS", ""))
+        print("+ " + " ".join(cfg), flush=True)
+        if subprocess.call(cfg, env=env) != 0:
+            shutil.rmtree(bdir, ignore_errors=True)
+            die("CMake configure failed (see messages above)", hint=False)
+    run([cmake, "--build", bdir, "--parallel"], env=env)
+    print("Built: " + os.path.join(bdir, "index.html"))
+    if args.test:
+        run([find_ctest(cmake), "--test-dir", bdir, "--output-on-failure"], env=env)
+    if args.package:
+        package_web(bdir)
+    if args.run:
+        serve_web(bdir)
+
+
+WEB_FILES = ("index.html", "index.js", "index.wasm", "index.data")
+
+
+def package_web(bdir):
+    """dist/Edifice-<version>-web.zip: the site (the files GitHub Pages serves),
+    the docs and the licenses of the libraries in the binary"""
+    version = project_version()
+    dist = os.path.join(ROOT, "dist")
+    os.makedirs(dist, exist_ok=True)
+    base = "Edifice-%s-web" % version
+    out = os.path.join(dist, base + ".zip")
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        for f in WEB_FILES:
+            z.write(os.path.join(bdir, f), base + "/" + f)
+        for d in ("readme.txt", "license.txt", "lgpl-3.0.txt"):
+            if os.path.isfile(os.path.join(ROOT, d)):
+                z.write(os.path.join(ROOT, d), base + "/" + d)
+        for name, p in third_party_licenses(bdir):
+            z.write(p, base + "/licenses/%s.txt" % name)
+    print("Package: " + out)
+
+
+def serve_web(bdir):
+    """serves the site on http://127.0.0.1:8000/ (EDIFICE_WEB_PORT) until Ctrl+C:
+    a page can't load its .wasm and .data from file://"""
+    import functools
+    import http.server
+    import webbrowser
+
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        extensions_map = dict(http.server.SimpleHTTPRequestHandler.extensions_map,
+                              **{".wasm": "application/wasm"})
+    port = int(os.environ.get("EDIFICE_WEB_PORT", "8000"))
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", port), functools.partial(Handler, directory=bdir))
+    url = "http://127.0.0.1:%d/" % port
+    print("Serving %s on %s (Ctrl+C stops)" % (bdir, url), flush=True)
+    webbrowser.open(url)
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        pass
+
+
 def locate_binary(bdir, config):
     if OS == "macos":
         app = os.path.join(bdir, "Edifice.app")
@@ -303,6 +425,16 @@ def third_party_licenses(bdir):
         p = os.path.join(bdir, "_deps", name.lower() + "-src", f)
         if os.path.isfile(p):
             out.append((name, p))
+    # the web build: SDL2 is Emscripten's port, in its cache, and Emscripten's
+    # runtime (libc, libc++, JavaScript glue) is in the binary too
+    toolchain = cache_value(bdir, "CMAKE_TOOLCHAIN_FILE")
+    if toolchain.endswith("Emscripten.cmake"):
+        em = os.path.normpath(os.path.join(os.path.dirname(toolchain), "..", "..", ".."))
+        found = sorted(glob.glob(os.path.join(em, "cache", "ports", "sdl2", "SDL-*", "LICENSE.txt")))
+        if found:
+            out.append(("SDL2", found[-1]))
+        if os.path.isfile(os.path.join(em, "LICENSE")):
+            out.append(("emscripten", os.path.join(em, "LICENSE")))
     triplet = cache_value(bdir, "VCPKG_TARGET_TRIPLET")
     if triplet and cache_value(bdir, "EDIFICE_GNS").upper() in ("ON", "1", "TRUE"):
         share = os.path.join(bdir, "vcpkg_installed", triplet, "share")

@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Edifice</title>
+<style>
+	/* the game fills the page: SDL follows the canvas' CSS size (resizable window) */
+	html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+	body { color: #ccc; font: 15px/1.4 system-ui, sans-serif; }
+	#canvas { display: block; width: 100vw; height: 100vh; outline: none; }
+	#status { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+		text-align: center; padding: 16px; pointer-events: none; }
+	#status.hidden { display: none; }
+	#status a { color: #8cf; pointer-events: auto; }
+</style>
+</head>
+<body>
+<canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
+<div id="status">Loading Edifice&hellip;</div>
+<script>
+	var statusBox = document.getElementById('status');
+	function showStatus(html) {
+		statusBox.innerHTML = html;
+		statusBox.classList.toggle('hidden', !html);
+	}
+	var Module = {
+		canvas: document.getElementById('canvas'),
+		// "Downloading data... (1234/5678)" while data/ comes in, "" once running
+		setStatus: function (text) {
+			var m = /\((\d+)\/(\d+)\)/.exec(text || '');
+			showStatus(m ? 'Loading Edifice&hellip; ' + Math.floor(m[1] * 100 / m[2]) + '%' :
+				text ? text.replace(/&/g, '&amp;').replace(/</g, '&lt;') : '');
+		},
+		onQuit: function () {
+			showStatus('Edifice has quit. <a href="">Play again</a>');
+		},
+		onAbort: function () {
+			showStatus('Edifice stopped on an error (see the browser console). <a href="">Reload</a>');
+		}
+	};
+	if (!document.createElement('canvas').getContext('webgl2'))
+		showStatus('Edifice needs WebGL 2, which this browser does not offer.');
+
+	// browsers keep audio suspended until the player clicks or types (SDL's audio
+	// context is Module.SDL2.audioContext)
+	function resumeAudio() {
+		var ctx = Module.SDL2 && Module.SDL2.audioContext;
+		if (ctx && ctx.state === 'suspended') ctx.resume();
+	}
+	addEventListener('pointerdown', resumeAudio, true);
+	addEventListener('keydown', resumeAudio, true);
+	Module.canvas.addEventListener('pointerdown', function () { Module.canvas.focus(); });
+</script>
+{{{ SCRIPT }}}
+</body>
+</html>
