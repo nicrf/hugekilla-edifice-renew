@@ -18,11 +18,14 @@ extern DWORD curtime;
 
 #define MAXRECENT 5
 #define MAXLOCALLIST_UI 128     //MAXLOCALLIST in multiplay.cpp
-#define S .7f                   //text scale of the screen
-#define CW (.04f*S)             //character width
-#define ROWH .062f
-#define ROWTOP .40f
+#define ROWH .06f
+#define ROWTOP .5f              //top of the first row
 #define MAXROWS 13
+#define LISTX1 -.93f
+#define LISTX2 .93f
+#define HEADY1 .51f             //column headers (click to sort)
+#define HEADY2 .58f
+#define ROWRECT(r) LISTX1,ROWTOP-((r)+1)*ROWH,LISTX2,ROWTOP-(r)*ROWH
 
 enum { FOCUS_NONE, FOCUS_ADDRESS, FOCUS_NAME };   //FOCUS_ADDRESS: the game code on the Internet tab
 enum { SORT_FOUND, SORT_NAME, SORT_PLAYERS, SORT_PING };
@@ -54,7 +57,7 @@ static int joiningactive;
 static DWORD joiningsince,joininglastquery;
 
 //columns: x of each, header label, sort mode it sets
-static const float colx[6]={-.9f,-.35f,.17f,.36f,.61f,.79f};
+static const float colx[6]={-.9f,-.38f,.1f,.3f,.5f,.7f};
 static const char *colname[6]={"Name","Address","Ver.","Players","Mode","Ping"};
 static const int colsort[6]={SORT_NAME,SORT_FOUND,SORT_FOUND,SORT_PLAYERS,SORT_FOUND,SORT_PING};
 
@@ -85,49 +88,24 @@ static int Inside(float x1,float y1,float x2,float y2)
 	return mousepos.x>x1&&mousepos.x<x2&&mousepos.y>y1&&mousepos.y<y2;
 }
 
-static void Text(float x,float y,const char *text,float scale=S)
+//text in a column from x to x2, cut with "..." when too long
+static void Cell(float x,float y,float x2,const char *text)
 {
-	glPushMatrix();
-	glTranslatef(x,y,0);
-	glScalef(scale,scale,1);
-	DrawText(0,0,text);
-	glPopMatrix();
+	UITextFit(x,y,text,x2-x-.03f);
 }
 
-static void Rect(float x1,float y1,float x2,float y2,float r,float g,float b,float a)
-{
-	glDisable(GL_TEXTURE_2D);
-	glColor4f(r,g,b,a);
-	glBegin(GL_QUADS);
-	glVertex2f(x1,y1);
-	glVertex2f(x2,y1);
-	glVertex2f(x2,y2);
-	glVertex2f(x1,y2);
-	glEnd();
-	glEnable(GL_TEXTURE_2D);
-}
-
-//framed button; returns 1 when the mouse is over it
-static int Button(float x1,float y1,float x2,float y2,const char *label,int enabled,int strong=0)
-{
-	int over=enabled&&Inside(x1,y1,x2,y2);
-	Rect(x1,y1,x2,y2,1,1,1,over?.22f:.1f);
-	if(!enabled) glColor3f(.4f,.4f,.4f);
-	else if(strong) glColor3f(.6f,1,.6f);
-	else glColor3f(.9f,.9f,.9f);
-	Text((x1+x2)/2-strlen(label)*CW/2,(y1+y2)/2-.028f,label);
-	return over;
-}
-
-#define BTN_ADD -.02f,.6f,.2f,.68f
-#define BTN_REFRESH .26f,.6f,.56f,.68f
-#define BTN_BACK -.9f,-.86f,-.62f,-.76f
-#define BTN_JOIN .56f,-.86f,.9f,-.76f
-#define FIELD_ADDRESS -.62f,.6f,-.06f,.68f
-#define FIELD_NAME .42f,.73f,.9f,.81f
-#define CHECKBOX -.9f,-.7f,-.2f,-.62f
-#define TAB_LANBTN -.4f,.73f,-.14f,.81f
-#define TAB_INETBTN -.12f,.73f,.16f,.81f
+#define PANELY2 .9f
+#define TITLEH .13f
+#define BTN_ADD .2f,.63f,.44f,.72f
+#define BTN_REFRESH .66f,.63f,.9f,.72f
+#define BTN_BACK -.9f,-.87f,-.6f,-.76f
+#define BTN_JOIN .6f,-.87f,.9f,-.76f
+#define FIELD_ADDRESS -.68f,.63f,.16f,.72f
+#define FIELD_NAME .5f,.795f,.9f,.875f
+#define CHECKBOX -.9f,-.62f,-.3f,-.54f
+#define TAB_LANBTN -.36f,.79f,-.1f,.88f
+#define TAB_INETBTN -.08f,.79f,.18f,.88f
+#define STATUSBAR -.93f,-.5f,.93f,-.41f
 
 //---- recent servers (net.ini "recentservers", comma separated) ----
 
@@ -451,14 +429,13 @@ void JoinScreenClick(int clicks)
 	for(int c=0;c<6;c++)
 	{
 		float x2=c<5?colx[c+1]:.95f;
-		if(Inside(colx[c]-.01f,.46f,x2,.53f)) { sortmode=ColSort(c); return; }
+		if(Inside(colx[c]-.01f,HEADY1,x2,HEADY2)) { sortmode=ColSort(c); return; }
 	}
 	int order[MAXLOCALLIST_UI];
 	int n=Order(order);
 	for(int r=0;r<n&&r<MAXROWS;r++)
 	{
-		float y=ROWTOP-r*ROWH;
-		if(Inside(-.93f,y-.012f,.93f,y+ROWH-.012f))
+		if(Inside(ROWRECT(r)))
 		{
 			selected=order[r];
 			if(clicks>=2) Join();
@@ -544,27 +521,22 @@ void HandleJoinScreenText(const char *text)
 		AppendText(playername,sizeof(playername),text);
 }
 
-static void Field(float x1,float y1,float x2,float y2,const char *text,int focused)
-{
-	Rect(x1,y1,x2,y2,0,0,0,.6f);
-	Rect(x1,y1,x2,y1+.004f,1,1,focused?.5f:1,focused?.9f:.3f);
-	char shown[80];
-	int room=(int)((x2-x1-.03f)/CW)-1;
-	int len=strlen(text);
-	snprintf(shown,sizeof(shown),"%s%s",len>room?&text[len-room]:text,focused&&((curtime/500)&1)?"_":"");
-	glColor3f(1,1,focused?.6f:1);
-	Text(x1+.015f,(y1+y2)/2-.028f,shown);
-}
-
-//a tab next to the title
+//a tab of the title bar
 static void Tab(float x1,float y1,float x2,float y2,const char *label,int active)
 {
 	int over=!active&&Inside(x1,y1,x2,y2);
-	Rect(x1,y1,x2,y2,1,1,active?.5f:1,active?.2f:over?.16f:.07f);
-	if(active) Rect(x1,y1,x2,y1+.004f,1,1,.5f,.9f);
+	UIRect(x1,y1,x2,y2,1,1,active?.5f:1,active?.2f:over?.14f:.06f);
+	if(active) UIRect(x1,y1,x2,y1+.006f,1,1,.5f,.9f);
 	if(active) glColor3f(1,1,.5f);
 	else glColor3f(over?1:.7f,over?1:.7f,over?1:.7f);
-	Text((x1+x2)/2-strlen(label)*CW/2,(y1+y2)/2-.028f,label);
+	UIText((x1+x2-UITextWidth(label))/2,UITextY(y1,y2),label);
+}
+
+//status messages that are a step under way, not an error, end with "..."
+static int InProgress(const char *text)
+{
+	int len=strlen(text);
+	return len>=3&&!strcmp(&text[len-3],"...");
 }
 
 void DrawJoinScreen()
@@ -576,118 +548,145 @@ void DrawJoinScreen()
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
 	glEnable(GL_TEXTURE_2D);
-	Rect(-.95f,-.92f,.95f,.88f,0,0,0,.85f);
-
-	glColor3f(1,1,.5f);
-	Text(-.9f,.74f,"Join a game",1);
+	UIPanel(-.95f,-.92f,.95f,PANELY2,TITLEH,"Join a game");
 	Tab(TAB_LANBTN,"LAN / IP",tab==TAB_LAN);
 	Tab(TAB_INETBTN,"Internet",tab==TAB_INTERNET);
-	glColor3f(.7f,.7f,.7f);
-	Text(.2f,.75f,"Name:");
-	Field(FIELD_NAME,playername,focus==FOCUS_NAME);
+	glColor3f(.6f,.6f,.6f);
+	UIText(.47f-UITextWidth("Name"),UITextY(.795f,.875f),"Name");
+	UIField(FIELD_NAME,playername,focus==FOCUS_NAME,"Player");
 
 	glColor3f(.7f,.7f,.7f);
+	float labely=UITextY(.63f,.72f);
 	if(tab==TAB_INTERNET)
 	{
 		//private and friends games aren't listed: joined by the code their host gives
-		Text(-.9f,.62f,"Code:");
-		Field(FIELD_ADDRESS,code,focus==FOCUS_ADDRESS);
-		Button(BTN_ADD,"Join",code[0]!=0&&!lookingup);
-		Button(BTN_REFRESH,"Refresh",inetstate!=1);
+		UIText(-.9f,labely,"Code");
+		UIField(FIELD_ADDRESS,code,focus==FOCUS_ADDRESS,"Game code from the host (6 letters)");
+		UIButton(BTN_ADD,"Join",code[0]!=0&&!lookingup,1);
+		UIButton(BTN_REFRESH,"Refresh",inetstate!=1);
 	}
 	else
 	{
-		Text(-.9f,.62f,"Address:");
-		Field(FIELD_ADDRESS,address,focus==FOCUS_ADDRESS);
-		Button(BTN_ADD,"Add",address[0]!=0);
-		Button(BTN_REFRESH,"Refresh",1);
+		UIText(-.9f,labely,"Address");
+		UIField(FIELD_ADDRESS,address,focus==FOCUS_ADDRESS,"IP address or host name");
+		UIButton(BTN_ADD,"Add",address[0]!=0);
+		UIButton(BTN_REFRESH,"Refresh",1);
 	}
 
-	//column headers (click to sort)
+	//list: column headers (click to sort), then the rows
+	int order[MAXLOCALLIST_UI];
+	int n=Order(order);
+	UIRect(LISTX1,ROWTOP-MAXROWS*ROWH-.01f,LISTX2,HEADY2,0,0,0,.45f);
+	UIRect(LISTX1,HEADY1,LISTX2,HEADY2,1,1,1,.06f);
 	for(int c=0;c<6;c++)
 	{
 		int active=ColSort(c)!=SORT_FOUND&&ColSort(c)==sortmode;
-		float x2=c<5?colx[c+1]:.95f;
+		float x2=c<5?colx[c+1]:LISTX2;
 		if(active) glColor3f(1,1,.5f);
-		else if(ColSort(c)!=SORT_FOUND&&Inside(colx[c]-.01f,.46f,x2,.53f)) glColor3f(1,1,1);
+		else if(ColSort(c)!=SORT_FOUND&&Inside(colx[c]-.01f,HEADY1,x2,HEADY2)) glColor3f(1,1,1);
 		else glColor3f(.6f,.6f,.6f);
-		Text(colx[c],.48f,ColName(c));
+		float end=UIText(colx[c],UITextY(HEADY1,HEADY2,.045f),ColName(c),.045f);
+		if(active) UIRect(colx[c],HEADY1+.008f,end,HEADY1+.013f,1,1,.5f,.8f);
 	}
-	Rect(-.92f,.455f,.92f,.46f,1,1,1,.25f);
+	UIRect(LISTX1,HEADY1-.004f,LISTX2,HEADY1,1,1,1,.2f);
 
-	int order[MAXLOCALLIST_UI];
-	int n=Order(order);
 	char text[120];
 	if(!n)
 	{
+		const char *empty=GameCount()?"Only incompatible servers found (tick the box below to see them)":
+			tab==TAB_INTERNET?inetmsg:"Searching the LAN... (F5 or Refresh to search again)";
 		glColor3f(.55f,.55f,.55f);
-		if(GameCount()) Text(colx[0],ROWTOP,"(only incompatible servers found)");
-		else if(tab==TAB_INTERNET) Text(colx[0],ROWTOP,inetmsg);
-		else Text(colx[0],ROWTOP,"Searching... (F5 or Refresh to search again)");
+		UITextFit(colx[0],UITextY(ROWTOP-ROWH,ROWTOP),empty,LISTX2-colx[0]-.03f);
 	}
 	for(int r=0;r<n&&r<MAXROWS;r++)
 	{
 		JoinGame *g=GameAt(order[r]);
-		float y=ROWTOP-r*ROWH;
-		int hover=Inside(-.93f,y-.012f,.93f,y+ROWH-.012f);
-		if(order[r]==selected) Rect(-.93f,y-.012f,.93f,y+ROWH-.012f,1,1,.5f,.18f);
-		else if(hover) Rect(-.93f,y-.012f,.93f,y+ROWH-.012f,1,1,1,.07f);
+		float y1=ROWTOP-(r+1)*ROWH,y=UITextY(y1,y1+ROWH);
+		int hover=Inside(ROWRECT(r));
+		if(order[r]==selected)
+		{
+			UIRect(ROWRECT(r),1,1,.5f,.2f);
+			UIRect(LISTX1,y1,LISTX1+.008f,y1+ROWH,1,1,.5f,.9f);
+		}
+		else if(hover) UIRect(ROWRECT(r),1,1,1,.08f);
+		else if(r&1) UIRect(ROWRECT(r),1,1,1,.025f);
 		float dim=g->compatible?1:.45f;
 		glColor3f(dim,dim,dim);
-		strncpy(text,g->name,16);
-		text[16]=0;
-		Text(colx[0],y,text);
-		Text(colx[1],y,g->address);
-		Text(colx[2],y,g->version);
+		Cell(colx[0],y,colx[1],g->name);
+		glColor3f(dim*.8f,dim*.8f,dim*.8f);
+		Cell(colx[1],y,colx[2],g->address);
+		Cell(colx[2],y,colx[3],g->version);
+		glColor3f(dim,dim,dim);
 		if(g->players>=0) snprintf(text,sizeof(text),"%d/%d",g->players,g->maxplayers);
 		else strcpy(text,"?");
-		Text(colx[3],y,text);
-		Text(colx[4],y,g->players<0?"?":g->gamemode?"Build":"CTF");
-		if(g->compatible)
-		{
-			if(g->ping<80) glColor3f(.6f,1,.6f);
-			else if(g->ping<200) glColor3f(1,1,.5f);
-			else glColor3f(1,.55f,.45f);
-		}
+		Cell(colx[3],y,colx[4],text);
+		Cell(colx[4],y,colx[5],g->players<0?"?":g->gamemode?"Build":"CTF");
 		if(tab==TAB_INTERNET)
 		{
-			glColor3f(dim,dim,dim);
-			Text(colx[5],y,lobbygames[order[r]].id);
+			glColor3f(dim,dim,dim*.6f);
+			Cell(colx[5],y,LISTX2,lobbygames[order[r]].id);
 		}
 		else
 		{
-			snprintf(text,sizeof(text),"%d",g->ping);
-			Text(colx[5],y,text);
+			if(!g->compatible) glColor3f(dim,dim,dim);
+			else if(g->ping<80) glColor3f(.6f,1,.6f);
+			else if(g->ping<200) glColor3f(1,1,.5f);
+			else glColor3f(1,.55f,.45f);
+			snprintf(text,sizeof(text),"%d ms",g->ping);
+			Cell(colx[5],y,LISTX2,text);
 		}
 	}
+	if(n>MAXROWS)
+	{
+		snprintf(text,sizeof(text),"+%d more: sort the list or hide the incompatible ones",n-MAXROWS);
+		glColor3f(.5f,.5f,.5f);
+		UIText(colx[0],ROWTOP-MAXROWS*ROWH-.055f,text,.04f);
+	}
 
-	//status: last error, or why the selected server can't be joined
+	//status bar: the last message, why the selected server can't be joined, or a hint
 	JoinGame *sel=GameAt(selected);
 	const char *line=status;
 	char why[200];
+	int kind=line[0]?(InProgress(line)?1:2):0;   //0 hint, 1 under way, 2 error
 	if(!line[0]&&sel&&!sel->compatible)
 	{
 		snprintf(why,sizeof(why),"Can't join: %s",sel->reason);
 		line=why;
+		kind=2;
 	}
-	if(line[0])
+	else if(!line[0]&&sel)
 	{
-		glColor3f(1,.6f,.45f);
-		Text(-.9f,-.52f,line);
+		snprintf(why,sizeof(why),"%s  -  Enter or Join to play",sel->name);
+		line=why;
 	}
+	else if(!line[0])
+		line=tab==TAB_INTERNET?"Pick a public game, or type the code of a friend's game":
+			"Pick a server found on the LAN, or add one by its address";
+	if(kind==2) UIRect(STATUSBAR,.6f,.15f,.1f,.35f);
+	else if(kind==1) UIRect(STATUSBAR,.5f,.45f,.1f,.3f);
+	else UIRect(STATUSBAR,1,1,1,.04f);
+	if(kind==2) glColor3f(1,.7f,.55f);
+	else if(kind==1) glColor3f(1,1,.6f);
+	else glColor3f(.75f,.75f,.75f);
+	UITextFit(-.9f,UITextY(-.5f,-.41f),line,1.8f);
 
-	glColor3f(.85f,.85f,.85f);
-	snprintf(text,sizeof(text),"[%c] Show incompatible servers",showincompatible?'x':' ');
-	if(Inside(CHECKBOX)) glColor3f(1,1,1);
-	Text(-.9f,-.68f,text);
-	glColor3f(.5f,.5f,.5f);
+	//show incompatible servers: a check box
+	int overbox=Inside(CHECKBOX);
+	UIRect(-.9f,-.605f,-.86f,-.555f,1,1,1,overbox?.5f:.3f);
+	UIRect(-.895f,-.6f,-.865f,-.56f,0,0,0,1);
+	if(showincompatible) UIRect(-.888f,-.593f,-.872f,-.567f,1,1,.5f,1);
+	glColor3f(overbox?1:.8f,overbox?1:.8f,overbox?1:.8f);
+	UIText(-.83f,UITextY(-.62f,-.54f),"Show incompatible servers");
+	glColor3f(.45f,.45f,.45f);
 	snprintf(text,sizeof(text),"You: v%s (protocol %d)",EDIFICE_VERSION_STRING,EDIFICE_PROTOCOL_VERSION);
-	Text(.1f,-.68f,text);
+	UIText(.9f-UITextWidth(text),UITextY(-.62f,-.54f),text);
 
-	Button(BTN_BACK,"Back",1);
-	Button(BTN_JOIN,"Join",sel&&sel->compatible,1);
-	glColor3f(.5f,.5f,.5f);
-	Text(-.5f,-.82f,"Double-click a server to join");
+	UIButton(BTN_BACK,"Back",1);
+	UIButton(BTN_JOIN,"Join",sel&&sel->compatible,1);
+	const char *keys="Double-click or Enter: join    Tab: next field    F5: refresh    Esc: back";
+	glColor3f(.45f,.45f,.45f);
+	float w=UITextWidth(keys,.04f);
+	UITextFit(-w/2>-.55f?-w/2:-.55f,UITextY(-.87f,-.76f,.04f),keys,1.1f,.04f);
 
 	glPopAttrib();
 	glColor3f(1,1,1);
