@@ -154,6 +154,7 @@ set(SOURCES
   src/ui/buildmenu.cpp
   src/ui/chat.cpp
   src/ui/joinscreen.cpp
+  src/ui/spawnscreen.cpp
   src/audio/sound_sdl.cpp
   src/audio/voice.cpp
   src/platform/platform_sdl.cpp

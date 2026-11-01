@@ -216,7 +216,7 @@ static void KeyDown(int vk, int repeat)
 	// Debug aid: HK_KEYLOG=1 prints every key the game receives (Windows VK code)
 	if (getenv("HK_KEYLOG") && !repeat)
 		fprintf(stderr, "key down: vk %d ('%c')\n", vk, vk >= 32 && vk < 127 ? vk : '?');
-	if (OptionsHandleKey(vk) || ServerSetupHandleKey(vk) || BuildMenuHandleKey(vk))
+	if (OptionsHandleKey(vk) || ServerSetupHandleKey(vk) || BuildMenuHandleKey(vk) || SpawnScreenHandleKey(vk))
 		return;
 	if (vk == VK_ESCAPE && CloseCredits())
 		return;

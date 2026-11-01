@@ -37,6 +37,9 @@ void ServerSetupClick();
 int ServerSetupHandleKey(int vk);
 void ServerSetupHandleText(const char *text);
 void DrawServerSetup();
+int IsSpawnScreenOpen();
+int SpawnScreenHandleKey(int vk);
+void DrawSpawnScreen();
 #endif
 
 //menu screen text and widgets (ui.cpp): the HUD font (texture 300) packed by the measured
