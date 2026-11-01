@@ -1,6 +1,6 @@
 # Build d'Edifice (HugeKilla)
 
-Un seul code pour les trois systèmes : **SDL2** (fenêtre, entrées, audio) + **OpenGL 2.1** (profil legacy, fixed-function), ou **sokol_gfx** avec `--sokol` (Metal sous macOS, Direct3D 11 sous Windows, OpenGL 4.1 core sous Linux ; voir « Rendu sokol_gfx »).
+Un seul code pour les trois systèmes : **SDL2** (fenêtre, entrées, audio) + **sokol_gfx** (Metal sous macOS, Direct3D 11 sous Windows, OpenGL 4.1 core sous Linux ; voir « Rendu sokol_gfx »), ou l'**OpenGL 2.1** d'origine (profil legacy, fixed-function) avec `--gl`, gardé le temps d'une release.
 SDL2 est téléchargée et compilée **en statique** par CMake (`FetchContent`, SDL 2.32.10), de même que libopus 1.5.2 (codec du chat vocal, licence BSD) : les binaires ne dépendent que du système.
 
 | OS | Résultat |
@@ -37,7 +37,7 @@ python3 build.py --config Debug --run
 python3 build.py --package           # dist/Edifice-<version>-<os>.zip|.tar.gz
 ```
 
-Sous Windows : `py build.py ...`. Options : `--clean`, `--test` (tests unitaires après le build), `--generator <G>`, `EDIFICE_ARCH=Win32` pour du 32 bits, `--universal` (macOS : un binaire arm64 + x86_64, macOS 10.15 minimum, comme la release), `--no-gns` (sans GameNetworkingSockets, donc sans P2P : plus rapide à compiler, mais les parties Internet demandent des ports UDP ouverts ; voir ci-dessous), `--sokol` (rendu sokol_gfx, dans `build/<os>-<config>[-gns]-sokol`). `EDIFICE_CMAKE_ARGS="-D…"` ajoute des arguments CMake.
+Sous Windows : `py build.py ...`. Options : `--clean`, `--test` (tests unitaires après le build), `--generator <G>`, `EDIFICE_ARCH=Win32` pour du 32 bits, `--universal` (macOS : un binaire arm64 + x86_64, macOS 10.15 minimum, comme la release), `--no-gns` (sans GameNetworkingSockets, donc sans P2P : plus rapide à compiler, mais les parties Internet demandent des ports UDP ouverts ; voir ci-dessous), `--gl` (rendu OpenGL fixe au lieu de sokol_gfx, dans `build/<os>-<config>[-gns]-gl` ; un dossier de build configuré avant la bascule passe à sokol_gfx au build suivant). `EDIFICE_CMAKE_ARGS="-D…"` ajoute des arguments CMake.
 `-DEDIFICE_SYSTEM_SDL2=ON` (CMake) utilise une SDL2 installée au lieu de la compiler.
 La version vient de `project(Edifice VERSION …)` dans `CMakeLists.txt`.
 
@@ -76,7 +76,7 @@ Puis `ctest` (dans `build/<os>-debug-gns`), `tests/run_netplay_tests.sh <binaire
 
 ## Rendu sokol_gfx (M13)
 
-`python3 build.py --sokol` (CMake : `-DHK_RENDER_SOKOL=ON`) remplace le backend OpenGL fixe (`renderer_gl.cpp`) par [sokol_gfx](https://github.com/floooh/sokol) (`renderer_sokol.cpp`) sur l'API du système : **Metal** sous macOS, **Direct3D 11** sous Windows, **OpenGL 4.1 core** sous Linux. `-DHK_SOKOL_BACKEND=GLCORE` compile aussi le chemin Linux sous macOS, pour l'essayer. Le reste du jeu ne change pas : il dessine par `renderer.h` dans les deux cas.
+Par défaut depuis M13.4, comme dans les releases (CMake : `-DHK_RENDER_SOKOL=ON`, l'option ; `python3 build.py --gl` ou `-DHK_RENDER_SOKOL=OFF` revient au backend OpenGL fixe, `renderer_gl.cpp`, le temps d'une release : pour une machine sans OpenGL 4.1 ni Direct3D 11) : le rendu passe par [sokol_gfx](https://github.com/floooh/sokol) (`renderer_sokol.cpp`) sur l'API du système : **Metal** sous macOS, **Direct3D 11** sous Windows, **OpenGL 4.1 core** sous Linux. `-DHK_SOKOL_BACKEND=GLCORE` compile aussi le chemin Linux sous macOS, pour l'essayer. Le reste du jeu ne change pas : il dessine par `renderer.h` dans les deux cas.
 
 - `src/third_party/sokol/sokol_gfx.h` : en-tête unique, licence zlib (`LICENSE`), commit `170136d` de floooh/sokol (12 octobre 2026), sans modification ; compilé seul dans `sokol_gfx_impl.cpp` (en Objective-C++ avec ARC sous macOS), sans `-Werror`.
 - Shaders : `src/render/shaders/edifice.glsl`, en GLSL annoté de `sokol-shdc`, converti au build en `build/…/shaders/edifice.glsl.h` (Metal, HLSL 5, GLSL 4.10, et déjà GLSL ES 3.00 et WGSL pour le web, M14). CMake télécharge `sokol-shdc` une fois pour la machine qui compile, depuis floooh/sokol-tools-bin au commit `b975d56` (celui du 11 octobre 2026, accordé à `sokol_gfx.h`), et vérifie son SHA-256 ; `-DHK_SOKOL_SHDC=<chemin>` en utilise un déjà installé (build hors ligne). Metal et HLSL sont compilés au lancement du jeu (pas d'outils Xcode ou Windows nécessaires au build ; Windows fournit `d3dcompiler_47.dll`).

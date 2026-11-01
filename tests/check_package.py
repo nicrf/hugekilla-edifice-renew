@@ -3,8 +3,8 @@
     python3 tests/check_package.py dist/Edifice-<version>-<os>.(zip|tar.gz) [--gns]
 
 Unpacks it into a temporary folder, then
-  - contents: the game, data/, license texts (with --gns: licenses/ of
-    GameNetworkingSockets, protobuf, abseil, OpenSSL);
+  - contents: the game, data/, license texts (sokol_gfx's among them; with --gns:
+    licenses/ of GameNetworkingSockets, protobuf, abseil, OpenSSL);
   - dependencies: only the OS's own libraries or what the archive ships
     (macOS: otool -L, both architectures, signature; Linux: readelf, nothing of
     GameNetworkingSockets/protobuf/OpenSSL linked dynamically or exported;
@@ -79,7 +79,7 @@ def check_contents(top, gns):
     lic = os.path.join(top, "licenses")
     have = sorted(os.listdir(lic)) if os.path.isdir(lic) else []
     print("licenses/: " + ", ".join(have))
-    need = ["stb_image.txt", "SDL2.txt", "opus.txt"]
+    need = ["stb_image.txt", "SDL2.txt", "opus.txt", "sokol.txt"]   # the releases render with sokol_gfx
     if gns:
         need += ["gamenetworkingsockets.txt", "protobuf.txt", "abseil.txt", "openssl.txt"]
     for n in need:

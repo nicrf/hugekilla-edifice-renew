@@ -1,7 +1,7 @@
 # Edifice (HugeKilla) — Renew
 
 Remise en état du jeu **Edifice**, alias *HugeKilla* : un FPS multijoueur de 2000 en capture du drapeau, où l'on bâtit des forts bloc par bloc sur des terrains générés aléatoirement, avec jetpack et deltaplane.
-Le jeu tourne désormais sur **macOS, Linux et Windows**, grâce à SDL2 et OpenGL.
+Le jeu tourne désormais sur **macOS, Linux et Windows**, grâce à SDL2 et sokol_gfx (Metal, Direct3D 11, OpenGL 4.1).
 
 ## Hommage aux auteurs originaux
 
@@ -17,7 +17,7 @@ Merci, Nelson et John.
 
 ## Ce qui a changé
 
-- **Multiplateforme** : SDL2 (fenêtre, entrées, audio) compilée en statique, OpenGL 2.1 conservé. Plus aucune dépendance à installer pour jouer.
+- **Multiplateforme** : SDL2 (fenêtre, entrées, audio) compilée en statique, rendu par sokol_gfx sur l'API de chaque système (Metal sous macOS, Direct3D 11 sous Windows, OpenGL 4.1 sous Linux), au même rendu que l'OpenGL 2.1 d'origine, qui reste disponible le temps d'une release (`build.py --gl`). Plus aucune dépendance à installer pour jouer.
 - **Corrections** : plantages et erreurs 64 bits (textures des armes, portée des boucles VC6, casse des fichiers sous Linux…).
 - **Nouveaux écrans** : configuration du serveur (ciel, relief, décor, captures, temps, avec choix aléatoire), multijoueur en jeu (IP ou LAN), options (touches, vidéo, audio, nom du joueur), crédits.
 - **Builds** : un seul `build.py` pour les trois OS. Les releases sont générées automatiquement par GitHub Actions à chaque tag `v*`.
@@ -48,4 +48,4 @@ Détails, prérequis et options : [BUILD.md](BUILD.md).
 
 GNU LGPL v3 : voir [license.txt](license.txt) et [lgpl-3.0.txt](lgpl-3.0.txt), comme le projet d'origine. Le texte d'origine de l'auteur est dans [readme.txt](readme.txt).
 
-Bibliothèques incluses dans les archives (leurs licences sont dans le dossier `licenses/`) : [SDL2](https://libsdl.org) (zlib), [Opus](https://opus-codec.org) (BSD), [GameNetworkingSockets](https://github.com/ValveSoftware/GameNetworkingSockets) de Valve (BSD-3), [Protocol Buffers](https://protobuf.dev) (BSD-3), [Abseil](https://abseil.io) (Apache 2.0), [OpenSSL](https://www.openssl.org) (Apache 2.0), [stb_image](https://github.com/nothings/stb) (domaine public / MIT), [sokol_gfx](https://github.com/floooh/sokol) (zlib) avec le rendu sokol_gfx, et [curl](https://curl.se) sous Windows.
+Bibliothèques incluses dans les archives (leurs licences sont dans le dossier `licenses/`) : [SDL2](https://libsdl.org) (zlib), [Opus](https://opus-codec.org) (BSD), [GameNetworkingSockets](https://github.com/ValveSoftware/GameNetworkingSockets) de Valve (BSD-3), [Protocol Buffers](https://protobuf.dev) (BSD-3), [Abseil](https://abseil.io) (Apache 2.0), [OpenSSL](https://www.openssl.org) (Apache 2.0), [stb_image](https://github.com/nothings/stb) (domaine public / MIT), [sokol_gfx](https://github.com/floooh/sokol) (zlib), et [curl](https://curl.se) sous Windows.

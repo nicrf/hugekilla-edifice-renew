@@ -2,8 +2,8 @@ cmake_minimum_required(VERSION 3.16)
 project(Edifice VERSION 0.5.4 LANGUAGES C CXX)
 
 # Edifice (HugeKilla) - one build, one code path for every platform:
-#   SDL2 (window, input, audio) + legacy OpenGL on macOS, Linux and Windows,
-#   or sokol_gfx (Metal, D3D11, GL 4.1 core) with HK_RENDER_SOKOL (roadmap M13).
+#   SDL2 (window, input, audio) + sokol_gfx (Metal on macOS, D3D11 on Windows,
+#   GL 4.1 core on Linux; roadmap M13), or legacy OpenGL with HK_RENDER_SOKOL=OFF.
 # SDL2 is downloaded and linked statically, so the game has no runtime
 # dependency besides the OS (set EDIFICE_SYSTEM_SDL2=ON to use an installed SDL2).
 # main() is SDL's on every platform (src/platform/platform_sdl.cpp); the original
@@ -123,11 +123,12 @@ if(EDIFICE_LOBBY)
 endif()
 
 # ---- Renderer backend (roadmap M13) -------------------------------------------
-# Fixed-function OpenGL 2.1 (renderer_gl.cpp), or sokol_gfx (renderer_sokol.cpp,
-# src/third_party/sokol, zlib license) on the platform's API: Metal on macOS, D3D11 on
-# Windows, GL 4.1 core on Linux. HK_SOKOL_BACKEND=GLCORE also builds the Linux path
-# on macOS (to test it there).
-option(HK_RENDER_SOKOL "Draw with sokol_gfx (Metal, D3D11, GL 4.1 core) instead of fixed-function OpenGL" OFF)
+# sokol_gfx (renderer_sokol.cpp, src/third_party/sokol, zlib license) on the
+# platform's API: Metal on macOS, D3D11 on Windows, GL 4.1 core on Linux: the
+# default since M13.4. HK_RENDER_SOKOL=OFF: the fixed-function OpenGL 2.1 backend
+# (renderer_gl.cpp), kept for one release, for the machines without GL 4.1 or D3D11.
+# HK_SOKOL_BACKEND=GLCORE also builds the Linux path on macOS (to test it there).
+option(HK_RENDER_SOKOL "Draw with sokol_gfx (Metal, D3D11, GL 4.1 core) instead of fixed-function OpenGL" ON)
 set(HK_SOKOL_BACKEND "" CACHE STRING "sokol_gfx backend: METAL, D3D11 or GLCORE (empty: the platform's)")
 if(HK_RENDER_SOKOL)
   if(NOT HK_SOKOL_BACKEND)
