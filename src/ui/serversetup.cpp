@@ -1,6 +1,8 @@
 //server setup screen, shown by the main menu "Server" button before the server starts:
 //server name, game mode, capture and time limits, sky, terrain and scenery, each of the
-//world settings having a "Random" choice. Choices are kept in sv.ini and net.ini.
+//world settings having a "Random" choice, and the map: a new random land or one saved
+//with the console's savemap (maps/<name>.map in the user folder, which then gives the
+//sky, terrain, scenery and buildings). Choices are kept in sv.ini and net.ini.
 
 #ifndef HK_WIN32_NATIVE
 
@@ -17,6 +19,7 @@ extern float hkreliefscale;
 extern int hksceneryoverride;
 
 #define MAXSKIES 16
+#define MAXMAPS 64
 
 static int showsetup;
 static char servername[40];
@@ -26,6 +29,10 @@ static int terrainchoice=-1;  //-1 random, else index in terrains
 static int scenerychoice=-1;  //-1 random, else index in sceneries
 static int numskies;
 static char skynames[MAXSKIES][40];
+static int mapchoice=-1;      //-1 new random land, else index in mapnames
+static int nummaps;
+static char mapnames[MAXMAPS][MAXMAPNAME+1];
+static char setuperror[200];  //why the chosen map couldn't be loaded
 
 static const char *terrainnames[]={"Flat","Hills","Mountains"};
 static const float terrainscales[]={.35f,1,1.8f};
@@ -34,10 +41,11 @@ static const char *scenerynames[]={"None","Few","Normal","Lots"};
 static const int scenerycounts[]={0,4,10,25};
 #define NUMSCENERIES 4
 
-#define SETUPROWS 7
+#define SETUPROWS 8
+#define MAPROW 7
 static const char *rowlabels[SETUPROWS]=
 {
-	"Server name","Game mode","Captures to win","Time limit","Sky","Terrain","Scenery"
+	"Server name","Game mode","Captures to win","Time limit","Sky","Terrain","Scenery","Map"
 };
 
 #define PANELX1 -.95f
@@ -111,6 +119,9 @@ static void LoadSkyNames()
 void OpenServerSetup()
 {
 	LoadSkyNames();
+	nummaps=ListSavedMaps(mapnames,MAXMAPS);
+	mapchoice=-1;
+	setuperror[0]=0;
 	CfgFile net;
 	servername[0]=0;
 	if(net.Load(UserFile("net.ini")))
@@ -120,6 +131,9 @@ void OpenServerSetup()
 		if(net.GetValues("serversky")) skychoice=net.GetValuei("serversky");
 		if(net.GetValues("serverterrain")) terrainchoice=net.GetValuei("serverterrain");
 		if(net.GetValues("serverscenery")) scenerychoice=net.GetValuei("serverscenery");
+		if(const char *map=net.GetValues("servermap"))   //a name, "*" for a random land
+			for(int i=0;i<nummaps;i++)
+				if(!strcmp(mapnames[i],map)) mapchoice=i;
 	}
 	if(!servername[0]) strcpy(servername,"Edifice Server");
 	if(skychoice<-1||skychoice>=numskies) skychoice=-1;
@@ -145,9 +159,9 @@ static void SaveSetup()
 	sprintf(mode,"%d",sv.gamemode);
 	sprintf(captures,"%d",sv.capturelimit);
 	sprintf(timelimit,"%d",sv.timelimit);
-	const char *netkeys[4]={"servername","serversky","serverterrain","serverscenery"};
-	const char *netvalues[4]={servername,sky,terrain,scenery};
-	SetIniValues(UserFile("net.ini"),netkeys,netvalues,4);
+	const char *netkeys[5]={"servername","serversky","serverterrain","serverscenery","servermap"};
+	const char *netvalues[5]={servername,sky,terrain,scenery,mapchoice>=0?mapnames[mapchoice]:"*"};
+	SetIniValues(UserFile("net.ini"),netkeys,netvalues,5);
 	const char *svkeys[3]={"gamemode","capturelimit","timelimit"};
 	const char *svvalues[3]={mode,captures,timelimit};
 	SetIniValues(UserFile("sv.ini"),svkeys,svvalues,3);
@@ -166,6 +180,16 @@ static void StartConfiguredServer()
 	hksceneryoverride=scenerycounts[scenery];
 	showsetup=0;
 	editingname=0;
+	if(mapchoice>=0)
+	{
+		//the server starts with the map (hugekilla.cpp); clients get it, buildings
+		//included, like any land
+		char err[300];
+		if(LoadMapPath(MapPath(mapnames[mapchoice]),err,sizeof(err))) return;
+		snprintf(setuperror,sizeof(setuperror),"%s",err);
+		showsetup=1;   //stay here and say why
+		return;
+	}
 	StartServer();
 }
 
@@ -206,6 +230,7 @@ static void ChangeRow(int row,int dir)
 	case 4: Cycle(skychoice,numskies,dir); break;
 	case 5: Cycle(terrainchoice,NUMTERRAINS,dir); break;
 	case 6: Cycle(scenerychoice,NUMSCENERIES,dir); break;
+	case MAPROW: Cycle(mapchoice,nummaps,dir); setuperror[0]=0; break;
 	}
 }
 
@@ -220,7 +245,10 @@ static void RowText(int row,char *text)
 	case 4: sprintf(text,"< %s >",skychoice>=0?skynames[skychoice]:"Random"); break;
 	case 5: sprintf(text,"< %s >",terrainchoice>=0?terrainnames[terrainchoice]:"Random"); break;
 	case 6: sprintf(text,"< %s >",scenerychoice>=0?scenerynames[scenerychoice]:"Random"); break;
+	case MAPROW: sprintf(text,"< %s >",mapchoice>=0?mapnames[mapchoice]:"New random"); break;
 	}
+	//a saved map brings its own sky, terrain and scenery
+	if(mapchoice>=0&&row>=4&&row<=6) strcpy(text,"From the map");
 }
 
 //buttons at the bottom of the panel
@@ -302,6 +330,13 @@ void DrawServerSetup()
 	}
 	glColor3f(.6f,.6f,.6f);
 	DrawText(LABELX,-.6f,"Click a value to change it");
+	if(setuperror[0])
+	{
+		char line[46];
+		snprintf(line,sizeof(line),"%s",setuperror);   //what fits in the panel
+		glColor3f(1,.4f,.4f);
+		DrawText(LABELX,-.69f,line);
+	}
 
 	const struct { float x; const char *text; } buttons[3]=
 	{

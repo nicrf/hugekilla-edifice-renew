@@ -97,7 +97,7 @@ int Sock::Send(const void *data,int size)
 int Sock::Receive(void *data,SOCKADDR_IN *source,int maxsize)
 {
 	fromack=0;
-	if(!link) return 0;
+	if(!link&&!feeddata) return 0;
 	for(;;)
 	{
 		//messages left from the last complete reliable transfer
@@ -132,8 +132,20 @@ int Sock::Receive(void *data,SOCKADDR_IN *source,int maxsize)
 		}
 
 		//next datagram
-		int received=link->ReceiveFrom(&recvbuf,sizeof(recvbuf),source);
-		if(received==0) return 0;   //nothing waiting
+		int received;
+		if(feeddata)
+		{
+			//as recvfrom: a datagram larger than the buffer is cut; source is left as is
+			received=feedsize<(int)sizeof(recvbuf)?feedsize:(int)sizeof(recvbuf);
+			if(received>0) CopyMemory(&recvbuf,feeddata,received);
+			feeddata=0;
+		}
+		else
+		{
+			if(!link) return 0;
+			received=link->ReceiveFrom(&recvbuf,sizeof(recvbuf),source);
+			if(received==0) return 0;   //nothing waiting
+		}
 		packetsreceived++;
 		if(received<=0) return 0;
 		//once connected, only the peer's IP is listened to (any port: NATs may change it)
@@ -206,7 +218,7 @@ int Sock::Receive(void *data,SOCKADDR_IN *source,int maxsize)
 			buf ack;
 			ack.type=ACK;
 			memcpy(&ack.data[0],&recvbuf.data[4],4);   //id, part number
-			link->SendTo(&ack,1+4,&dest);
+			if(link) link->SendTo(&ack,1+4,&dest);
 			packetssent++;
 			WORD id=WireGetU16(&recvbuf.data[4]);
 			if(id!=(WORD)(lastreliableid+1))   //WORD: keeps working after 65535 transfers

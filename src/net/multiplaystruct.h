@@ -1,3 +1,5 @@
+#ifndef MULTIPLAYSTRUCTH
+#define MULTIPLAYSTRUCTH
 #include "sock.h"
 
 //main messages
@@ -47,7 +49,7 @@
 #define VERSIONMISMATCH 26   //server refused REQUESTENTER: msg = server protocol (version.h)
 
 //Decoded messages. None of these structs goes onto the wire as it is: each
-//message has explicit Write/Read functions (multiplay.cpp, src/net/wire.h).
+//message has explicit Write/Read functions (netmsg.h, src/net/wire.h).
 //REQUESTENTER and INFO are built byte by byte: type, uint8 n, name[n] (<=31,
 //<=99), NUL, version trailer (version.h).
 struct LandInfo
@@ -99,3 +101,5 @@ void HandleFireGun(FireGunDirection *firegun);
 void ReceiveKillMessage(int killed,int killer);
 void ReceiveChangeTeam(int player,int team);
 void ReceiveUpdateServerObject(UpdateServerObject *update);
+
+#endif

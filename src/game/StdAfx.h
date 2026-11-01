@@ -33,6 +33,9 @@
 
 // Local Header Files
 const char *UserFile(const char *name);	// per-user settings folder (platform_sdl.cpp)
+FILE *HKFileOpen(const char *path, const char *mode);	// fopen with a UTF-8 path, also on Windows
+int HKMakeDir(const char *path);	// 1 if the folder exists or was created
+int HKListDir(const char *dir, char (*names)[64], int max);	// file names in a folder (names < 64)
 #include "math.h"
 
 #include "cfgfile.h"

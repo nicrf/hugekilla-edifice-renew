@@ -76,12 +76,14 @@ set(SOURCES
   src/game/GamePlay.cpp
   src/game/hugekilla.cpp
   src/game/land.cpp
+  src/game/mapfile.cpp
   src/game/playing.cpp
   src/game/structures.cpp
   src/game/Vector.cpp
   src/net/multiplay.cpp
   src/net/sock.cpp
   src/net/udplink.cpp
+  src/net/version.cpp
   src/ui/console.cpp
   src/ui/ui.cpp
   src/ui/options.cpp
@@ -211,6 +213,13 @@ add_executable(voice_test tests/voice_test.cpp)
 target_include_directories(voice_test PRIVATE ${SRC}/net ${SRC}/audio)
 target_link_libraries(voice_test PRIVATE Opus::opus)
 add_test(NAME voice COMMAND voice_test)
+set(HK_TEST_INCLUDES ${SRC}/game ${SRC}/net ${SRC}/compat)
+if(NOT WIN32)
+  list(APPEND HK_TEST_INCLUDES ${SRC}/compat/include)   # "windows.h": DWORD...
+endif()
+add_executable(map_test tests/map_test.cpp src/game/mapfile.cpp)
+target_include_directories(map_test PRIVATE ${HK_TEST_INCLUDES})
+add_test(NAME map COMMAND map_test)
 
 # ---- GameNetworkingSockets (experimental, roadmap M7) --------------------------
 # Encrypted connections and P2P. Off by default: configure with the vcpkg
@@ -234,4 +243,74 @@ if(EDIFICE_GNS)
     set_property(TARGET gns_loopback_test PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
   endif()
   add_test(NAME gns_loopback COMMAND gns_loopback_test)
+endif()
+
+# ---- Fuzzing -----------------------------------------------------------------
+# libFuzzer harnesses of every parser of network or file input (tests/fuzz,
+# roadmap M6). Off by default; see BUILD.md. With clang's libFuzzer they are
+# real fuzzers (-fsanitize=fuzzer,address,undefined); otherwise (Apple clang,
+# GCC) plain programs that run their inputs once (tests/fuzz/fuzz_main.cpp),
+# with AddressSanitizer/UBSan when available. ctest runs each over its seeds.
+option(EDIFICE_FUZZ "Build the fuzzing harnesses of tests/fuzz" OFF)
+if(EDIFICE_FUZZ)
+  include(CheckCXXSourceCompiles)
+  set(HK_FUZZ_PROBE "#include <stddef.h>\n#include <stdint.h>\nextern \"C\" int LLVMFuzzerTestOneInput(const uint8_t *d, size_t n) { return n && d[0]; }\n")
+  set(CMAKE_REQUIRED_FLAGS "-fsanitize=fuzzer,address,undefined")
+  set(CMAKE_REQUIRED_LINK_OPTIONS "-fsanitize=fuzzer,address,undefined")
+  check_cxx_source_compiles("${HK_FUZZ_PROBE}" HK_HAVE_LIBFUZZER)
+  set(CMAKE_REQUIRED_FLAGS "-fsanitize=address,undefined")
+  set(CMAKE_REQUIRED_LINK_OPTIONS "-fsanitize=address,undefined")
+  check_cxx_source_compiles("${HK_FUZZ_PROBE}int main() { return LLVMFuzzerTestOneInput(0, 0); }\n" HK_HAVE_ASAN)
+  unset(CMAKE_REQUIRED_FLAGS)
+  unset(CMAKE_REQUIRED_LINK_OPTIONS)
+  if(HK_HAVE_LIBFUZZER)
+    set(HK_FUZZ_FLAGS -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=undefined)
+    set(HK_FUZZ_MAIN)
+    message(STATUS "Fuzzing: libFuzzer harnesses")
+  else()
+    if(HK_HAVE_ASAN)
+      set(HK_FUZZ_FLAGS -fsanitize=address,undefined -fno-sanitize-recover=undefined)
+    endif()
+    set(HK_FUZZ_MAIN tests/fuzz/fuzz_main.cpp)
+    message(STATUS "Fuzzing: no libFuzzer runtime, harnesses built as corpus runners")
+  endif()
+  set(HK_FUZZ_CORPUS ${CMAKE_CURRENT_SOURCE_DIR}/tests/fuzz/corpus)
+  add_custom_target(fuzz)
+  # fuzz_<name>: harness source, extra sources
+  function(hk_fuzzer name source)
+    add_executable(fuzz_${name} ${source} ${HK_FUZZ_MAIN} ${ARGN})
+    target_include_directories(fuzz_${name} PRIVATE ${INCLUDE_DIRS})
+    target_compile_definitions(fuzz_${name} PRIVATE FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION)
+    target_compile_options(fuzz_${name} PRIVATE -g -O1 ${HK_FUZZ_FLAGS} -fsigned-char -fwrapv
+      -fno-strict-aliasing -Wno-write-strings -Wno-deprecated-declarations -Wno-parentheses)
+    target_link_options(fuzz_${name} PRIVATE ${HK_FUZZ_FLAGS})
+    add_dependencies(fuzz fuzz_${name})
+    # every seed once (libFuzzer: -runs=0 only runs the corpus)
+    add_test(NAME fuzz_${name} COMMAND fuzz_${name} -runs=0 ${HK_FUZZ_CORPUS}/fuzz_${name})
+  endfunction()
+  hk_fuzzer(sock tests/fuzz/fuzz_sock.cpp src/net/sock.cpp src/game/Vector.cpp)
+  hk_fuzzer(simple tests/fuzz/fuzz_simple.cpp src/net/sock.cpp src/game/Vector.cpp)
+  hk_fuzzer(hello tests/fuzz/fuzz_hello.cpp src/net/version.cpp src/game/Vector.cpp)
+  foreach(msg Position:PlayerPosition FireGun:FireGunDirection KilledPosition:KilledPosition
+      UpdateServerObject:UpdateServerObject Snapshot:ServerObjectSnapshot
+      ServerVars:ServerVarsMessage RGD:RemoteGameDataMessage LandInfo:LandInfo)
+    string(REPLACE ":" ";" pair ${msg})
+    list(GET pair 0 msgname)
+    list(GET pair 1 msgtype)
+    string(TOLOWER ${msgname} lower)
+    string(TOUPPER ${msgname} upper)
+    hk_fuzzer(${lower} tests/fuzz/fuzz_msg.cpp src/game/Vector.cpp)
+    target_compile_definitions(fuzz_${lower} PRIVATE FUZZ_NAME=${msgname} FUZZ_TYPE=${msgtype} FUZZ_${upper})
+  endforeach()
+  hk_fuzzer(playernames tests/fuzz/fuzz_playernames.cpp src/game/Vector.cpp)
+  hk_fuzzer(chat tests/fuzz/fuzz_chat.cpp src/game/Vector.cpp)
+  hk_fuzzer(blocks tests/fuzz/fuzz_blocks.cpp src/game/Vector.cpp)
+  hk_fuzzer(voice tests/fuzz/fuzz_voice.cpp)
+  hk_fuzzer(map tests/fuzz/fuzz_map.cpp src/game/mapfile.cpp)
+  hk_fuzzer(map_legacy tests/fuzz/fuzz_map_legacy.cpp src/game/mapfile.cpp)
+  # regenerates the seeds of tests/fuzz/corpus (see tests/fuzz/make_seeds.cpp)
+  add_executable(fuzz_make_seeds tests/fuzz/make_seeds.cpp src/net/sock.cpp src/net/version.cpp
+    src/game/mapfile.cpp src/game/Vector.cpp)
+  target_include_directories(fuzz_make_seeds PRIVATE ${INCLUDE_DIRS})
+  target_compile_options(fuzz_make_seeds PRIVATE -fsigned-char -fwrapv -Wno-write-strings -Wno-deprecated-declarations)
 endif()

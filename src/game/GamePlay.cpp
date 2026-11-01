@@ -201,26 +201,37 @@ void GTick()
 		}
 		if(gd.gameendtime&&curtime>gd.gameendtime+30000)
 		{
-			LoadSky();
-			LightLand(GetSkySettings()->sunheight);
-			RandomLand(ldfs);
-			SendLandInfo(0);
-			CreateLand(ldfs);
-			//GReset();
-			for(int i=0;i<numplayers;i++)
+			if(!ReloadServerMap())   //a server started with a saved map plays it again
 			{
-				GetPlayer(i)->playstate=1;
-				GetPlayer(i)->team=0;
+				LoadSky();
+				LightLand(GetSkySettings()->sunheight);
+				RandomLand(ldfs);
+				SendLandInfo(0);
+				CreateLand(ldfs);
 			}
-#ifndef HKDS
-			GetLocalPlayer()->playstate=10;
-			GPlayerEnterGame(0);
-#endif
+			//GReset();
+			GRestartPlayers();
 			
 			
 		}
 	}
 	GTickServerObjects();	
+}
+
+//everyone plays again on a new land (the server sent it with SendLandInfo):
+//clients wait for it, the host is in at once
+
+void GRestartPlayers()
+{
+	for(int i=0;i<numplayers;i++)
+	{
+		GetPlayer(i)->playstate=1;
+		GetPlayer(i)->team=0;
+	}
+#ifndef HKDS
+	GetLocalPlayer()->playstate=10;
+	GPlayerEnterGame(0);
+#endif
 }
 
 void GReset()

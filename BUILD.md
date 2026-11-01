@@ -43,17 +43,34 @@ Avec les presets CMake : `cmake --preset macos-release && cmake --build --preset
 
 ## Tests
 
-- `ctest --test-dir build/<os>-release -C Release` : tests unitaires sans fenêtre (valeurs de référence du générateur du monde, `tests/worldrandom_test.cpp` ; lecture/écriture little-endian bornée de `src/net/wire.h`, `tests/wire_test.cpp` ; message VOICE, règles de distance et aller-retour opus, `tests/voice_test.cpp`), lancés par la CI sur les trois OS.
+- `ctest --test-dir build/<os>-release -C Release` : tests unitaires sans fenêtre (valeurs de référence du générateur du monde, `tests/worldrandom_test.cpp` ; lecture/écriture little-endian bornée de `src/net/wire.h`, `tests/wire_test.cpp` ; message VOICE, règles de distance et aller-retour opus, `tests/voice_test.cpp` ; cartes sauvegardées : aller-retour, fichiers corrompus, tronqués ou trop gros refusés, sauvegardes d'origine construites à la main, `tests/map_test.cpp`), lancés par la CI sur les trois OS. `map_test --check <fichier>` dit si un fichier est une carte valide.
 - Tests réseau contre un serveur local (`HK_AUTOSTART=1 <binaire> &`, puis) :
   - `python3 tests/net_handshake.py` : version dans INFO, refus des versions incompatibles ;
   - `python3 tests/net_identity.py` : une nouvelle demande garde son slot, un autre client a le sien ;
   - `python3 tests/net_join.py` : rejoint la partie comme un vrai client et décode PLAYERNAMES, LANDINFO, SERVERVARS, etc. (tailles et valeurs du format explicite), puis envoie des messages tronqués ;
   - `python3 tests/net_fuzz.py` : paquets malformés, à lancer de préférence contre un build AddressSanitizer (voir l'en-tête du script) ;
-  - `python3 tests/net_voice.py` : trois clients ; la voix n'est relayée qu'au joueur proche (y compris de l'autre côté du bord du monde), sous le numéro de l'émetteur, et jamais si le message est malformé.
-  - `tests/run_netplay_tests.sh <binaire>` lance les cinq, un serveur neuf par test (sous Linux avec Xvfb si aucun écran) ; la CI le fait à chaque push contre un build AddressSanitizer, et une release n'est publiée que s'ils passent.
+  - `python3 tests/net_voice.py` : trois clients ; la voix n'est relayée qu'au joueur proche (y compris de l'autre côté du bord du monde), sous le numéro de l'émetteur, et jamais si le message est malformé ;
+  - `python3 tests/net_map.py --write /tmp/test.map`, puis `HK_AUTOSTART=1 HK_MAPFILE=/tmp/test.map <binaire> &` et `python3 tests/net_map.py /tmp/test.map` : un client qui rejoint un serveur lancé avec une carte reçoit son relief, son ciel et tous ses blocs.
+  - `tests/run_netplay_tests.sh <binaire>` lance les six, un serveur neuf par test (sous Linux avec Xvfb si aucun écran) ; la CI le fait à chaque push contre un build AddressSanitizer, et une release n'est publiée que s'ils passent.
 - Partie à deux sur une machine : `HK_AUTOSTART=1 <binaire> &` puis `HK_JOIN=127.0.0.1 <binaire>` (le second rejoint le premier serveur qui répond).
 
-Format réseau (protocole 5) : aucun struct n'est copié tel quel sur le fil ; chaque message a ses fonctions d'écriture et de lecture explicites (`Sync*` dans `src/net/multiplay.cpp`, `WriteSimple`/`ReadSimple` dans `src/net/sock.cpp`, primitives dans `src/net/wire.h`). Changer un de ces formats impose d'incrémenter `EDIFICE_PROTOCOL_VERSION` (`src/net/version.h`).
+Format réseau (protocole 5) : aucun struct n'est copié tel quel sur le fil ; chaque message a ses fonctions d'écriture et de lecture explicites (`Sync*` dans `src/net/netmsg.h` et `landwire.h`, `WriteSimple`/`ReadSimple` dans `src/net/sock.cpp`, primitives dans `src/net/wire.h`). Changer un de ces formats impose d'incrémenter `EDIFICE_PROTOCOL_VERSION` (`src/net/version.h`).
+
+## Fuzzing
+
+Un harnais libFuzzer par parseur d'entrée réseau ou fichier, dans `tests/fuzz/` : `Sock::Receive` (découpage des datagrammes, transferts fiables, ACK, alimenté sans socket par `Sock::Feed`), chaque message (`fuzz_position`, `fuzz_firegun`, `fuzz_killedposition`, `fuzz_updateserverobject`, `fuzz_snapshot`, `fuzz_servervars`, `fuzz_rgd`, `fuzz_landinfo`, `fuzz_simple`, `fuzz_hello` pour REQUESTENTER/INFO et le trailer de version, `fuzz_playernames`, `fuzz_chat`, `fuzz_blocks`, `fuzz_voice`) et les cartes (`fuzz_map`, `fuzz_map_legacy`). Les parseurs sont dans `src/net/netmsg.h`, `landwire.h`, `voicemsg.h`, `version.cpp`, `sock.cpp` et `src/game/mapfile.cpp`, appelables sans le jeu.
+
+```bash
+cmake -S . -B build/fuzz -G Ninja -DEDIFICE_FUZZ=ON -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+cmake --build build/fuzz --target fuzz
+ctest --test-dir build/fuzz -R '^fuzz_'          # chaque corpus de départ une fois
+mkdir -p /tmp/c && cp tests/fuzz/corpus/fuzz_map/* /tmp/c
+build/fuzz/fuzz_map -max_total_time=60 /tmp/c    # fuzzing (le corpus grandit dans /tmp/c)
+```
+
+- Avec un clang qui a libFuzzer (Linux, ou `brew install llvm` sur macOS : `-DCMAKE_CXX_COMPILER=$(brew --prefix llvm)/bin/clang++`), les harnais sont compilés avec `-fsanitize=fuzzer,address,undefined`. Apple clang n'a pas libFuzzer : les harnais sont alors des programmes qui passent une fois les fichiers ou dossiers donnés (`tests/fuzz/fuzz_main.cpp`), avec AddressSanitizer et UBSan.
+- Corpus de départ dans `tests/fuzz/corpus/<harnais>/`, produits par les écrivains du jeu : `fuzz_make_seeds tests/fuzz/corpus` et `map_test --write tests/fuzz/corpus/fuzz_map tests/fuzz/corpus/fuzz_map_legacy`. `NET_JOIN_DUMP=<dossier> python3 tests/net_join.py` enregistre en plus les messages et datagrammes envoyés par un vrai serveur.
+- La CI (job `fuzzing`, ubuntu-22.04, clang) passe les corpus puis fuzze chaque harnais 60 s ; un crash fait échouer le job et l'entrée fautive est publiée en artefact (`fuzz-crashes`). Pour la rejouer : `build/fuzz/fuzz_<nom> <fichier>`.
 
 ## Releases automatiques
 
@@ -85,10 +102,22 @@ Les données viennent de Windows (insensible à la casse) : hors Windows, `HKPat
 
 ## Écrans ajoutés
 
-- **Server Setup** (bouton Server) : nom du serveur, mode (capture du drapeau / bac à sable), captures pour gagner, limite de temps, ciel, relief, décor ; « Random » pour ciel/relief/décor et bouton « Randomize all ». Sauvegardé dans `sv.ini` / `net.ini`.
+- **Server Setup** (bouton Server) : nom du serveur, mode (capture du drapeau / bac à sable), captures pour gagner, limite de temps, ciel, relief, décor, carte ; « Random » pour ciel/relief/décor et bouton « Randomize all ». « Map » : « New random » (un nouveau terrain, par défaut) ou une des cartes sauvegardées (voir plus bas), qui apporte alors son ciel, son relief, son décor et ses bâtiments. Sauvegardé dans `sv.ini` / `net.ini` (`servermap`).
 - **Multiplayer Game** (bouton Play) : IP ou nom d'hôte, recherche LAN (F5).
 - **Options** : touches, vidéo/audio (plein écran, VSync, distance d'affichage, souris, volume, volume des voix, micro), nom du joueur.
 - **Credits** : auteurs originaux.
+
+## Cartes sauvegardées
+
+Le terrain (relief, ciel, décor) et tous les bâtiments, dans `maps/<nom>.map` du dossier utilisateur (voir Données). Commandes de console (`` ` ``) :
+
+- `savemap <nom>` : enregistre la partie en cours (serveur ou client) ; le nom ne contient que lettres, chiffres, `_` et `-` (32 au plus), un fichier existant est remplacé ;
+- `loadmap <nom>` : sur le serveur, remplace le monde par la carte pour tout le monde (les clients la reçoivent comme un nouveau terrain : LANDINFO, puis tous les blocs) ; hors partie, démarre un serveur avec cette carte ; refusé quand on est client d'un autre serveur ;
+- `maps` : liste les cartes enregistrées.
+
+Un serveur lancé avec une carte (`loadmap` ou Server Setup) la recharge à chaque nouvelle manche, avec ses bâtiments d'origine. Debug : `HK_AUTOSTART=1 HK_MAPFILE=<chemin absolu>` démarre le serveur avec ce fichier (le jeu se place dans son dossier de données : un chemin relatif partirait de là).
+
+Format 2, décrit dans `src/game/mapfile.h` : en-tête `EDIFICEMAP`, version du format, protocole (informatif) et dimensions de la grille, puis le ciel, les `LandDefs` et les blocs écrits champ par champ en little-endian, en plages de cellules identiques (quelques Ko pour un monde peu construit), et un CRC-32. Un fichier tronqué, trop gros, corrompu, d'un autre format ou d'une autre taille de monde est refusé avec un message ; les noms de textures et les compteurs sont bornés comme ceux d'un message LANDINFO. Les sauvegardes du jeu d'origine (Windows, 2000 : `edifice` suivi des structs brutes, environ 55 Mo) se chargent aussi : les copier dans `maps/` avec l'extension `.map`. Leur relief, leur ciel et leurs bâtiments sont repris ; le décor (arbres, taches du sol) diffère, le générateur du monde ayant changé au protocole 3.
 
 ## Chat vocal
 
@@ -108,7 +137,7 @@ Les lettres suivent la disposition du clavier : sur AZERTY, remappez Avancer/Gau
 
 ## Aides au debug
 
-- `HK_AUTOSTART=1` démarre un serveur local directement.
+- `HK_AUTOSTART=1` démarre un serveur local directement (avec `HK_MAPFILE=<fichier .map>` : sur cette carte).
 - `HK_ZOOM_TEST=1` simule un appui sur la touche de zoom (zoom ×3).
 - `HK_SEED=N` génère le même monde à chaque lancement (pour comparer des captures).
 - `HK_KEYLOG=1` affiche dans le terminal chaque touche reçue par le jeu (code VK) et les changements de zoom.

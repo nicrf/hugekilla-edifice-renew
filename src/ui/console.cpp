@@ -67,6 +67,58 @@ void ConsoleDisplayText(char *text)
 
 }
 
+//savemap <name>, loadmap <name> (maps/<name>.map in the user folder), maps
+
+static int IsCommand(const char *name)
+{
+	int len=strlen(name);
+	return strncmp(consolecommand,name,len)==0&&(consolecommand[len]==' '||consolecommand[len]==0);
+}
+
+static void MapCommand(int save)
+{
+	char name[100];
+	const char *arg=&consolecommand[7];
+	while(*arg==' ') arg++;
+	snprintf(name,sizeof(name),"%s",arg);
+	int len=strlen(name);
+	while(len&&name[len-1]==' ') name[--len]=0;
+	char text[1500];
+	if(!ValidMapName(name))
+	{
+		snprintf(text,sizeof(text),"usage: %s <name> (letters, digits, _ and -, at most %d)",save?"savemap":"loadmap",MAXMAPNAME);
+		ConsoleDisplayText(text);
+		return;
+	}
+	char err[1400];
+	if(save)
+	{
+		if(!IsServer()&&!IsConnected())
+		{
+			ConsoleDisplayText("No land to save: start or join a game first");
+			return;
+		}
+		HKMakeDir(UserFile("maps"));
+		if(SaveMapPath(MapPath(name),err,sizeof(err)))
+			snprintf(text,sizeof(text),"Saved map %s",MapPath(name));
+		else
+			snprintf(text,sizeof(text),"%s",err);
+		ConsoleDisplayText(text);
+	}
+	else if(!LoadMapPath(MapPath(name),err,sizeof(err)))
+		ConsoleDisplayText(err);
+}
+
+static void ListMapsCommand()
+{
+	static char names[64][MAXMAPNAME+1];
+	int n=ListSavedMaps(names,64);
+	char text[200];
+	snprintf(text,sizeof(text),n?"%d saved map(s), loadmap <name>:":"No saved map (savemap <name>)",n);
+	ConsoleDisplayText(text);
+	for(int i=0;i<n;i++) ConsoleDisplayText(names[i]);
+}
+
 void ConsoleCommand()
 {
 	if(strlen(consolecommand)==0) return;
@@ -135,6 +187,9 @@ void ConsoleCommand()
 		cur->tilt=GetLocalPlayer()->tilt;
 		numplayers++;
 	}
+	if(IsCommand("savemap")) MapCommand(1);
+	if(IsCommand("loadmap")) MapCommand(0);
+	if(IsCommand("maps")) ListMapsCommand();
 	if(strncmp(consolecommand,"say",3)==0)
 	{
 		if(strlen(consolecommand)>4)

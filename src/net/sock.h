@@ -105,6 +105,12 @@ public:
 	int SendReliable(const void *data,int size,int callback);
 	int Receive(void *data,SOCKADDR_IN *source,int maxsize=sizeof(Message));
 	int fromack;   //last Receive returned a local reliable-ack callback (not peer data)
+	//tests and fuzzing (tests/fuzz/fuzz_sock.cpp): the next datagram Receive reads is
+	//this one (type byte included) instead of one from the socket; data must stay valid
+	//until Receive has used it. Works without a link (none open: nothing is sent).
+	void Feed(const void *datagram,int size) { feeddata=(const char *)datagram; feedsize=size; }
+	const char *feeddata;
+	int feedsize;
 	void ResetReliable();
 	void ResetRecvReliable();
 	void Flush();

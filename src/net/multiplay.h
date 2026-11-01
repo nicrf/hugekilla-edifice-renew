@@ -1,3 +1,5 @@
+#ifndef MULTIPLAYH
+#define MULTIPLAYH
 #include "land.h"
 #include "vector.h"
 #include "playing.h"
@@ -48,6 +50,7 @@ int IsServer();
 int IsConnected();
 int GetNumPlayers();
 void SendLandInfo(int num);
+void ApplyLand(const LandDefs *defs,const SkySettings *sky);   //builds this land, clears the blocks
 void SendSimple(char num,char type,DWORD msg,DWORD msg2);
 void SendPosition(char srcnum,char destnum);
 void ReceiveBlockBuffer(char *buf,int pnum,int len);
@@ -89,6 +92,4 @@ struct NetSettings
 	DWORD maxplayers;
 };
 
-
-
-
+#endif
