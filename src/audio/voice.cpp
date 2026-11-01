@@ -253,6 +253,14 @@ static void ResetPeer(int p)
 	SoundVoiceClear(p);
 }
 
+//player left and its slot is free, the others kept their numbers (M11 phase 3b)
+void VoiceForget(int player)
+{
+	if(player<0||player>=MAXPLAYERS) return;
+	ResetPeer(player);
+	peer[player].heard=0;
+}
+
 void VoiceReset()
 {
 	for(int i=0;i<MAXPLAYERS;i++)

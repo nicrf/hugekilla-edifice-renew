@@ -61,7 +61,7 @@ void DrawScoreboard()
 	int order[MAXPLAYERS];
 	int count=0;
 	for(int i=0;i<numplayers&&i<MAXPLAYERS;i++)
-		order[count++]=i;
+		if(PlayerSlotUsed(i)) order[count++]=i;   //not the free slots (M11 phase 3b)
 	qsort(order,count,sizeof(int),ComparePlayers);
 	int rows=count<MAXROWS?count:MAXROWS;
 

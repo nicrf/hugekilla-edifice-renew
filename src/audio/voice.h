@@ -44,6 +44,7 @@ void VoicePushToTalk(int down);             //push-to-talk key held / released
 void VoiceUpdate();                         //every frame: capture, send, decode, position
 void VoiceReceive(int player,int seq,const unsigned char *data,int len);
 void VoiceReset();                          //players were renumbered or the game ended
+void VoiceForget(int player);               //player left, the others kept their numbers
 int VoiceTransmitting();
 int VoiceIsSpeaking(int player);            //heard in the last VOICE_SPEAKINGTIME ms
 void VoiceSetVolume(float volume);          //0..1, playback of other players

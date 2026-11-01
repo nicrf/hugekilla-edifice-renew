@@ -1,4 +1,4 @@
-//the server's anti-cheat checks (roadmap M11 phases 1 and 3a, docs/M11.md): the
+//the server's anti-cheat checks (roadmap M11 phases 1, 3a and 3b, docs/M11.md): the
 //pure logic, apart from multiplay.cpp so that tests/anticheat_test.cpp can check it
 //without the game. Times are in ms (curtime), distances in world units.
 
@@ -315,6 +315,95 @@ inline int AcRewind(int ping,int lagcomp)
 {
 	if(ping<0) ping=0;
 	return ping<lagcomp?ping:lagcomp;
+}
+
+//---- M11 phase 3b: numbered positions, movement bound, stable slots ----
+
+//the sequence numbers (uint16, wrapping) of a client's positions
+struct AcSeq
+{
+	unsigned short last;   //of the newest accepted
+	int valid;             //0: none yet (joined): the next one is accepted
+};
+
+//1 if seq is newer than the last accepted (it becomes the last), 0 if it is that
+//one again or an older one (a duplicate, or overtaken on the way). Serial number
+//arithmetic: up to 32767 ahead is newer, so a few lost positions don't matter.
+inline int AcSeqNewer(AcSeq *s,unsigned int seq)
+{
+	seq&=0xFFFF;
+	if(!s->valid)
+	{
+		s->valid=1;
+		s->last=(unsigned short)seq;
+		return 1;
+	}
+	short d=(short)(unsigned short)(seq-s->last);
+	if(d<=0) return 0;
+	s->last=(unsigned short)seq;
+	return 1;
+}
+
+//where the server lets a player be (ac_moveclamp): the last position it kept
+struct AcClamp
+{
+	float x,y,z;
+	unsigned int time;
+	int valid;   //0: none (joined, respawned): the next position is kept as it is
+};
+
+//moves the claimed position x,y,z (world wrapping every size on x and z) at most
+//maxspeed units/s away from the last one kept, over the time since it (at least
+//mindt ms, positions arrive bunched up). Returns 1 if it had to be pulled back.
+//Pulled back, the player catches up as soon as it moves slower than maxspeed.
+inline int AcMoveClamp(AcClamp *c,float *x,float *y,float *z,unsigned int now,float maxspeed,int mindt,float size)
+{
+	int clamped=0;
+	if(c->valid&&(int)(now-c->time)>=0)
+	{
+		int dt=(int)(now-c->time);
+		if(dt<mindt) dt=mindt;
+		float dx=AcWrap(*x-c->x,size),dy=*y-c->y,dz=AcWrap(*z-c->z,size);
+		float d=sqrtf(dx*dx+dy*dy+dz*dz);
+		float allowed=maxspeed*dt/1000;
+		if(d>allowed&&d>0)
+		{
+			float f=allowed/d;
+			*x=fmodf(c->x+dx*f+size,size);
+			*y=c->y+dy*f;
+			*z=fmodf(c->z+dz*f+size,size);
+			clamped=1;
+		}
+	}
+	c->x=*x;c->y=*y;c->z=*z;
+	c->time=now;
+	c->valid=1;
+	return clamped;
+}
+
+//player slots: a joiner takes the first free one (from first, the host is 0),
+//-1 if none is
+inline int SlotFirstFree(const char *used,int first,int max)
+{
+	for(int i=first;i<max;i++)
+		if(!used[i]) return i;
+	return -1;
+}
+
+//numplayers once slots were freed: one past the last used (at least 1, the host)
+inline int SlotTrim(const char *used,int n)
+{
+	while(n>1&&!used[n-1]) n--;
+	return n;
+}
+
+//the number of player i once player left left: -1 for left itself; one lower
+//after it if the slots are compacted (everyone after it moved down)
+inline int SlotRenumber(int i,int left,int compact)
+{
+	if(i==left) return -1;
+	if(compact&&i>left) return i-1;
+	return i;
 }
 
 #endif

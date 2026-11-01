@@ -20,6 +20,7 @@ int GPlayerChangeTeam(int num,int team);
 
 void GTick();
 void GPlayerLeave(int num);
+void GPlayerRenumber(int left);   //server: the players after left moved down one
 void GReset();
 void GRestartPlayers();
 int GCanClaimObject(int pnum,int sonum);

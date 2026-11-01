@@ -174,6 +174,68 @@ int main()
 	CHECK(fabsf(AcWrap(at[0]-512,512))<.01f);                        // half way: on the edge, not 256 off
 	CHECK(AcRewind(80,300)==80&&AcRewind(900,300)==300&&AcRewind(-5,300)==0);
 
+	// M11 phase 3b: numbered positions, newest only
+	AcSeq q;
+	memset(&q,0,sizeof(q));
+	CHECK(AcSeqNewer(&q,500));                                       // the first one, whatever it is
+	CHECK(!AcSeqNewer(&q,500));                                      // duplicate
+	CHECK(AcSeqNewer(&q,501));
+	CHECK(AcSeqNewer(&q,505));                                       // a few lost
+	CHECK(!AcSeqNewer(&q,503));                                      // overtaken on the way
+	CHECK(q.last==505);
+	memset(&q,0,sizeof(q));
+	CHECK(AcSeqNewer(&q,65534));
+	CHECK(AcSeqNewer(&q,65535));
+	CHECK(AcSeqNewer(&q,0));                                         // wraps
+	CHECK(AcSeqNewer(&q,3));
+	CHECK(!AcSeqNewer(&q,65535));                                    // from before the wrap
+	CHECK(AcSeqNewer(&q,3+32767));                                   // up to half the range ahead
+	CHECK(!AcSeqNewer(&q,3));                                        // half the range behind
+
+	// movement bound (ac_moveclamp): at most maxspeed from the last position kept
+	AcClamp c;
+	memset(&c,0,sizeof(c));
+	float px=100,py=50,pz=100;
+	CHECK(!AcMoveClamp(&c,&px,&py,&pz,1000,150,100,512));            // first: kept as it is
+	px=110;
+	CHECK(!AcMoveClamp(&c,&px,&py,&pz,1100,150,100,512)&&px==110);    // 100 units/s: fine
+	px=200;
+	CHECK(AcMoveClamp(&c,&px,&py,&pz,1200,150,100,512));              // 900 units/s: held back
+	CHECK(fabsf(px-125)<.01f&&py==50&&pz==100);                       // 15 units in 100 ms
+	px=200;
+	CHECK(AcMoveClamp(&c,&px,&py,&pz,1200,150,100,512));              // bunched up: at least 100 ms
+	CHECK(fabsf(px-140)<.01f);
+	px=145;
+	CHECK(!AcMoveClamp(&c,&px,&py,&pz,1300,150,100,512)&&px==145);    // slower: caught up
+	memset(&c,0,sizeof(c));
+	px=510;pz=100;
+	AcMoveClamp(&c,&px,&py,&pz,1000,150,100,512);
+	px=4;                                                            // 6 units across the edge
+	CHECK(!AcMoveClamp(&c,&px,&py,&pz,1100,150,100,512)&&px==4);
+	px=200;
+	CHECK(AcMoveClamp(&c,&px,&py,&pz,1200,150,100,512));
+	CHECK(fabsf(px-19)<.01f);                                        // 15 on from 4 (not 256 off)
+	px=490;
+	CHECK(AcMoveClamp(&c,&px,&py,&pz,1300,150,100,512));
+	CHECK(fabsf(px-4)<.01f);                                         // back across the edge, wrapped into [0,512)
+
+	// stable slots: the first free one, numplayers after a leave, renumbering
+	char used[8]={1,1,0,1,0,0,0,0};
+	CHECK(SlotFirstFree(used,1,8)==2);                               // a hole first
+	used[2]=1;
+	CHECK(SlotFirstFree(used,1,8)==4);                               // else after the last
+	char full[3]={1,1,1};
+	CHECK(SlotFirstFree(full,1,3)==-1);
+	char trim[6]={1,1,0,1,0,0};
+	CHECK(SlotTrim(trim,6)==4);                                      // trailing free ones dropped
+	trim[3]=0;
+	CHECK(SlotTrim(trim,4)==2);
+	char alone[2]={1,0};
+	CHECK(SlotTrim(alone,2)==1);                                     // the host stays
+	CHECK(SlotRenumber(3,2,0)==3&&SlotRenumber(1,2,0)==1);           // kept slots: nobody moves
+	CHECK(SlotRenumber(3,2,1)==2&&SlotRenumber(1,2,1)==1);           // compacted: after it, down one
+	CHECK(SlotRenumber(2,2,0)==-1&&SlotRenumber(2,2,1)==-1);         // the leaver itself
+
 	if(failures) printf("%d failure(s)\n",failures);
 	else printf("anticheat: all checks passed\n");
 	return failures?1:0;

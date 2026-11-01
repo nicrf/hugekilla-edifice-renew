@@ -52,7 +52,8 @@ void StartServer();
 void Disconnect();
 int IsServer();
 int IsConnected();
-int GetNumPlayers();
+int GetNumPlayers();         //one past the last player's number: free slots below it are possible
+int PlayerSlotUsed(int i);   //0: nobody has number i (a player left it, M11 phase 3b)
 void SendLandInfo(int num);
 void ApplyLand(const LandDefs *defs,const SkySettings *sky);   //builds this land, clears the blocks
 void SendSimple(char num,char type,DWORD msg,DWORD msg2);

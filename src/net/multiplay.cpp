@@ -59,6 +59,25 @@ Sock datasock;
 Sock clientsock[MAXPLAYERS];
 
 int numplayers;
+//slots in use below numplayers (M11 phase 3b): a player who leaves may leave a free
+//slot behind (PLAYERLEFT_KEEPSLOTS), the others keep their numbers. The host is 0.
+static char slotused[MAXPLAYERS];
+
+static int SlotUsed(int i)
+{
+	return i>=0&&i<numplayers&&slotused[i];
+}
+int PlayerSlotUsed(int i)
+{
+	return SlotUsed(i);
+}
+//players in the game (numplayers counts the free slots below the last one too)
+static int UsedSlots()
+{
+	int n=0;
+	for(int i=0;i<numplayers;i++) n+=slotused[i]!=0;
+	return n;
+}
 
 HWND dlghwnd;
 
@@ -124,12 +143,13 @@ static void SendRequestEnter()
 	int len=2+nl+1;
 	len+=WriteVersionTrailer(&buf[len]);
 	int cookie=haveentercookie&&entercookieip==infosock.dest.sin_addr.s_addr;
-	len+=WriteHelloCaps(&buf[len],HELLOCAP_COOKIE|HELLOCAP_SERVERHITS,cookie?entercookie:0);
+	len+=WriteHelloCaps(&buf[len],HELLOCAP_COOKIE|HELLOCAP_SERVERHITS|HELLOCAP_STABLESLOTS|HELLOCAP_POSSEQ,
+		cookie?entercookie:0);
 	infosock.Send(buf,len);
 	infosock.Flush();
 }
 
-extern int ac_enable,ac_requirecookie,ac_serverhits;
+extern int ac_enable,ac_requirecookie,ac_serverhits,ac_stableslots;
 
 //server answers an info request, with its version
 static void SendInfo(SOCKADDR_IN dest)
@@ -144,13 +164,13 @@ static void SendInfo(SOCKADDR_IN dest)
 	int len=2+nl+1;
 	len+=WriteVersionTrailer(&buf[len]);
 	//server details for the join list (ignored by older clients)
-	buf[len++]=(char)numplayers;
+	buf[len++]=(char)UsedSlots();
 	buf[len++]=(char)MAXPLAYERS;
 	buf[len++]=(char)sv.gamemode;
 	buf[len++]=(char)sv.capturelimit;
-	//capabilities (M11 phases 2 and 3a, version.h; ignored by older clients)
-	buf[len++]=(char)(ac_enable?HELLOCAP_COOKIE|(ac_requirecookie?HELLOCAP_REQUIRECOOKIE:0)|
-		(ac_serverhits?HELLOCAP_SERVERHITS:0):0);
+	//capabilities (M11 phases 2, 3a and 3b, version.h; ignored by older clients)
+	buf[len++]=(char)((ac_enable?HELLOCAP_COOKIE|(ac_requirecookie?HELLOCAP_REQUIRECOOKIE:0)|
+		(ac_serverhits?HELLOCAP_SERVERHITS:0):0)|(ac_stableslots?HELLOCAP_STABLESLOTS:0));
 	infosock.dest=dest;
 	infosock.Send(buf,len);
 	infosock.Flush();
@@ -233,6 +253,10 @@ int ac_cookietime=30000;    //ms of a join cookie time bucket (valid one to two 
 int ac_serverhits=1;        //1: the server decides hits and deaths (phase 3a); 0: phase-1 bounds
 float ac_hittolerance=.5f;  //units added around a player's hitbox when the server tests a bullet
 int ac_lagcomp=300;         //ms of a shooter's ping the server rewinds, at most
+//phase 3b. ac_stableslots isn't a check: it doesn't depend on ac_enable
+int ac_stableslots=1;       //1: a leaver frees its slot, the others keep their numbers (all clients able)
+float ac_posrate=2;         //positions per positionresendtime a client may send (more are dropped), 0: off
+int ac_moveclamp=0;         //1: a player moving faster than ac_maxspeed is held back to it (0: logged only)
 
 #define AC_KILL 0
 #define AC_DEATH 1
@@ -243,8 +267,9 @@ int ac_lagcomp=300;         //ms of a shooter's ping the server rewinds, at most
 #define AC_IP 6
 #define AC_STATE 7
 #define AC_ORIGIN 8
-#define ACKINDS 9
-static const char *ackind[ACKINDS]={"kill","death","fire","ammo","move","build","ip","state","origin"};
+#define AC_POSITION 9
+#define ACKINDS 10
+static const char *ackind[ACKINDS]={"kill","death","fire","ammo","move","build","ip","state","origin","position"};
 
 struct AcPlayer
 {
@@ -262,6 +287,10 @@ struct AcPlayer
 	DWORD lasthit;
 	AcHistory hist;      //where it was, for the shooters' lag
 	int caps;            //HELLOCAP_* of its REQUESTENTER (kept by AcJoin)
+	//phase 3b: numbered positions, movement bound
+	AcSeq seq;
+	AcBucket posrate;
+	AcClamp clamp;
 };
 static AcPlayer acplayer[MAXPLAYERS];
 #define ACIPTABLE 64
@@ -321,6 +350,7 @@ static void AcInitVars()
 		{&ac_ipinfo,0,"ac_ipinfo"},{&ac_ipenter,0,"ac_ipenter"},{&ac_ippackets,0,"ac_ippackets"},
 		{&ac_requirecookie,0,"ac_requirecookie"},{&ac_cookietime,0,"ac_cookietime"},
 		{&ac_serverhits,0,"ac_serverhits"},{0,&ac_hittolerance,"ac_hittolerance"},{&ac_lagcomp,0,"ac_lagcomp"},
+		{&ac_stableslots,0,"ac_stableslots"},{0,&ac_posrate,"ac_posrate"},{&ac_moveclamp,0,"ac_moveclamp"},
 	};
 	//debug (tests): HK_AC_VARS="ac_requirecookie=1 ac_cookietime=1000" wins over sv.ini
 	const char *env=getenv("HK_AC_VARS");
@@ -369,6 +399,7 @@ static void AcNewLife(int i)
 	AcAmmoFill(&a->ammo,hold);
 	a->ammo.weapon=GetPlayer(i)->weapon;
 	a->move.valid=0;
+	a->clamp.valid=0;
 	a->life=100;
 	a->hist.count=0;   //respawned somewhere else: no rewind across the teleport
 }
@@ -405,8 +436,7 @@ static int AcKiller(int i,int claimed)
 {
 	if(!AcServerHits()||claimed==i) return claimed;   //a suicide (console "kill") is always one
 	AcPlayer *a=&acplayer[i];
-	int recent=a->lasthit&&(int)(curtime-a->lasthit)<AC_KILLCREDIT&&ValidPlayer(a->lastattacker)&&
-		a->lastattacker<numplayers;
+	int recent=a->lasthit&&(int)(curtime-a->lasthit)<AC_KILLCREDIT&&SlotUsed(a->lastattacker);
 	if(a->caps&HELLOCAP_SERVERHITS)
 	{
 		//it doesn't count its own damage: only the server can kill it
@@ -458,14 +488,14 @@ static int AcDeath(int i)
 static void AcServerKill(int v,int killer)
 {
 	AcPlayer *a=&acplayer[v];
-	if(!ValidPlayer(killer)||killer>=numplayers) killer=v;
+	if(!SlotUsed(killer)) killer=v;
 	//phase 3a: the normal way to die, not an event
 	if(!AcServerHits())
 		AcLog(AC_KILL,"%.31s (%d) took %.0f damage without dying: killed by the server",GetPlayer(v)->name,v,a->damage);
 	ReceiveKillMessage(v,killer);
 	SimpleBuf killed=MakeSimple(KILLED,v,killer);
 	for(int i=1;i<numplayers;i++)
-		clientsock[i].SendReliable(killed.b,sizeof(killed.b),0);   //the victim too: it dies
+		if(slotused[i]) clientsock[i].SendReliable(killed.b,sizeof(killed.b),0);   //the victim too: it dies
 	GetPlayer(v)->playstate=11;
 	a->deaduntil=curtime+ac_deadtime;
 	if(!a->deaduntil) a->deaduntil=1;
@@ -479,6 +509,7 @@ static void AcServerKill(int v,int killer)
 //v 0, the host: its own state.
 static int AcCanBeHit(int v)
 {
+	if(!SlotUsed(v)) return 0;   //a free slot (phase 3b)
 	if(v==0) return GetPlayer(0)->playstate==10&&GetPlayer(0)->life>0;
 	AcPlayer *a=&acplayer[v];
 	if(AcDead(a)) return 0;
@@ -491,7 +522,7 @@ static int AcCanBeHit(int v)
 static void AcPainOthers(int v,int sound)
 {
 	for(int i=1;i<numplayers;i++)
-		if(i!=v) SendSimple(i,PAIN,v,sound);
+		if(i!=v&&slotused[i]) SendSimple(i,PAIN,v,sound);
 	if(v!=GetLocalNum())
 	{
 		SetSoundPosition(sound+1,GetPlayer(v)->pos);
@@ -572,7 +603,7 @@ void AcBulletTick(Object *o,Vector prev)
 {
 	if(o->type!=1&&o->type!=3) return;
 	int shooter=o->pnum;
-	if(!ValidPlayer(shooter)||shooter>=numplayers) return;
+	if(!SlotUsed(shooter)) return;
 	if(AcServerHits())
 	{
 		AcServerBullet(o,prev,shooter);
@@ -600,7 +631,7 @@ void AcGrenade(Object *o)
 {
 	if(AcServerHits())
 	{
-		int thrower=ValidPlayer(o->pnum)&&o->pnum<numplayers?o->pnum:-1;
+		int thrower=SlotUsed(o->pnum)?o->pnum:-1;
 		for(int v=0;v<numplayers;v++)
 		{
 			if(!AcCanBeHit(v)) continue;
@@ -677,9 +708,43 @@ static int AcFire(int i,FireGunDirection *f)
 	return 1;
 }
 
+//phase 3b: is this PLAYERPOSITION of client i (len bytes) one to use. Its rate is
+//bounded (ac_posrate); a client that numbers them (HELLOCAP_POSSEQ) must, and an
+//older or repeated one (overtaken on the way, a duplicate, a replay) is dropped:
+//only the newest position moves the player, feeds the history of the shooters' lag
+//(AcServerFrame) and is relayed.
+static int AcPositionAccepted(int i,const char *msg,int len)
+{
+	if(!ac_enable) return 1;
+	AcPlayer *a=&acplayer[i];
+	if(ac_posrate>0)
+	{
+		//a client sends one every positionresendtime at most (ClientLoop)
+		int interval=sv.positionresendtime>10?sv.positionresendtime:10;
+		if(!AcTake(&a->posrate,curtime,ac_posrate/interval,10))
+		{
+			AcLog(AC_POSITION,"%.31s (%d) sends positions too fast, dropped",GetPlayer(i)->name,i);
+			return 0;
+		}
+	}
+	if(!(a->caps&HELLOCAP_POSSEQ)) return 1;
+	int seq=ReadPositionSeq(msg,len);
+	if(seq<0)
+	{
+		AcLog(AC_POSITION,"%.31s (%d) sent a position without its number, dropped",GetPlayer(i)->name,i);
+		return 0;
+	}
+	if(!AcSeqNewer(&a->seq,seq))
+	{
+		AcLog(AC_POSITION,"%.31s (%d) position %d after %d, dropped",GetPlayer(i)->name,i,seq,a->seq.last);
+		return 0;
+	}
+	return 1;
+}
+
 //a position of client i with state (10 alive, 11 dead) and weapon: returns the
-//state the server keeps
-static int AcPosition(int i,int state,Vector pos,int weapon)
+//state the server keeps. pos may be held back (ac_moveclamp).
+static int AcPosition(int i,int state,Vector *pos,int weapon)
 {
 	if(!ac_enable) return state;
 	AcPlayer *a=&acplayer[i];
@@ -695,11 +760,21 @@ static int AcPosition(int i,int state,Vector pos,int weapon)
 	AcAmmoPosition(&a->ammo,weapon,hold);
 	if(state==10&&ac_maxspeed>0)
 	{
-		float speed=AcMoveSpeed(&a->move,pos.x,pos.y,pos.z,curtime,250,LANDGRIDSIZE);
+		float speed=AcMoveSpeed(&a->move,pos->x,pos->y,pos->z,curtime,250,LANDGRIDSIZE);
 		if(speed>ac_maxspeed)
 			AcLog(AC_MOVE,"%.31s (%d) moved at %.0f units/s",GetPlayer(i)->name,i,speed);
+		//phase 3b: held back to ac_maxspeed from the last position kept, so it is
+		//not where it says it went faster (its shots too, ac_firedist), until it
+		//slows down. Off by default: legitimate speeds aren't known well enough yet.
+		if(ac_moveclamp&&
+			AcMoveClamp(&a->clamp,&pos->x,&pos->y,&pos->z,curtime,ac_maxspeed,100,LANDGRIDSIZE))
+			AcLog(AC_MOVE,"%.31s (%d) held back to %.0f units/s",GetPlayer(i)->name,i,ac_maxspeed);
 	}
-	else a->move.valid=0;
+	else
+	{
+		a->move.valid=0;
+		a->clamp.valid=0;
+	}
 	return state;
 }
 
@@ -877,6 +952,8 @@ void StartServer()
 	ZeroMemory(acplayer,sizeof(acplayer));   //the host's position history of a previous game
 	LoadNetSettings();
 	numplayers=1;
+	ZeroMemory(slotused,sizeof(slotused));
+	slotused[0]=1;
 	
 	//an Internet game also listens for P2P connections, once the lobby gave it an
 	//identity (lobbygame.cpp)
@@ -921,12 +998,12 @@ static void SendExit()
 	for(int k=0;k<3;k++)
 	{
 		if(server)
-			for(int i=1;i<numplayers;i++) clientsock[i].Send(exit.b,sizeof(exit.b));
+			for(int i=1;i<numplayers;i++) if(slotused[i]) clientsock[i].Send(exit.b,sizeof(exit.b));
 		else if(connected)
 			datasock.Send(exit.b,sizeof(exit.b));
 	}
 	if(server)
-		for(int i=1;i<numplayers;i++) clientsock[i].Flush();
+		for(int i=1;i<numplayers;i++) if(slotused[i]) clientsock[i].Flush();
 	else if(connected)
 		datasock.Flush();
 }
@@ -944,6 +1021,7 @@ void Disconnect()
 	connected=0;
 	clientserverhits=0;
 	numplayers=0;
+	ZeroMemory(slotused,sizeof(slotused));
 	VoiceReset();
 }
 
@@ -994,9 +1072,9 @@ void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pn
 				char names[2+MAXPLAYERS*PLAYERNAMESIZE];
 				ByteWriter w(names,sizeof(names));
 				w.U8(PLAYERNAMES);
-				w.U8(numplayers);
-				for(int i=0;i<numplayers;i++)
-					WritePlayerName(w,i);
+				w.U8(UsedSlots());   //not the free slots (phase 3b): in order, an older
+				for(int i=0;i<numplayers;i++)   //client counts its players up to the last one
+					if(slotused[i]) WritePlayerName(w,i);
 				clientsock[pnum].SendReliable(names,w.Size(),RECEIVEDPLAYERNAMES);
 				
 				ConsoleDisplayText("received port acknowledgement, sending player names");
@@ -1051,7 +1129,7 @@ void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pn
 				int i;
 				for(i=1;i<numplayers;i++)
 				{
-					clientsock[i].SendReliable(joingame.b,sizeof(joingame.b),0);
+					if(slotused[i]) clientsock[i].SendReliable(joingame.b,sizeof(joingame.b),0);
 				}
 				for(i=0;i<numplayers;i++)
 				if(GetPlayer(i)->playstate==10)
@@ -1112,7 +1190,7 @@ void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pn
 				if(server)
 				{
 					for(int i=1;i<numplayers;i++)
-						if(i!=pnum)clientsock[i].SendReliable(killed.b,sizeof(killed.b),0);
+						if(i!=pnum&&slotused[i])clientsock[i].SendReliable(killed.b,sizeof(killed.b),0);
 				}
 				break;
 			}
@@ -1135,7 +1213,7 @@ void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pn
 void ServerLoop()
 {
 	GTick();
-	LobbyHostLoop(numplayers);
+	LobbyHostLoop(UsedSlots());
 	AcServerFrame();
 	static Message msg;
 	SOCKADDR_IN source;
@@ -1154,7 +1232,8 @@ void ServerLoop()
 				int trailer=ReadHelloName((char *)&msg,msglen,reqname,sizeof(reqname));
 				PeerVersion peer;
 				ReadVersionTrailer((char *)&msg+trailer,msglen-trailer,&peer);
-				int addplayer=numplayers;
+				//the first free slot, one left by a player who left too (M11 phase 3b)
+				int addplayer=SlotFirstFree(slotused,1,MAXPLAYERS);
 
 				char message[1000];
 				strcpy(message,reqname);
@@ -1177,7 +1256,7 @@ void ServerLoop()
 				//a retried request (its ENTER got lost) gets the same slot again
 				int known;
 				for(known=1;known<numplayers;known++)
-					if(GetPlayer(known)->playstate==1&&
+					if(slotused[known]&&GetPlayer(known)->playstate==1&&
 						clientsock[known].requestaddr.sin_addr.s_addr==source.sin_addr.s_addr&&
 						clientsock[known].requestaddr.sin_port==source.sin_port)
 						break;
@@ -1193,7 +1272,7 @@ void ServerLoop()
 				HelloCaps caps;
 				ReadHelloCaps((char *)&msg+trailer,msglen-trailer,&caps);
 				if(!JoinAddressProven(source,&caps,msglen)) break;
-				if(numplayers>=MAXPLAYERS)
+				if(addplayer<0)
 				{
 					ConsoleDisplayText("server was full");
 					RefuseClient(source,SERVERFULL,"The server is full.");
@@ -1211,7 +1290,7 @@ void ServerLoop()
 				{
 					int used=0;
 					for(int c=1;c<numplayers;c++)
-						if(clientsock[c].link&&clientsock[c].localport==p) used=1;
+						if(slotused[c]&&clientsock[c].link&&clientsock[c].localport==p) used=1;
 					if(used) continue;
 					if(peerlink||newlink->Bind(htons(p))) port=p;
 				}
@@ -1224,7 +1303,10 @@ void ServerLoop()
 					break;
 				}
 
+				//a free slot was cleared when its player left (DeletePlayer)
 				strcpy(GetPlayer(addplayer)->name,reqname);
+				slotused[addplayer]=1;
+				if(addplayer>=numplayers) numplayers=addplayer+1;
 				clientsock[addplayer].Open(peerlink?peerlink:newlink);
 				clientsock[addplayer].dest=source;
 				clientsock[addplayer].dest.sin_port=htons(port);   //the client binds the same port
@@ -1242,8 +1324,7 @@ void ServerLoop()
 					clientsock[addplayer].Send(tmpmsg.b,sizeof(tmpmsg.b));
 					clientsock[addplayer].Flush();
 				}*/
-				strcpy(message,GetPlayer(addplayer)->name);
-				strcat(message," has connected");
+				snprintf(message,sizeof(message),"%.31s has connected (player %d)",GetPlayer(addplayer)->name,addplayer);
 				ConsoleDisplayText(message);
 				GetPlayer(addplayer)->playstate=1;
 				acplayer[addplayer].caps=caps.caps;
@@ -1258,13 +1339,13 @@ void ServerLoop()
 
 				for(int i=1;i<numplayers;i++)
 				{
-					clientsock[i].SendReliable(names,w.Size(),0);
+					//not to itself: it gets them all after PORTACK
+					if(slotused[i]&&i!=addplayer) clientsock[i].SendReliable(names,w.Size(),0);
 				}
 				GetPlayer(addplayer)->timeout=curtime+PEERTIMEOUT;
 				GetPlayer(addplayer)->gunup=Vector(0,1,0);
 				clientsock[addplayer].packetssent=0;
 				clientsock[addplayer].packetsreceived=0;
-				numplayers++;
 				
 				break;
 			}	
@@ -1284,6 +1365,7 @@ void ServerLoop()
 	int i;
 	for(i=1;i<numplayers;i++)
 	{
+		if(!slotused[i]) continue;   //left, free (M11 phase 3b)
 		clientsock[i].CheckReliableResend();
 		int clen;
 		while((clen=clientsock[i].Receive(&msg,&source)))
@@ -1359,7 +1441,7 @@ void ServerLoop()
 						char kpbuf[KILLEDPOSITIONSIZE];
 						int kpsize=WriteKilledPosition(kpbuf,sizeof(kpbuf),&kp);
 						for(int i3=1;i3<numplayers;i3++)
-							if(i3!=i)clientsock[i3].SendReliable(kpbuf,kpsize,0);
+							if(i3!=i&&slotused[i3])clientsock[i3].SendReliable(kpbuf,kpsize,0);
 					}
 					break;
 				}
@@ -1368,6 +1450,7 @@ void ServerLoop()
 		if(curtime>GetPlayer(i)->timeout||clientsock[i].reliablefailed)
 		{
 			DeletePlayer(i,0);
+			continue;   //slot i is free now, or someone else's
 		}
 		if((GetPlayer(i)->pingwasrecv&&(curtime>GetPlayer(i)->lastpingtime+1000))||
 			curtime>GetPlayer(i)->lastpingtime+500)
@@ -1394,9 +1477,9 @@ void ServerLoop()
 		}
 		nextresend=curtime+sv.positionresendtime;
 	}
-	for(i=0;i<numplayers;i++)
+	for(i=1;i<numplayers;i++)
 		{
-			clientsock[i].Flush();
+			if(slotused[i]) clientsock[i].Flush();
 		}
 	
 }
@@ -1407,7 +1490,9 @@ void SendSimple(char num,char type,DWORD msg,DWORD msg2)
 {
 	SimpleBuf simple=MakeSimple(type,msg,msg2);
 	if(server)
-		clientsock[num].Send(simple.b,sizeof(simple.b));
+	{
+		if(SlotUsed(num)) clientsock[num].Send(simple.b,sizeof(simple.b));
+	}
 	else
 		datasock.Send(simple.b,sizeof(simple.b));
 }
@@ -1479,6 +1564,9 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 					GetLocalPlayer()->playstate=1;
 					GetLocalPlayer()->timeout=curtime+PEERTIMEOUT;
 					numplayers=msg2+1;
+					//the others come with PLAYERNAMES; below us may be free slots (phase 3b)
+					ZeroMemory(slotused,sizeof(slotused));
+					slotused[msg2]=1;
 					datasock.Open(NetOpenDataLink(msg,&source));
 					datasock.dest=source;
 					datasock.dest.sin_port=msg;
@@ -1486,7 +1574,9 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 					SimpleBuf portack=MakeSimple(PORTACK,msg,0);
 					datasock.SendReliable(portack.b,sizeof(portack.b),0);
 					infosock.Close();
-					ConsoleDisplayText("connection accepted");
+					char accepted[60];
+					snprintf(accepted,sizeof(accepted),"connection accepted, player %d",(int)msg2);
+					ConsoleDisplayText(accepted);
 					datasock.packetssent=0;
 					datasock.packetsreceived=0;
 					LockCursor(1);
@@ -1510,7 +1600,8 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 			}
 		case DELETEPLAYER:
 			{
-				if(!ValidPlayer(msg)) break;
+				//nobody we know of: nothing to free or move (and numplayers stays right)
+				if(!ValidPlayer(msg)||(int)msg>=numplayers) break;
 				DeletePlayer(msg,msg2);
 				break;
 			}
@@ -1657,7 +1748,7 @@ void ClientLoop()
 					ApplyLand(&landinfo.ldfs,&landinfo.skysets);
 					for(int i=0;i<numplayers;i++)
 					{
-						GetPlayer(i)->playstate=1;
+						if(slotused[i]) GetPlayer(i)->playstate=1;
 					}
 					ConsoleDisplayText("received landinfo");
 					break;
@@ -1705,13 +1796,16 @@ void ClientLoop()
 						GetPlayer(playernum)->deaths=entries[i].deaths;
 						GetPlayer(playernum)->team=entries[i].team;
 						strcpy(GetPlayer(playernum)->name,entries[i].name);
-						if(playernum>=numplayers) 
+						//a joiner comes alone; it may take a free slot (phase 3b)
+						int freed=numnames==1&&playernum<numplayers&&!slotused[playernum];
+						slotused[playernum]=1;
+						if(playernum>=numplayers||freed)
 						{
 							char message[1000];
 							strcpy(message,GetPlayer(playernum)->name);
 							strcat(message," has joined the game");
 							ConsoleDisplayText(message);
-							numplayers=playernum+1;
+							if(playernum>=numplayers) numplayers=playernum+1;
 						}
 					}
 					ConsoleDisplayText("received player names");
@@ -2117,35 +2211,52 @@ int IsConnected()
 	return connected;
 }
 
-//called by the client and server when a player leaves
+//can every client but except keep its number when a player leaves (M11 phase 3b):
+//older builds renumber everyone after the leaver on any DELETEPLAYER, so with one of
+//them in the game the server renumbers too, as before
+static int AllKeepSlots(int except)
+{
+	if(!ac_stableslots) return 0;
+	for(int i=1;i<numplayers;i++)
+		if(i!=except&&slotused[i]&&!(acplayer[i].caps&HELLOCAP_STABLESLOTS)) return 0;
+	return 1;
+}
+
+//the server's state that names players, after player left left: forgotten for it,
+//moved down one after it if compact (DeletePlayer moves the players and sockets)
+static void AcPlayerLeft(int left,int compact)
+{
+	for(int i=0;i<numplayers;i++)
+	{
+		AcPlayer *a=&acplayer[i];
+		int n=SlotRenumber(a->lastattacker,left,compact);
+		if(n<0) a->lasthit=0;   //no kill credited to whoever comes next in its slot
+		else a->lastattacker=n;
+	}
+}
+
+//called by the client and server when a player leaves. reason: 0 timed out, 1 left,
+//2 kicked; from the server, with PLAYERLEFT_KEEPSLOTS if the others keep their
+//numbers. The server decides that itself (AllKeepSlots).
 
 void DeletePlayer(int num,int reason)
 {
-	
+	int keep=(reason&PLAYERLEFT_KEEPSLOTS)!=0;
+	reason&=PLAYERLEFT_REASON;
 	if(server)
 	{
+		keep=AllKeepSlots(num);
 		GPlayerLeave(num);
-		SimpleBuf deleteplayer=MakeSimple(DELETEPLAYER,num,reason);
+		SimpleBuf deleteplayer=MakeSimple(DELETEPLAYER,num,reason|(keep?PLAYERLEFT_KEEPSLOTS:0));
 		for(int i=1;i<numplayers;i++)
 		{
-			clientsock[i].SendReliable(deleteplayer.b,sizeof(deleteplayer.b),0);
+			if(slotused[i]) clientsock[i].SendReliable(deleteplayer.b,sizeof(deleteplayer.b),0);
 		}
-		
+
 		clientsock[num].Close();
-		
+
 		clientsock[num].ResetReliable();
-		
-	}
-	int localnum=GetLocalNum();
-	if(localnum==num)
-	{
-		Disconnect();
-		SetLocalNum(0);
-		GetLocalPlayer()->playstate=0;
-	}
-	if(localnum>num)
-	{
-		SetLocalNum(localnum-1);
+
 	}
 	char message[1000];
 	strcpy(message,GetPlayer(num)->name);
@@ -2162,17 +2273,54 @@ void DeletePlayer(int num,int reason)
 		break;
 	}
 	ConsoleDisplayText(message);
+	int localnum=GetLocalNum();
+	if(localnum==num)
+	{
+		//kicked: nothing left to renumber (Disconnect emptied the game)
+		Disconnect();
+		SetLocalNum(0);
+		GetLocalPlayer()->playstate=0;
+		return;
+	}
+	if(keep)
+	{
+		//phase 3b: the slot is free, nobody else moves
+		ZeroMemory(GetPlayer(num),sizeof(Player));
+		if(server)
+		{
+			ZeroMemory(&clientsock[num],sizeof(Sock));
+			AcPlayerLeft(num,0);
+			ZeroMemory(&acplayer[num],sizeof(AcPlayer));
+		}
+		slotused[num]=0;
+		VoiceForget(num);
+		numplayers=SlotTrim(slotused,numplayers);
+		return;
+	}
+	if(localnum>num)
+	{
+		SetLocalNum(localnum-1);
+	}
 	VoiceReset();   //players are renumbered
+	if(server) AcPlayerLeft(num,1);
 	numplayers--;
 	for(int i=num;i<numplayers;i++)
 	{
 		CopyMemory(GetPlayer(i),GetPlayer(i+1),sizeof(Player));
 		if(server) CopyMemory(&clientsock[i],&clientsock[i+1],sizeof(Sock));
 		acplayer[i]=acplayer[i+1];
+		slotused[i]=slotused[i+1];
 	}
 	ZeroMemory(GetPlayer(numplayers),sizeof(Player));
 	ZeroMemory(&clientsock[numplayers],sizeof(Sock));
-	
+	ZeroMemory(&acplayer[numplayers],sizeof(AcPlayer));
+	slotused[numplayers]=0;
+	//what names players by number moves down with them: projectiles in flight here,
+	//objects carried (the server sends their new carrier: older clients don't move them)
+	for(int i=0;i<MAXOBJS;i++)
+		if(object[i].type&&object[i].pnum>num) object[i].pnum--;
+	if(server) GPlayerRenumber(num);
+
 }
 
 //sends the land information necessary to construct the same landscape
@@ -2230,6 +2378,7 @@ void SendLandInfo(int num)
 	{
 		for(int i=1;i<numplayers;i++)
 		{
+			if(!slotused[i]) continue;
 			GetPlayer(i)->playstate=1;
 			clientsock[i].SendReliable(buf,size,RECEIVEDLANDINFO);
 		}
@@ -2263,6 +2412,7 @@ void ReceivePosition(const char *msg,int msglen,int sender)
 	PlayerPosition *pos=&position;
 	int pnum=sender>=0?sender:pos->pnum;
 	if(!ValidPlayer(pnum)) return;
+	if(sender>=0&&!AcPositionAccepted(sender,msg,msglen)) return;   //stale, too fast (M11 phase 3b)
 	Player *src=GetPlayer(pnum);
 	src->up=!!((1<<0)&pos->keys);
 	src->down=!!((1<<1)&pos->keys);
@@ -2286,7 +2436,7 @@ void ReceivePosition(const char *msg,int msglen,int sender)
 		//a client only reports being alive or dead, and stays dead while the
 		//server says so (M11)
 		if(pos->state==10||pos->state==11)
-			src->playstate=AcPosition(pnum,pos->state,src->pos,src->weapon);
+			src->playstate=AcPosition(pnum,pos->state,&src->pos,src->weapon);
 	}
 	else if(pos->state!=1) 
 		src->playstate=pos->state;
@@ -2320,11 +2470,15 @@ void SendPosition(char srcnum,char destnum)
 	pos.weapon=src->weapon;
 	pos.pnum=srcnum;
 	pos.state=src->playstate;
-	char buf[POSITIONSIZE];
+	char buf[POSITIONSEQSIZE];
 	int size=WritePosition(buf,sizeof(buf),&pos);
 	if(!server)
 	{
-		datasock.Send(buf,size);
+		//numbered (HELLOCAP_POSSEQ, M11 phase 3b): the server drops the ones
+		//overtaken on the way. Older servers read the first 16 bytes only.
+		static unsigned int posseq;
+		WirePutU16(&buf[size],++posseq);
+		datasock.Send(buf,size+2);
 	}
 	else
 	{
@@ -2479,7 +2633,7 @@ void ReceiveBlockBuffer(char *buf,int pnum,int len)
 		WirePutU32(&buf[1],numblocks);   //relay the blocks actually received
 		for(i=1;i<numplayers;i++)
 		{
-			clientsock[i].SendReliable(buf,pos,0);
+			if(slotused[i]) clientsock[i].SendReliable(buf,pos,0);
 		}
 	}
 }
@@ -2490,6 +2644,7 @@ int SendMultMessage(const void *msg,int len,int player=-1)
 	if(!server) return 0;
 	for(int i=0;i<numplayers;i++)
 	{
+		if(!slotused[i]) continue;
 		if(player==TARGTEAM||GetPlayer(i)->team==player-TARGTEAM||player==-1||i==player)
 		{
 			if(i==0)
@@ -2754,7 +2909,7 @@ void Killed(int killer)
 	if(server)
 	{
 		for(int i=1;i<numplayers;i++)
-			clientsock[i].SendReliable(killed.b,sizeof(killed.b),0);
+			if(slotused[i]) clientsock[i].SendReliable(killed.b,sizeof(killed.b),0);
 	}
 	else
 	{
@@ -2789,9 +2944,9 @@ void SendServerVars(int num)
 		}
 		else
 		{
-			for(int i=0;i<numplayers;i++)
+			for(int i=1;i<numplayers;i++)
 			{
-				clientsock[i].SendReliable(buf,size,0);
+				if(slotused[i]) clientsock[i].SendReliable(buf,size,0);
 			}
 		}
 	}
@@ -2837,7 +2992,7 @@ void ChangeTeam(int player,int team)
 		ReceiveChangeTeam(player,team);
 		for(int i=1;i<numplayers;i++)
 		{
-			clientsock[i].SendReliable(changeteam.b,sizeof(changeteam.b),0);
+			if(slotused[i]) clientsock[i].SendReliable(changeteam.b,sizeof(changeteam.b),0);
 		}
 	}
 	else
@@ -2862,7 +3017,7 @@ void SendUpdateServerObject(int num)
 	{
 		for(int i=1;i<numplayers;i++)
 		{
-			clientsock[i].SendReliable(buf,size,0);
+			if(slotused[i]) clientsock[i].SendReliable(buf,size,0);
 		}
 	}
 }
@@ -2954,7 +3109,7 @@ void ScoreReset()
 	if(server)
 	for(int i=1;i<numplayers;i++)
 	{
-		clientsock[i].SendReliable(scorereset.b,sizeof(scorereset.b),0);
+		if(slotused[i]) clientsock[i].SendReliable(scorereset.b,sizeof(scorereset.b),0);
 	}
 }
 
@@ -2963,6 +3118,7 @@ void GiveCredit(int player, int credit, int number)
 	if(!server) return;
 	for(int i=0;i<numplayers;i++)
 	{
+		if(!slotused[i]) continue;
 		if(player==TARGTEAM||GetPlayer(i)->team==player-TARGTEAM||player==-1||i==player)
 		{
 			if(credit>=0)

@@ -58,6 +58,13 @@
 //SERVERHIT: you were hit, msg = by whom, msg2 = your life now (0: KILLED follows).
 #define SERVERHIT 28
 #define HITMODE 29
+//DELETEPLAYER: msg = the player who left, msg2 = reason (0 timed out, 1 left, 2
+//kicked). With PLAYERLEFT_KEEPSLOTS (M11 phase 3b, docs/M11.md) the others keep
+//their numbers and the slot is free; without it everyone after msg moves down one
+//(what older builds always do). Only sent with it when every client has
+//HELLOCAP_STABLESLOTS (version.h).
+#define PLAYERLEFT_KEEPSLOTS 0x100
+#define PLAYERLEFT_REASON 0xFF
 
 //Decoded messages. None of these structs goes onto the wire as it is: each
 //message has explicit Write/Read functions (netmsg.h, src/net/wire.h).
