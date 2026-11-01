@@ -18,6 +18,7 @@
 #include "textures.h"
 #include "edifice.glsl.h"
 #include <math.h>
+#include <stddef.h>   //offsetof
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

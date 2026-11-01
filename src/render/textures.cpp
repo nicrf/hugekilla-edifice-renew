@@ -345,7 +345,7 @@ void MoveUnnecessaryTextures()
 			strcpy(newfilename,"textures/sprite/unused/");
 			strcat(newfilename,texname[i]);
 			char message[10000];
-			sprintf(message,"Moving %s to %s",oldfilename,newfilename);
+			snprintf(message,sizeof(message),"Moving %s to %s",oldfilename,newfilename);
 			ConsoleDisplayText(message);
 			HKRenameFile(oldfilename,newfilename);
 		}
