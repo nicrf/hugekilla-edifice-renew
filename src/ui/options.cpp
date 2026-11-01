@@ -51,11 +51,11 @@ static Binding bindings[]=
 };
 #define NUMBINDINGS (int)(sizeof(bindings)/sizeof(bindings[0]))
 
-#define NUMSETTINGS 13
+#define NUMSETTINGS 14
 static const char *settinglabels[NUMSETTINGS]=
 {
 	"Fullscreen","VSync","Draw distance","Mouse sensitivity","Invert mouse","Volume",
-	"Voice volume","Microphone","Gun over walls","Explosions","Smoke","Impacts and splashes","Muzzle flash"
+	"Voice volume","Microphone","Gun over walls","Explosions","Smoke","Impacts and splashes","Muzzle flash","Net stats"
 };
 
 //layout, in screen units (-1..1), like the server setup screen (serversetup.cpp)
@@ -244,7 +244,7 @@ void SetIniValues(const char *filename,const char *keys[],const char *values[],i
 
 static void SaveOptions()
 {
-#define NUMNUMBERS 13
+#define NUMNUMBERS 14
 #define MAXPADVALUES 32
 	const char *keys[NUMBINDINGS+NUMNUMBERS+MAXPADVALUES];
 	const char *values[NUMBINDINGS+NUMNUMBERS+MAXPADVALUES];
@@ -273,8 +273,9 @@ static void SaveOptions()
 	sprintf(numbers[10],"%d",fxprefs.smoke);
 	sprintf(numbers[11],"%d",fxprefs.impacts);
 	sprintf(numbers[12],"%d",fxprefs.muzzleflash);
+	sprintf(numbers[13],"%d",fxprefs.netstats);
 	const char *numberkeys[NUMNUMBERS]={"changeres","vsync","drawdistance","mousesensitivity","mousereverse","volume",
-		"voicevolume","voicemic","fxviewmodel","fxexplosions","fxsmoke","fximpacts","fxmuzzleflash"};
+		"voicevolume","voicemic","fxviewmodel","fxexplosions","fxsmoke","fximpacts","fxmuzzleflash","netstats"};
 	for(int i=0;i<NUMNUMBERS;i++)
 	{
 		keys[n]=numberkeys[i];
@@ -312,6 +313,7 @@ void LoadOptions()
 	if(ini.GetValues("fxsmoke")) fxprefs.smoke=ini.GetValuei("fxsmoke")!=0;
 	if(ini.GetValues("fximpacts")) fxprefs.impacts=ini.GetValuei("fximpacts")!=0;
 	if(ini.GetValues("fxmuzzleflash")) fxprefs.muzzleflash=ini.GetValuei("fxmuzzleflash")!=0;
+	if(ini.GetValues("netstats")) fxprefs.netstats=ini.GetValuei("netstats")!=0;
 }
 
 void OpenOptions()
@@ -401,6 +403,7 @@ static void ChangeSetting(int row,int dir)
 	case 10: fxprefs.smoke=!fxprefs.smoke; break;
 	case 11: fxprefs.impacts=!fxprefs.impacts; break;
 	case 12: fxprefs.muzzleflash=!fxprefs.muzzleflash; break;
+	case 13: fxprefs.netstats=!fxprefs.netstats; break;
 	}
 }
 
@@ -426,6 +429,7 @@ static void SettingText(int row,char *text)
 	case 10: strcpy(text,fxprefs.smoke?"On":"Off"); break;
 	case 11: strcpy(text,fxprefs.impacts?"On":"Off"); break;
 	case 12: strcpy(text,fxprefs.muzzleflash?"On":"Off"); break;
+	case 13: strcpy(text,fxprefs.netstats?"On":"Off"); break;
 	}
 }
 

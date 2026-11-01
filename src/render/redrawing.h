@@ -62,6 +62,7 @@ struct FxPrefs
 	int smoke;            //smoke after explosions, trails of grenades in flight
 	int impacts;          //bullets: splashes on the water, bubbles under it, dust on land
 	int muzzleflash;      //a glow around the muzzle sprite when a gun fires
+	int netstats;         //fps, bytes sent/received per second and the red/blue packet lights
 };
 
 struct Particle
