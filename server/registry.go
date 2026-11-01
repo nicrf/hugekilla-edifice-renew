@@ -90,6 +90,33 @@ func cleanText(s string, max int) string {
 	return strings.TrimSpace(b.String())
 }
 
+// codeAlphabet: the characters of game codes, without the look-alikes 0/O and 1/I.
+const codeAlphabet = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+
+// newCode is a game id short enough to be read out or typed: 6 characters,
+// 30 random bits.
+func newCode() string {
+	b := make([]byte, 6)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
+	for i := range b {
+		b[i] = codeAlphabet[int(b[i])%len(codeAlphabet)]
+	}
+	return string(b)
+}
+
+// NormalizeCode turns what a player typed ("abc-123 ") into an id.
+func NormalizeCode(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToUpper(s) {
+		if r != '-' && r != ' ' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 func (a *Announcement) validate() error {
 	a.Name = cleanText(a.Name, 64)
 	a.Version = cleanText(a.Version, 15)
@@ -134,7 +161,11 @@ func (r *Registry) Register(ip string, a Announcement) (id, token string, err er
 	if perIP >= r.maxPerIP || len(r.servers) >= r.maxTotal {
 		return "", "", ErrTooMany
 	}
-	s := &Server{ID: randomHex(8), Address: ip, token: randomHex(16), lastSeen: r.now()}
+	id = newCode()
+	for r.servers[id] != nil {
+		id = newCode()
+	}
+	s := &Server{ID: id, Address: ip, token: randomHex(16), lastSeen: r.now()}
 	s.apply(a)
 	r.servers[s.ID] = s
 	return s.ID, s.token, nil
@@ -199,12 +230,13 @@ func (r *Registry) List(protocol int) []Server {
 	return out
 }
 
-// Get returns one game by id, whatever its visibility (shared by invitation).
+// Get returns one game by id (its game code, any case), whatever its
+// visibility (shared by invitation).
 func (r *Registry) Get(id string) (Server, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.expireLocked()
-	s, ok := r.servers[id]
+	s, ok := r.servers[NormalizeCode(id)]
 	if !ok {
 		return Server{}, false
 	}

@@ -57,7 +57,7 @@ jobs:
         run: |
           .github/scripts/apt-install.sh build-essential cmake ninja-build libglu1-mesa-dev \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev \
-            libxkbcommon-dev libwayland-dev libasound2-dev libpulse-dev
+            libxkbcommon-dev libwayland-dev libasound2-dev libpulse-dev libcurl4-openssl-dev
 
       - name: Build and package
         shell: bash
@@ -89,7 +89,12 @@ jobs:
         run: |
           .github/scripts/apt-install.sh build-essential cmake ninja-build xvfb libgl1-mesa-dri libglu1-mesa-dev \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev \
-            libxkbcommon-dev libwayland-dev libasound2-dev libpulse-dev
+            libxkbcommon-dev libwayland-dev libasound2-dev libpulse-dev libcurl4-openssl-dev
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache-dependency-path: server/go.sum
 
       - name: Build with AddressSanitizer
         env:
@@ -98,6 +103,12 @@ jobs:
 
       - name: Network tests
         run: tests/run_netplay_tests.sh build/linux-debug/Edifice netplay-logs
+
+      - name: Lobby tests (edifice-lobby, a host announcing, a client joining by game code)
+        run: |
+          (cd server && go build -o ../build/edifice-lobby .)
+          SDL_AUDIODRIVER=dummy xvfb-run -a python3 tests/net_lobby.py build/linux-debug/Edifice \
+            build/edifice-lobby build/linux-debug/lobby_test
 
       - uses: actions/upload-artifact@v4
         if: failure()

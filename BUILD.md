@@ -16,10 +16,10 @@ Seulement la chaîne de compilation (+ Python 3) ; pas besoin d'installer SDL2.
 - **macOS** : `xcode-select --install`, puis `brew install cmake ninja`
 - **Linux (Debian/Ubuntu)** :
   ```bash
-  sudo apt install build-essential cmake ninja-build libglu1-mesa-dev libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev libwayland-dev libxkbcommon-dev libasound2-dev libpulse-dev
+  sudo apt install build-essential cmake ninja-build libglu1-mesa-dev libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev libwayland-dev libxkbcommon-dev libasound2-dev libpulse-dev libcurl4-openssl-dev
   ```
-  (les en-têtes X11/Wayland/audio servent à compiler SDL ; à l'exécution SDL charge ce qui est présent)
-- **Windows** : Visual Studio 2019+ (charge « Développement Desktop en C++ »), CMake (fourni avec VS), Python 3.
+  (les en-têtes X11/Wayland/audio servent à compiler SDL ; à l'exécution SDL charge ce qui est présent ; libcurl sert à la liste des parties Internet, le jeu se compile sans, l'onglet Internet dit alors qu'il n'est pas disponible)
+- **Windows** : Visual Studio 2019+ (charge « Développement Desktop en C++ »), CMake (fourni avec VS), Python 3. libcurl (liste des parties Internet) est téléchargé et compilé avec le TLS de Windows (Schannel), comme SDL2 ; `-DEDIFICE_LOBBY=OFF` s'en passe.
 
 ## Compiler
 
@@ -49,10 +49,13 @@ Avec les presets CMake : `cmake --preset macos-release && cmake --build --preset
   - `python3 tests/net_identity.py` : une nouvelle demande garde son slot, un autre client a le sien ;
   - `python3 tests/net_join.py` : rejoint la partie comme un vrai client et décode PLAYERNAMES, LANDINFO, SERVERVARS, etc. (tailles et valeurs du format explicite), puis envoie des messages tronqués ;
   - `python3 tests/net_fuzz.py` : paquets malformés, à lancer de préférence contre un build AddressSanitizer (voir l'en-tête du script) ;
-  - `python3 tests/net_voice.py` : trois clients ; la voix n'est relayée qu'au joueur proche (y compris de l'autre côté du bord du monde), sous le numéro de l'émetteur, et jamais si le message est malformé ;
+  - `python3 tests/net_voice.py` : trois clients ; la voix n'est relayée qu'au joueur proche, sous le numéro de l'émetteur, et jamais si le message est malformé ;
   - `python3 tests/net_map.py --write /tmp/test.map`, puis `HK_AUTOSTART=1 HK_MAPFILE=/tmp/test.map <binaire> &` et `python3 tests/net_map.py /tmp/test.map` : un client qui rejoint un serveur lancé avec une carte reçoit son relief, son ciel et tous ses blocs.
   - `tests/run_netplay_tests.sh <binaire>` lance les six, un serveur neuf par test (sous Linux avec Xvfb si aucun écran) ; la CI le fait à chaque push contre un build AddressSanitizer, et une release n'est publiée que s'ils passent.
 - Partie à deux sur une machine : `HK_AUTOSTART=1 <binaire> &` puis `HK_JOIN=127.0.0.1 <binaire>` (le second rejoint le premier serveur qui répond). `HK_CONSOLE_LOG=1` recopie la console sur stderr.
+- Parties Internet (lobby, M7c) : `python3 tests/net_lobby.py <binaire> <edifice-lobby> [<lobby_test>]` (Linux, avec un écran ou `xvfb-run`) lance le lobby de `server/`, un hôte qui s'y annonce et un client qui le rejoint par son code de partie ; `HK_LOBBY_URL=http://127.0.0.1:8080 lobby_test` teste seul le client du lobby. La CI les lance.
+
+Parties Internet : dans `net.ini`, `lobby=https://…` donne l'adresse du serveur `edifice-lobby` (vide par défaut, en attendant une instance publique : l'onglet Internet de l'écran Join dit alors qu'aucun lobby n'est configuré), et `servervisibility=lan|public|friends|private` (ligne « Internet » de Server Setup) dit si l'hôte s'annonce : `public` est listée, `friends`/`private` se rejoignent par le code de partie (6 caractères, affiché dans la console et le tableau des scores de l'hôte). La connexion reste pour l'instant l'UDP direct vers l'IP vue par le lobby : l'hôte doit ouvrir ses ports UDP (27020 et suivants) tant que le P2P (M7d) n'est pas là.
 
 ## GameNetworkingSockets (expérimental, M7)
 
@@ -149,7 +152,8 @@ Les lettres suivent la disposition du clavier : sur AZERTY, remappez Avancer/Gau
 - `HK_ZOOM_TEST=1` simule un appui sur la touche de zoom (zoom ×3).
 - `HK_SEED=N` génère le même monde à chaque lancement (pour comparer des captures).
 - `HK_KEYLOG=1` affiche dans le terminal chaque touche reçue par le jeu (code VK) et les changements de zoom.
-- `HK_MENU=options|options2|player|credits|join|server|serverstart` ouvre cet écran au démarrage.
+- `HK_MENU=options|options2|player|credits|join|internet|server|serverstart` ouvre cet écran au démarrage (`internet` : l'onglet Internet de Join).
+- `HK_LOBBYJOIN=<code>` cherche ce code de partie sur le lobby (`net.ini` `lobby=`) et rejoint la partie, par l'onglet Internet.
 - `HK_CONSOLE=1` démarre un serveur local et ouvre la console après quelques commandes (`help`, `maps`, …) ; `HK_CONSOLE=scroll` la fait défiler vers le haut, `HK_CONSOLE=notify` la laisse fermée (dernières lignes sur le jeu), toute autre valeur reste tapée à l'invite (`HK_CONSOLE=gr` : complétion).
 - `HK_SHOT=fichier.ppm` (et `HK_SHOT_FRAME=N`) enregistre l'image rendue N.
 - Chat vocal : `HK_VOICE_TEST_TONE=1` émet une tonalité à la place du micro, `HK_VOICE_AUTOTALK=1` émet en permanence (sans touche), `HK_VOICE_LOOPBACK=1` fait entendre sa propre voix par le chemin de réception, `HK_VOICE_LOG=1` affiche sur stderr chaque début de prise de parole entendue.

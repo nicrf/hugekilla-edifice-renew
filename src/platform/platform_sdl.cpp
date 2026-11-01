@@ -595,13 +595,18 @@ int main(int argc, char **argv)
 		JoinNetOpen();
 		autojoin = JoinNetQuery(host);
 	}
-	// Debug aid: HK_MENU=options|credits|join opens that screen at startup.
+	// Debug aid: HK_LOBBYJOIN=<game code> looks the game up on the lobby (net.ini
+	// lobby=) and joins it, through the join screen's Internet tab (tests/net_lobby.py).
+	if (const char *code = getenv("HK_LOBBYJOIN"))
+		JoinScreenJoinCode(code);
+	// Debug aid: HK_MENU=options|credits|join|internet opens that screen at startup.
 	if (const char *m = getenv("HK_MENU"))
 	{
 		if (!strcmp(m, "options")) OpenOptions();
 		if (!strcmp(m, "options2")) { OpenOptions(); mousepos = Vector(-.2f, .72f, 0); OptionsClick(); }
 		if (!strcmp(m, "credits")) { mousepos = Vector(0, -.92f, 0); MenuMouseDown(); }
 		if (!strcmp(m, "join")) OpenJoinScreen();
+		if (!strcmp(m, "internet")) JoinScreenJoinCode("");   // the Internet tab
 		if (!strcmp(m, "joindemo"))
 		{
 			OpenJoinScreen();

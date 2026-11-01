@@ -53,6 +53,7 @@ docker run -p 8080:8080 -p 10000:10000 -p 3478:3478/udp -e EDIFICE_PUBLIC_HOST=l
 | `-turn-relay-ports` | `EDIFICE_TURN_RELAY_PORTS` | — | plage UDP du trafic relayé (ex. `49160-49200`), indispensable derrière les redirections de ports de Docker |
 | `-trust-proxy` | `EDIFICE_TRUST_PROXY=1` | non | IP du client lue dans `X-Forwarded-For` (derrière un reverse proxy) |
 | `-ttl` | — | `60s` | une partie disparaît si son hôte ne l'a pas renouvelée depuis ce délai |
+| `-rate-limit` | — | `30` | requêtes d'écriture et recherches par code autorisées par minute et par IP (rafale : un tiers) |
 
 Pour le relais TURN, les ports UDP des allocations doivent aussi être joignables : fixer leur plage avec `-turn-relay-ports` et l'ouvrir (le compose le fait).
 
@@ -65,10 +66,10 @@ Pour le relais TURN, les ports UDP des allocations doivent aussi être joignable
 | `PUT /v1/servers/{id}` (même corps, `Authorization: Bearer <token>`) | 204 : partie renouvelée |
 | `DELETE /v1/servers/{id}` (`Authorization: Bearer <token>`) | 204 |
 | `GET /v1/servers?protocol=N` | `{"servers": [...]}` : parties publiques, les plus peuplées d'abord |
-| `GET /v1/servers/{id}` | une partie, même privée (partagée par son id) |
+| `GET /v1/servers/{id}` | une partie, même privée (partagée par son id : le **code de partie**) |
 | `GET /healthz` | `ok` |
 
-L'adresse d'une partie est **l'IP vue par le serveur**, jamais celle déclarée par l'hôte. `visibility` vaut `public` (listée), `friends` ou `private` (non listées, joignables par leur id). Limites : 4 parties par IP, requêtes d'écriture limitées par IP, corps de 4 Ko maximum, textes réduits à l'ASCII imprimable.
+L'adresse d'une partie est **l'IP vue par le serveur**, jamais celle déclarée par l'hôte. `visibility` vaut `public` (listée), `friends` ou `private` (non listées, joignables par leur id). L'id est le **code de partie** : 6 caractères (chiffres et majuscules, sans 0/O ni 1/I) à se transmettre ; la recherche ignore la casse, les tirets et les espaces, et compte dans la limite de requêtes par IP pour qu'on ne puisse pas énumérer les parties privées. Limites : 4 parties par IP, requêtes d'écriture limitées par IP, corps de 4 Ko maximum, textes réduits à l'ASCII imprimable.
 
 ## Signalisation
 
