@@ -451,3 +451,152 @@ int SignalWsReader::Next(int *opcode,std::string *payload)
 		return 1;
 	}
 }
+
+//---- WebRTC signals ----
+
+static const char b64url[]="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+static void Base64Url(const std::string &in,std::string *out)
+{
+	const unsigned char *p=(const unsigned char *)in.data();
+	int n=(int)in.size();
+	for(int i=0;i<n;i+=3)
+	{
+		unsigned v=(unsigned)p[i]<<16|(i+1<n?(unsigned)p[i+1]<<8:0)|(i+2<n?p[i+2]:0);
+		*out+=b64url[v>>18&63];
+		*out+=b64url[v>>12&63];
+		if(i+1<n) *out+=b64url[v>>6&63];
+		if(i+2<n) *out+=b64url[v&63];
+	}
+}
+
+static int Base64UrlDigit(int c)
+{
+	if(c>='A'&&c<='Z') return c-'A';
+	if(c>='a'&&c<='z') return c-'a'+26;
+	if(c>='0'&&c<='9') return c-'0'+52;
+	if(c=='-') return 62;
+	if(c=='_') return 63;
+	return -1;
+}
+
+//n characters at s, unpadded: 1 and the bytes in out, 0 if not base64url or longer
+//than max once decoded
+static int UnBase64Url(const char *s,int n,int max,std::string *out)
+{
+	out->clear();
+	if(n<0||n%4==1||(n/4)*3+(n%4?n%4-1:0)>max) return 0;
+	unsigned v=0;
+	int bits=0;
+	for(int i=0;i<n;i++)
+	{
+		int d=Base64UrlDigit((unsigned char)s[i]);
+		if(d<0) return 0;
+		v=(v<<6|d)&0xffffff;
+		bits+=6;
+		if(bits>=8)
+		{
+			bits-=8;
+			out->push_back((char)(v>>bits&255));
+		}
+	}
+	return 1;
+}
+
+//what an SDP or a candidate may hold: printable ASCII, line ends, tabs
+static int RtcText(const std::string &t,int needed)
+{
+	if((int)t.size()>SIGNAL_RTC_MAXTEXT||(needed&&t.empty())) return 0;
+	for(size_t i=0;i<t.size();i++)
+	{
+		unsigned char c=(unsigned char)t[i];
+		if((c<32||c>126)&&c!='\r'&&c!='\n'&&c!='\t') return 0;
+	}
+	return 1;
+}
+
+static int RtcValid(const SignalRtc *s)
+{
+	int n=(int)strnlen(s->cid,SIGNAL_RTC_MAXCID+1);
+	if(n<1||n>SIGNAL_RTC_MAXCID) return 0;
+	for(int i=0;i<n;i++)
+	{
+		char c=s->cid[i];
+		if(!((c>='0'&&c<='9')||(c>='a'&&c<='z')||(c>='A'&&c<='Z'))) return 0;
+	}
+	if(s->kind!='o'&&s->kind!='a'&&s->kind!='c') return 0;
+	if(s->kind!='c'&&!s->b.empty()) return 0;
+	return RtcText(s->a,1)&&RtcText(s->b,0);
+}
+
+static void RtcClear(SignalRtc *s)
+{
+	s->kind=0;
+	s->cid[0]=0;
+	s->a.clear();
+	s->b.clear();
+}
+
+int SignalRtcFormat(const char *destination,const SignalRtc *s,std::string *line)
+{
+	if(!SignalValidIdentity(destination)||!RtcValid(s)) return 0;
+	line->assign(destination);
+	*line+=" " SIGNAL_RTC_PREFIX;
+	line->push_back(s->kind);
+	*line+=':';
+	*line+=s->cid;
+	*line+=':';
+	Base64Url(s->a,line);
+	if(s->kind=='c')
+	{
+		*line+=':';
+		Base64Url(s->b,line);
+	}
+	line->push_back('\n');
+	return (int)line->size()<=SIGNAL_MAXLINE;
+}
+
+int SignalRtcParse(const char *payload,int len,SignalRtc *s)
+{
+	RtcClear(s);
+	const int pre=(int)sizeof(SIGNAL_RTC_PREFIX)-1;
+	if(!payload||len<pre+4||len>SIGNAL_MAXLINE||memcmp(payload,SIGNAL_RTC_PREFIX,pre)) return 0;
+	const char *p=payload+pre,*end=payload+len;
+	if(p[1]!=':') return 0;
+	char kind=p[0];
+	p+=2;
+	const char *colon=(const char *)memchr(p,':',end-p);
+	if(!colon||colon-p<1||colon-p>SIGNAL_RTC_MAXCID) return 0;
+	memcpy(s->cid,p,colon-p);
+	s->cid[colon-p]=0;
+	p=colon+1;
+	const char *second=(const char *)memchr(p,':',end-p);
+	if((second&&kind!='c')||
+		!UnBase64Url(p,(int)((second?second:end)-p),SIGNAL_RTC_MAXTEXT,&s->a)||
+		(second&&(memchr(second+1,':',end-second-1)||
+			!UnBase64Url(second+1,(int)(end-second-1),SIGNAL_RTC_MAXTEXT,&s->b))))
+	{
+		RtcClear(s);
+		return 0;
+	}
+	s->kind=kind;
+	if(RtcValid(s)) return 1;
+	RtcClear(s);
+	return 0;
+}
+
+int SignalRtcParseLine(const char *line,int len,char *sender,int sendersize,SignalRtc *s)
+{
+	if(sendersize>0) sender[0]=0;
+	RtcClear(s);
+	if(!line||len<0||len>SIGNAL_MAXLINE) return 0;
+	if(len&&line[len-1]=='\r') len--;
+	const char *space=(const char *)memchr(line,' ',len);
+	if(!space) return 0;
+	int idlen=(int)(space-line);
+	if(!ValidIdentity(line,idlen)||idlen>=sendersize) return 0;
+	if(!SignalRtcParse(space+1,len-idlen-1,s)) return 0;
+	memcpy(sender,line,idlen);
+	sender[idlen]=0;
+	return 1;
+}

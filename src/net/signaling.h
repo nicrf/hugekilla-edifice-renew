@@ -103,6 +103,37 @@ private:
 	unsigned long long skipping;   //bytes of an overlong frame still to drop
 };
 
+//---- WebRTC signals (roadmap M14 task 3) ----
+//A browser joins a native host over a WebRTC DataChannel (rtchost.h, webrtclink.h).
+//Its offer, the host's answer and the ICE candidates of both travel over the same
+//relay, as lines whose payload is
+//  rtc1:K:CID:A[:B]
+//K the kind (o offer, a answer, c candidate), CID the browser's connection id (1 to
+//SIGNAL_RTC_MAXCID letters and digits, a new one each time it tries), A and B in
+//base64url without padding: the SDP (o, a), or the candidate line and its mid (c).
+//The relay wants printable payloads without spaces, which these are; the hex
+//payloads of GameNetworkingSockets never start with "rtc1:". No JSON on purpose:
+//nothing to parse but these fields, on both sides.
+#define SIGNAL_RTC_PREFIX "rtc1:"
+#define SIGNAL_RTC_MAXCID 16
+#define SIGNAL_RTC_MAXTEXT 2700      //an SDP or a candidate, decoded (DataChannel SDPs: ~600)
+
+struct SignalRtc
+{
+	char kind;                       //'o', 'a' or 'c'
+	char cid[SIGNAL_RTC_MAXCID+1];
+	std::string a,b;                 //SDP; or candidate and mid (b may be "")
+};
+
+//"DESTINATION rtc1:...\n"; 0 if anything isn't valid or the line is too long
+int SignalRtcFormat(const char *destination,const SignalRtc *s,std::string *line);
+//the payload of a relay line ("rtc1:..."): 1 and the signal if valid (texts
+//printable ASCII, SDP line ends and tabs allowed), else 0
+int SignalRtcParse(const char *payload,int len,SignalRtc *s);
+//a line from the relay, without its '\n': 1 and the sender and signal if it is a
+//valid WebRTC signal, else 0 (another kind of line, or malformed)
+int SignalRtcParseLine(const char *line,int len,char *sender,int sendersize,SignalRtc *s);
+
 //signaling relay address, "host:port" (host name or IPv4; port 1-65535): 1 and its
 //parts if valid
 int SignalParseAddress(const char *text,char *host,int hostsize,int *port);

@@ -46,6 +46,24 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data,size_t size)
 			memcpy(copy,line.data(),line.size());
 			int len=-1;
 			int r=SignalParseLine(copy,(int)line.size(),sender,sizeof(sender),payload,sizeof(payload),&len);
+			// the same line as a WebRTC signal (M14 task 3): valid fields, and written
+			// back it reads the same
+			SignalRtc rtc,again;
+			char rtcsender[SIGNAL_MAXIDENTITY+1];
+			if(SignalRtcParseLine(copy,(int)line.size(),rtcsender,sizeof(rtcsender),&rtc))
+			{
+				FUZZ_CHECK(r==0);   //never both kinds
+				Identity(rtcsender);
+				FUZZ_CHECK(rtc.kind=='o'||rtc.kind=='a'||rtc.kind=='c');
+				FUZZ_CHECK(rtc.cid[0]&&strlen(rtc.cid)<=SIGNAL_RTC_MAXCID);
+				FUZZ_CHECK(!rtc.a.empty()&&(int)rtc.a.size()<=SIGNAL_RTC_MAXTEXT&&(int)rtc.b.size()<=SIGNAL_RTC_MAXTEXT);
+				std::string out;
+				FUZZ_CHECK(SignalRtcFormat(rtcsender,&rtc,&out));
+				FUZZ_CHECK((int)out.size()<=SIGNAL_MAXLINE);
+				FUZZ_CHECK(SignalRtcParseLine(out.data(),(int)out.size()-1,rtcsender,sizeof(rtcsender),&again)==1);
+				FUZZ_CHECK(again.kind==rtc.kind&&!strcmp(again.cid,rtc.cid)&&again.a==rtc.a&&again.b==rtc.b);
+			}
+			else FUZZ_CHECK(rtc.kind==0&&rtc.a.empty());
 			free(copy);
 			FUZZ_CHECK(r>=-1&&r<=1);
 			if(r!=1) { FUZZ_CHECK(len==0); continue; }
