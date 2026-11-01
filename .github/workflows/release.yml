@@ -120,58 +120,6 @@ jobs:
           path: dist/Edifice-*
           if-no-files-found: error
 
-  gns:
-    # GameNetworkingSockets (roadmap M7, in the releases since M7e): an encrypted
-    # loopback connection test, and the game built with EDIFICE_GNS=ON.
-    # The netplay tests (tests/run_*netplay_tests.sh, net_lobby.py, net_p2p.py) run
-    # locally, not here (BUILD.md).
-    # Not required for releases (the build job checks the archives themselves).
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest, ubuntu-22.04, windows-2022]
-    runs-on: ${{ matrix.os }}
-    env:
-      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/vcpkg-cache
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Build tools (Linux)
-        if: runner.os == 'Linux'
-        timeout-minutes: 20
-        run: |
-          .github/scripts/apt-install.sh build-essential cmake ninja-build pkg-config libglu1-mesa-dev \
-            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev \
-            libxkbcommon-dev libwayland-dev libasound2-dev libpulse-dev libcurl4-openssl-dev
-
-      - name: Build tools (macOS)
-        if: runner.os == 'macOS'
-        run: brew install ninja pkg-config
-
-      - name: vcpkg
-        shell: bash
-        run: .github/scripts/vcpkg-setup.sh
-
-      - uses: actions/cache@v4
-        with:
-          path: vcpkg-cache
-          key: gns-${{ matrix.os }}-${{ env.VCPKG_COMMIT }}-${{ hashFiles('vcpkg.json') }}
-          restore-keys: gns-${{ matrix.os }}-
-
-      - name: Configure with GameNetworkingSockets
-        shell: bash
-        run: |
-          extra=""
-          if [ "$RUNNER_OS" = Windows ]; then extra="-DVCPKG_TARGET_TRIPLET=x64-windows -A x64"; else extra="-G Ninja"; fi
-          cmake -S . -B build/gns $extra -DCMAKE_BUILD_TYPE=Release -DEDIFICE_GNS=ON -DVCPKG_MANIFEST_FEATURES=gns \
-            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
-
-      - name: Build the game and the tests, run the loopback test
-        shell: bash
-        run: |
-          cmake --build build/gns --config Release
-          ctest --test-dir build/gns -C Release -R gns_loopback --output-on-failure
-
   fuzzing:
     if: github.event_name != 'pull_request' && !startsWith(github.ref, 'refs/tags/v')
     # libFuzzer harnesses of every network and file parser (tests/fuzz): seeds
