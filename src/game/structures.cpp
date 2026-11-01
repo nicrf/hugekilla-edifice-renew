@@ -20,6 +20,13 @@ char curstructurepath[1000];
 static int buildrot;
 static int builddist;
 
+//the help shown while placing, with the current turn and distance
+void BuildPreviewText()
+{
+	sprintf(menutext,"Left click: build here\rRight click: cancel\r"
+		"Wheel: rotate (%d)\rCtrl/Cmd + wheel: distance (%d)",buildrot*90,builddist);
+}
+
 void BuildPreviewWheel(int dir,int distance)
 {
 	if(distance)
@@ -29,6 +36,7 @@ void BuildPreviewWheel(int dir,int distance)
 		if(builddist>MAXBUILDDIST) builddist=MAXBUILDDIST;
 	}
 	else buildrot=(buildrot+(dir>0?1:3))&3;
+	BuildPreviewText();
 }
 
 

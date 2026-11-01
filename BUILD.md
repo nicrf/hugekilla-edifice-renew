@@ -9,7 +9,7 @@ SDL2 est téléchargée et compilée **en statique** par CMake (`FetchContent`, 
 | Linux | `Edifice` + dossier `data/` à côté |
 | Windows (MSVC, x64) | `Edifice.exe` + dossier `data/` à côté, CRT statique (avec `--gns` : DLL de GameNetworkingSockets et du runtime C++ à côté) |
 
-Les releases sont compilées avec GameNetworkingSockets (`--gns`, ci-dessous) pour le P2P des parties Internet ; sans vcpkg, `build.py` sans `--gns` compile tout le reste (parties Internet en UDP direct).
+`build.py` compile avec GameNetworkingSockets par défaut, comme les releases, pour le P2P des parties Internet : sans `VCPKG_ROOT`, il récupère vcpkg dans `build/vcpkg` (au commit `VCPKG_COMMIT` de la CI) ; le premier build compile ses bibliothèques (OpenSSL, protobuf, abseil), les suivants les réutilisent. `--no-gns` compile sans (parties Internet en UDP direct).
 
 ## Prérequis
 
@@ -26,7 +26,7 @@ Seulement la chaîne de compilation (+ Python 3) ; pas besoin d'installer SDL2.
 ## Compiler
 
 ```bash
-python3 build.py                     # Release dans build/<os>-release
+python3 build.py                     # Release avec P2P (GameNetworkingSockets) dans build/<os>-release-gns
 ```
 
 ```bash
@@ -37,7 +37,7 @@ python3 build.py --config Debug --run
 python3 build.py --package           # dist/Edifice-<version>-<os>.zip|.tar.gz
 ```
 
-Sous Windows : `py build.py ...`. Options : `--clean`, `--test` (tests unitaires après le build), `--generator <G>`, `EDIFICE_ARCH=Win32` pour du 32 bits, `--universal` (macOS : un binaire arm64 + x86_64, macOS 10.13 minimum, comme la release), `--gns` (ci-dessous). `EDIFICE_CMAKE_ARGS="-D…"` ajoute des arguments CMake.
+Sous Windows : `py build.py ...`. Options : `--clean`, `--test` (tests unitaires après le build), `--generator <G>`, `EDIFICE_ARCH=Win32` pour du 32 bits, `--universal` (macOS : un binaire arm64 + x86_64, macOS 10.13 minimum, comme la release), `--no-gns` (sans GameNetworkingSockets, donc sans P2P : plus rapide à compiler, mais les parties Internet demandent des ports UDP ouverts ; voir ci-dessous). `EDIFICE_CMAKE_ARGS="-D…"` ajoute des arguments CMake.
 `-DEDIFICE_SYSTEM_SDL2=ON` (CMake) utilise une SDL2 installée au lieu de la compiler.
 La version vient de `project(Edifice VERSION …)` dans `CMakeLists.txt`.
 
@@ -66,8 +66,8 @@ GameNetworkingSockets (Valve, BSD-3), avec protobuf et OpenSSL, vient de vcpkg (
 ```bash
 git clone https://github.com/microsoft/vcpkg && vcpkg/bootstrap-vcpkg.sh   # Windows : vcpkg\bootstrap-vcpkg.bat
 export VCPKG_ROOT=$PWD/vcpkg
-python3 build.py --gns --package                 # build/<os>-release-gns, comme la release
-python3 build.py --gns --universal --package     # macOS : binaire universel, comme la release
+python3 build.py --package                       # build/<os>-release-gns, comme la release
+python3 build.py --universal --package           # macOS : binaire universel, comme la release
 ```
 
 Le premier build compile OpenSSL, protobuf et abseil (de quelques minutes à une demi-heure selon la machine), ensuite le cache binaire de vcpkg sert. Triplets : `x64-linux-release` (statique), `x64-windows-release` (`cmake/triplets/`, DLL : tout le jeu passe au runtime C++ partagé `/MD`, et les DLL du runtime sont copiées à côté de `Edifice.exe`), `universal-osx` (`cmake/triplets/`, statique, arm64 + x86_64) ; en Debug, ceux par défaut de vcpkg. `-DVCPKG_TARGET_TRIPLET=…` dans `EDIFICE_CMAKE_ARGS` en impose un autre. À la main : `cmake -S . -B build/gns -DEDIFICE_GNS=ON -DVCPKG_MANIFEST_FEATURES=gns -DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake` (Windows : `-DVCPKG_TARGET_TRIPLET=x64-windows -A x64`). Sans l'option, rien ne change, sur le fil non plus.
