@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -214,6 +215,47 @@ func TestHTTPAPI(t *testing.T) {
 	json.NewDecoder(resp.Body).Decode(&sess)
 	if resp.StatusCode != http.StatusCreated || sess.Identity == "" || sess.Token == "" {
 		t.Fatalf("session: %v %+v", resp.Status, sess)
+	}
+
+	// an identity is only listed with the token of its session
+	announce := func(identity, session string) string {
+		a := announcement("P2P fort")
+		a.Identity, a.Session = identity, session
+		body, _ := json.Marshal(a)
+		resp, err := http.Post(ts.URL+"/v1/servers", "application/json", bytes.NewReader(body))
+		if err != nil || resp.StatusCode != http.StatusCreated {
+			t.Fatalf("announce: %v %v", err, resp.Status)
+		}
+		var c struct{ ID string }
+		json.NewDecoder(resp.Body).Decode(&c)
+		resp, _ = http.Get(ts.URL + "/v1/servers/" + c.ID)
+		raw, _ := io.ReadAll(resp.Body)
+		if strings.Contains(string(raw), session) && session != "" {
+			t.Fatalf("the session token is shown: %s", raw)
+		}
+		var s Server
+		json.Unmarshal(raw, &s)
+		return s.Identity
+	}
+	if got := announce(sess.Identity, sess.Token); got != sess.Identity {
+		t.Fatalf("own identity not listed: %q", got)
+	}
+	if got := announce(sess.Identity, "wrong"); got != "" {
+		t.Fatalf("someone else's identity listed: %q", got)
+	}
+	if got := announce(sess.Identity, ""); got != "" {
+		t.Fatalf("identity listed without proof: %q", got)
+	}
+}
+
+func TestSessionSignalingAddress(t *testing.T) {
+	s := NewSessions(time.Hour, 10, nil, nil, "x")
+	if sess, _ := s.Create(); sess.Signaling != "" {
+		t.Fatalf("signaling = %q", sess.Signaling)
+	}
+	s.signaling = "lobby.example.org:10000"
+	if sess, _ := s.Create(); sess.Signaling != "lobby.example.org:10000" {
+		t.Fatalf("signaling = %q", sess.Signaling)
 	}
 }
 

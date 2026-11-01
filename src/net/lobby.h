@@ -43,6 +43,31 @@ struct LobbyAnnouncement
 	int mode;
 	const char *visibility;
 	const char *identity;
+	const char *session;        //token of identity's session: the lobby lists the
+	                            //identity only with it (0 or "": no identity)
+};
+
+#define LOBBY_MAXICE 4              //STUN and TURN servers kept from a session
+
+struct LobbyIceServer
+{
+	char url[128];              //turn:host:port?transport=udp
+	char username[128];
+	char credential[128];
+};
+
+//POST /v1/sessions: who we are for P2P (M7d), and how to get through NATs.
+//Every text is printable ASCII without spaces or commas (GameNetworkingSockets
+//takes the STUN/TURN servers as comma-separated lists).
+struct LobbySession
+{
+	char identity[65];          //GameNetworkingSockets identity, str:edifice-...
+	char token[65];             //proves it to the signaling relay: never logged
+	char signaling[128];        //host:port of the signaling relay, "" if not given
+	int numstun;
+	char stun[LOBBY_MAXICE][128];   //stun:host:port
+	int numturn;
+	LobbyIceServer turn[LOBBY_MAXICE];
 };
 
 //---- HTTP (worker thread) ----
@@ -74,8 +99,9 @@ int LobbyParseList(const char *json,int len,LobbyGame *games,int max);
 int LobbyParseGame(const char *json,int len,LobbyGame *game);
 //POST /v1/servers: id, token, refresh_seconds (clamped to 2..300). 1 if valid
 int LobbyParseAnnounced(const char *json,int len,char *id,int idsize,char *token,int tokensize,int *refresh);
-//POST /v1/sessions: identity and token (the STUN/TURN part is for M7d). 1 if valid
-int LobbyParseSession(const char *json,int len,char *identity,int identitysize,char *token,int tokensize);
+//POST /v1/sessions: identity, token, signaling relay, STUN/TURN servers (invalid
+//servers are skipped). 1 if valid
+int LobbyParseSession(const char *json,int len,LobbySession *session);
 //{"error":"..."}: 1 and the printable text if present
 int LobbyParseError(const char *json,int len,char *msg,int size);
 

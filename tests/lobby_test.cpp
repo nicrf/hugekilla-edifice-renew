@@ -111,14 +111,33 @@ static void Parsers()
 	CHECK(LobbyParseAnnounced(longtoken,(int)strlen(longtoken),id,sizeof(id),token,sizeof(token),&refresh)==0);
 	CHECK(LobbyParseAnnounced("{\"id\":\"A\"}",10,id,sizeof(id),token,sizeof(token),&refresh)==0);
 
-	// session
-	char identity[65];
+	// session, with its STUN/TURN servers and signaling relay (M7d)
+	LobbySession session;
 	const char *sess="{\"identity\":\"str:edifice-0011223344556677\",\"token\":\"ab01\",\"expires\":\"2026-01-01T00:00:00Z\","
-		"\"ice\":{\"stun\":[\"stun:x:3478\"],\"turn\":[{\"url\":\"turn:x\",\"username\":\"u\",\"credential\":\"c\"}]}}";
-	CHECK(LobbyParseSession(sess,(int)strlen(sess),identity,sizeof(identity),token,sizeof(token))==1);
-	CHECK(!strcmp(identity,"str:edifice-0011223344556677")&&!strcmp(token,"ab01"));
+		"\"ice\":{\"stun\":[\"stun:x:3478\",\"stun:a,b:1\",7],\"turn\":[{\"url\":\"turn:x:3478?transport=udp\",\"username\":\"1:str:e\","
+		"\"credential\":\"c+/=\"},{\"url\":\"turn:y\",\"username\":\"u v\",\"credential\":\"c\"},{\"url\":\"turn:z\"}]},"
+		"\"signaling\":\"lobby.example.org:10000\"}";
+	CHECK(LobbyParseSession(sess,(int)strlen(sess),&session)==1);
+	CHECK(!strcmp(session.identity,"str:edifice-0011223344556677")&&!strcmp(session.token,"ab01"));
+	CHECK(session.numstun==1&&!strcmp(session.stun[0],"stun:x:3478"));   // a comma, a number: skipped
+	CHECK(session.numturn==1&&!strcmp(session.turn[0].url,"turn:x:3478?transport=udp")&&
+		!strcmp(session.turn[0].username,"1:str:e")&&!strcmp(session.turn[0].credential,"c+/="));
+	CHECK(!strcmp(session.signaling,"lobby.example.org:10000"));
+	const char *nosig="{\"identity\":\"str:edifice-1\",\"token\":\"ab\",\"signaling\":\"a b:1\",\"ice\":5}";
+	CHECK(LobbyParseSession(nosig,(int)strlen(nosig),&session)==1&&!session.signaling[0]&&!session.numstun);
 	const char *spaced="{\"identity\":\"a b\",\"token\":\"ab\"}";
-	CHECK(LobbyParseSession(spaced,(int)strlen(spaced),identity,sizeof(identity),token,sizeof(token))==0);
+	CHECK(LobbyParseSession(spaced,(int)strlen(spaced),&session)==0&&!session.identity[0]&&!session.token[0]);
+	char many[2000];
+	int at=snprintf(many,sizeof(many),"{\"identity\":\"str:e\",\"token\":\"ab\",\"ice\":{\"stun\":[");
+	for(int i=0;i<10;i++) at+=snprintf(many+at,sizeof(many)-at,"%s\"stun:h%d:1\"",i?",":"",i);
+	snprintf(many+at,sizeof(many)-at,"]}}");
+	CHECK(LobbyParseSession(many,(int)strlen(many),&session)==1&&session.numstun==LOBBY_MAXICE);
+
+	// the announcement carries the session token beside the identity
+	LobbyAnnouncement withid={"Fort",27020,"0.4.0",5,1,32,0,"public","str:edifice-1","ab01"};
+	char withbody[400];
+	CHECK(LobbyAnnouncementJSON(&withid,withbody,sizeof(withbody))&&
+		strstr(withbody,"\"identity\":\"str:edifice-1\",\"session\":\"ab01\""));
 
 	// error
 	char msg[40];
@@ -139,7 +158,7 @@ static void Parsers()
 	LobbyAnnouncement a={"My \"fort\"\\\n\xc3\xa9",27020,"0.4.0",5,2,32,0,"private",""};
 	char body[400];
 	CHECK(LobbyAnnouncementJSON(&a,body,sizeof(body))==1);
-	CHECK(!strcmp(body,"{\"name\":\"My \\\"fort\\\"\\\\\",\"version\":\"0.4.0\",\"visibility\":\"private\",\"identity\":\"\","
+	CHECK(!strcmp(body,"{\"name\":\"My \\\"fort\\\"\\\\\",\"version\":\"0.4.0\",\"visibility\":\"private\",\"identity\":\"\",\"session\":\"\","
 		"\"port\":27020,\"protocol\":5,\"players\":2,\"maxplayers\":32,\"mode\":0}"));
 	char asgame[500];
 	snprintf(asgame,sizeof(asgame),"{\"id\":\"Z\",\"address\":\"1.1.1.1\",%s",body+1);
@@ -182,7 +201,7 @@ static void Parsers()
 		LobbyParseList(buf,cut,games,LOBBY_MAXGAMES);
 		LobbyParseGame(buf,cut,&g);
 		LobbyParseAnnounced(buf,cut,id,sizeof(id),token,sizeof(token),&refresh);
-		LobbyParseSession(buf,cut,identity,sizeof(identity),token,sizeof(token));
+		LobbyParseSession(buf,cut,&session);
 		LobbyParseError(buf,cut,msg,sizeof(msg));
 	}
 }
@@ -216,10 +235,12 @@ static void Online(const char *url)
 	char identity[65],token[65],id[LOBBY_CODELEN+1],privid[LOBBY_CODELEN+1],privtoken[65];
 	int refresh;
 	CHECK(Request("POST","/v1/sessions",0,0,&reply)==201);
-	CHECK(LobbyParseSession(reply.data(),(int)reply.size(),identity,sizeof(identity),token,sizeof(token)));
+	LobbySession session;
+	CHECK(LobbyParseSession(reply.data(),(int)reply.size(),&session));
+	snprintf(identity,sizeof(identity),"%s",session.identity);
 
 	char body[600];
-	LobbyAnnouncement pub={"lobby_test public",27999,"test",9999,1,8,1,"public",identity};
+	LobbyAnnouncement pub={"lobby_test public",27999,"test",9999,1,8,1,"public",identity,session.token};
 	LobbyAnnouncementJSON(&pub,body,sizeof(body));
 	CHECK(Request("POST","/v1/servers",body,0,&reply)==201);
 	CHECK(LobbyParseAnnounced(reply.data(),(int)reply.size(),id,sizeof(id),token,sizeof(token),&refresh));

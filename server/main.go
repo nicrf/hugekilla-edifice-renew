@@ -65,6 +65,10 @@ func main() {
 
 	registry := NewRegistry(*ttl, 4, 2000)
 	sessions := NewSessions(12*time.Hour, 20000, stunURLs, turnURLs, *turnSecret)
+	if *publicHost != "" {
+		_, port, _ := net.SplitHostPort(*signalAddr)
+		sessions.signaling = net.JoinHostPort(*publicHost, port)
+	}
 	go func() {
 		for range time.Tick(time.Minute) {
 			sessions.Expire()

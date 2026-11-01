@@ -109,7 +109,11 @@ try:
     check(game["address"] == "127.0.0.1" and game["port"] == 27020, "address and info port of the host")
     check(game["players"] == 1 and game["maxplayers"] == 32 and game["mode"] == 0, "players, max players, mode")
     check(game["visibility"] == "public" and game["protocol"] > 0 and game["version"], "visibility, protocol, version")
-    check(game["identity"].startswith("str:edifice-"), "the host's session identity is announced")
+    # a P2P identity only from hosts that listen for P2P connections (GameNetworkingSockets
+    # builds, tests/net_p2p.py); the others are joined by their address
+    identity = game.get("identity", "")
+    check(identity == "" or identity.startswith("str:edifice-"),
+          "identity: %s" % (identity or "none (no P2P in this build)"))
     code = game["id"]
     check(len(code) == 6, "a 6-character game code: " + code)
     status, one = get("/v1/servers/" + code.lower())

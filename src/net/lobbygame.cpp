@@ -1,8 +1,9 @@
-//game side of the edifice-lobby client (roadmap M7c, see lobbygame.h): the host
-//gets a session (its network identity, for P2P later), announces its game, renews
-//it at the interval the lobby asks for (sooner when the player count changes) and
-//removes it when the server stops; the join screen lists the public games and
-//looks up game codes. The connection itself is still the direct UDP one.
+//game side of the edifice-lobby client (roadmap M7c, M7d, see lobbygame.h): the host
+//gets a session (its network identity) and listens for P2P connections under it
+//(netlink.h), announces its game, renews it at the interval the lobby asks for
+//(sooner when the player count changes) and removes it when the server stops; the
+//join screen lists the public games and looks up game codes, and gets a session of
+//its own to join a game P2P.
 
 #include "StdAfx.h"
 #include "cfgfile.h"
@@ -11,6 +12,7 @@
 #include "version.h"
 #include "ui.h"
 #include "lobbygame.h"
+#include "netlink.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -20,9 +22,10 @@ extern ServerVars sv;
 //---- settings and session ----
 
 static char lobbyurl[201];
-static char sessionidentity[65];
-static char sessiontoken[65];
+static LobbySession session;    //identity and token: host and client alike
+static int havesession;
 static DWORD sessiontime;
+static int sessionrequest;
 
 //the public edifice-lobby instance (server/), used when net.ini has no lobby= line
 #define DEFAULT_LOBBY "https://edifice.rousseaufournier.com"
@@ -39,7 +42,11 @@ static void LoadLobbyURL()
 	snprintf(before,sizeof(before),"%s",LobbyGetURL());
 	LobbySetURL(lobbyurl,"Edifice/" EDIFICE_VERSION_STRING);
 	if(strcmp(before,LobbyGetURL()))
-		sessionidentity[0]=0;   //another lobby: another identity
+	{
+		havesession=0;   //another lobby: another identity
+		if(sessionrequest) LobbyDrop(sessionrequest);
+		sessionrequest=0;
+	}
 }
 
 int LobbyReady(char *why,int whysize)
@@ -63,6 +70,49 @@ static void Describe(int status,const std::string &reply,char *out,int size)
 	else snprintf(out,size,"Lobby: HTTP error %d",status);
 }
 
+//a session lasts 12 hours: a new one after 11
+static int SessionValid()
+{
+	return havesession&&GetTickCount()-sessiontime<11*3600*1000u;
+}
+
+int LobbySessionStart()
+{
+	if(!LobbyReady()) return -1;
+	if(SessionValid()) return 1;
+	if(sessionrequest) return 0;
+	sessionrequest=LobbySend("POST","/v1/sessions",0,0);
+	return sessionrequest?0:-1;
+}
+
+int LobbySessionResult(char *err,int errsize)
+{
+	if(SessionValid()) return 1;
+	if(!sessionrequest)
+	{
+		snprintf(err,errsize,"No session with the lobby");
+		return -1;
+	}
+	int status;
+	std::string reply;
+	if(!LobbyPoll(sessionrequest,&status,&reply)) return 0;
+	sessionrequest=0;
+	if(status==201&&LobbyParseSession(reply.data(),(int)reply.size(),&session))
+	{
+		havesession=1;
+		sessiontime=GetTickCount();
+		return 1;
+	}
+	if(status==201) snprintf(err,errsize,"Lobby: unreadable session");
+	else Describe(status,reply,err,errsize);
+	return -1;
+}
+
+const LobbySession *LobbySessionGet()
+{
+	return SessionValid()?&session:0;
+}
+
 //---- host ----
 
 enum { HOST_OFF, HOST_SESSION, HOST_ANNOUNCE, HOST_LISTED };
@@ -73,6 +123,7 @@ static DWORD hostnext;          //GetTickCount() of the next request
 static DWORD hostlastsent;
 static int hostrefresh;         //seconds, from the lobby
 static int hostplayers;         //as last announced
+static int hostp2p;             //listening for P2P connections: identity announced
 static char hostvisibility[8];
 static char hostid[LOBBY_CODELEN+1];
 static char hosttoken[65];
@@ -84,27 +135,37 @@ static void Say(const char *text)
 	ConsoleDisplayText(line);
 }
 
-void LobbyHostStart()
+//servervisibility of net.ini, "lan" unless it is an Internet one
+static void ReadVisibility()
 {
-	LobbyHostStop();
 	CfgFile ini;
 	strcpy(hostvisibility,"lan");
 	if(ini.Load(UserFile("net.ini"))&&ini.GetValues("servervisibility"))
 		CopyIniString(hostvisibility,ini.GetValues("servervisibility"),sizeof(hostvisibility));
 	if(strcmp(hostvisibility,"public")&&strcmp(hostvisibility,"friends")&&strcmp(hostvisibility,"private"))
-	{
 		strcpy(hostvisibility,"lan");
-		return;
-	}
+}
+
+int LobbyHostInternet()
+{
+	ReadVisibility();
+	return strcmp(hostvisibility,"lan")&&LobbyReady();
+}
+
+void LobbyHostStart()
+{
+	LobbyHostStop();
+	ReadVisibility();
+	if(!strcmp(hostvisibility,"lan")) return;
 	char why[120];
 	if(!LobbyReady(why,sizeof(why)))
 	{
 		Say(why);
 		return;
 	}
-	//a session lasts 12 hours: a new one after 11
-	if(!sessionidentity[0]||GetTickCount()-sessiontime>11*3600*1000u) hoststate=HOST_SESSION;
-	else hoststate=HOST_ANNOUNCE;
+	//P2P first needs a session (our identity); without P2P, nothing to ask
+	hostp2p=0;
+	hoststate=NetP2PMode()&&LobbySessionStart()>=0?HOST_SESSION:HOST_ANNOUNCE;
 	hostnext=GetTickCount();
 	hostplayers=-1;
 }
@@ -112,6 +173,7 @@ void LobbyHostStart()
 static void HostSend(int players)
 {
 	char body[600],path[64];
+	const LobbySession *s=LobbySessionGet();
 	LobbyAnnouncement a;
 	a.name=netsettings.servername;
 	a.port=ntohs(netsettings.infosendport);
@@ -121,10 +183,9 @@ static void HostSend(int players)
 	a.maxplayers=MAXPLAYERS;
 	a.mode=sv.gamemode;
 	a.visibility=hostvisibility;
-	a.identity=sessionidentity;
-	if(hoststate==HOST_SESSION)
-		hostrequest=LobbySend("POST","/v1/sessions",0,0);
-	else if(LobbyAnnouncementJSON(&a,body,sizeof(body)))
+	a.identity=hostp2p&&s?s->identity:"";   //the lobby lists it with its token only
+	a.session=hostp2p&&s?s->token:"";
+	if(LobbyAnnouncementJSON(&a,body,sizeof(body)))
 	{
 		if(hoststate==HOST_ANNOUNCE)
 			hostrequest=LobbySend("POST","/v1/servers",body,0,1);   //IPv4: the address listed
@@ -143,25 +204,26 @@ void LobbyHostLoop(int players)
 {
 	if(hoststate==HOST_OFF) return;
 	DWORD now=GetTickCount();
+	char text[200];
+	if(hoststate==HOST_SESSION)
+	{
+		//without a session (or P2P) the game is still listed: clients then join it
+		//directly, through the host's open UDP ports
+		int r=LobbySessionResult(text,sizeof(text));
+		if(!r) return;
+		if(r>0) hostp2p=NetP2PStart(LobbySessionGet(),LobbyGetURL());
+		else fprintf(stderr,"%s\n",text);
+		if(!hostp2p) Say("No P2P: players will have to reach your UDP ports");
+		hoststate=HOST_ANNOUNCE;
+		hostnext=now;
+	}
 	if(hostrequest)
 	{
 		int status;
 		std::string reply;
 		if(!LobbyPoll(hostrequest,&status,&reply)) return;
 		hostrequest=0;
-		char text[200];
-		if(hoststate==HOST_SESSION)
-		{
-			//without a session the game is still listed, only P2P (M7d) needs it
-			if(status==201&&LobbyParseSession(reply.data(),(int)reply.size(),sessionidentity,sizeof(sessionidentity),
-				sessiontoken,sizeof(sessiontoken)))
-				sessiontime=now;
-			else
-				sessionidentity[0]=0;
-			hoststate=HOST_ANNOUNCE;
-			hostnext=now;
-		}
-		else if(hoststate==HOST_ANNOUNCE)
+		if(hoststate==HOST_ANNOUNCE)
 		{
 			if(status==201&&LobbyParseAnnounced(reply.data(),(int)reply.size(),hostid,sizeof(hostid),
 				hosttoken,sizeof(hosttoken),&hostrefresh))
