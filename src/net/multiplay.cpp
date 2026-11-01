@@ -29,6 +29,8 @@
 #include "anticheat.h"
 #include <stdarg.h>
 #define MAXLOCALLIST 128
+#define PEERTIMEOUT 70000     //ms without a message before a peer is dropped
+#define SERVERSILENCE 10000   //ms: the server is gone, once in the game (ClientLoop)
 #ifndef HK_WIN32_NATIVE
 #ifndef _WIN32
 #include <netdb.h>
@@ -625,8 +627,28 @@ void StartServer()
 
 //closes sockets
 
+//the other side leaves at once instead of waiting for its timeout: the server's
+//clients go back to the menu, or the server drops us. A few copies, unreliable: the
+//sockets close right after (older versions ignore EXIT)
+static void SendExit()
+{
+	SimpleBuf exit=MakeSimple(EXIT,0,0);
+	for(int k=0;k<3;k++)
+	{
+		if(server)
+			for(int i=1;i<numplayers;i++) clientsock[i].Send(exit.b,sizeof(exit.b));
+		else if(connected)
+			datasock.Send(exit.b,sizeof(exit.b));
+	}
+	if(server)
+		for(int i=1;i<numplayers;i++) clientsock[i].Flush();
+	else if(connected)
+		datasock.Flush();
+}
+
 void Disconnect()
 {
+	SendExit();
 	LockCursor(0);
 	LobbyHostStop();
 	infosock.Close();
@@ -668,6 +690,12 @@ void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pn
 {
 	switch(type)
 	{
+		case EXIT:
+			{
+				//deleted by the timeout check of ServerLoop, after its receive loop
+				if(pnum>0) GetPlayer(pnum)->timeout=curtime-1;
+				break;
+			}
 		case REQUESTINFO:
 		{
 			SendInfo(source);
@@ -932,7 +960,7 @@ void ServerLoop()
 				{
 					clientsock[i].SendReliable(names,w.Size(),0);
 				}
-				GetPlayer(addplayer)->timeout=curtime+70000;
+				GetPlayer(addplayer)->timeout=curtime+PEERTIMEOUT;
 				GetPlayer(addplayer)->gunup=Vector(0,1,0);
 				clientsock[addplayer].packetssent=0;
 				clientsock[addplayer].packetsreceived=0;
@@ -960,7 +988,7 @@ void ServerLoop()
 		int clen;
 		while((clen=clientsock[i].Receive(&msg,&source)))
 		{
-			GetPlayer(i)->timeout=curtime+70000;
+			GetPlayer(i)->timeout=curtime+PEERTIMEOUT;
 			switch(msg.type)
 			{
 				case PLAYERPOSITION:
@@ -1080,6 +1108,19 @@ void SendSimple(char num,char type,DWORD msg,DWORD msg2)
 		datasock.Send(simple.b,sizeof(simple.b));
 }
 
+//the server left or stopped answering: back to the join screen, saying why
+static void ServerGone(const char *why)
+{
+	char text[100];
+	snprintf(text,sizeof(text),"%s",why);
+	ConsoleDisplayText(text);
+	Disconnect();
+	GetLocalPlayer()->playstate=0;
+#ifndef HK_WIN32_NATIVE
+	JoinScreenShowError(why);
+#endif
+}
+
 //client calls this when it receives a simplemessage
 
 void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
@@ -1111,7 +1152,7 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 					connected=1;
 					SetLocalNum(msg2);
 					GetLocalPlayer()->playstate=1;
-					GetLocalPlayer()->timeout=curtime+70000;
+					GetLocalPlayer()->timeout=curtime+PEERTIMEOUT;
 					numplayers=msg2+1;
 					datasock.Open(NetOpenDataLink(msg,&source));
 					datasock.dest=source;
@@ -1125,6 +1166,12 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 					datasock.packetsreceived=0;
 					LockCursor(1);
 				}
+				break;
+			}
+		case EXIT:
+			{
+				if(!connected) break;
+				ServerGone("The server closed the game");
 				break;
 			}
 		case JOINGAME:
@@ -1224,7 +1271,7 @@ void ClientLoop()
 			if(source.sin_addr.s_addr!=infosock.dest.sin_addr.s_addr) continue;
 			if(msg.type!=SIMPLE&&msg.type!=CHATMESSAGE) continue;
 		}
-		GetPlayer(0)->timeout=curtime+70000;
+		GetPlayer(0)->timeout=curtime+PEERTIMEOUT;
 		//if(!(source.sin_addr.s_addr==infosock.dest.sin_addr.s_addr)) continue;
 		switch(msg.type)
 		{
@@ -1399,12 +1446,11 @@ void ClientLoop()
 			GetLocalPlayer()->playstate=0;
 		}
 	}
-	if(connected&&GetLocalPlayer()->playstate>=10&&(curtime>GetPlayer(0)->timeout||datasock.reliablefailed))
-	{
-		ConsoleDisplayText("server timed out");
-		Disconnect();
-		GetLocalPlayer()->playstate=0;
-	}
+	//in the game the server pings every second: SERVERSILENCE without a word means
+	//it is gone (while joining, a map transfer may take longer: the full timeout)
+	if(connected&&GetLocalPlayer()->playstate>=10&&(curtime+(PEERTIMEOUT-SERVERSILENCE)>GetPlayer(0)->timeout||
+		datasock.reliablefailed))
+		ServerGone("Lost the connection to the server");
 	if(curtime>nextresend)
 	{
 		if(GetLocalPlayer()->playstate>=10)SendPosition(GetLocalNum(),-1);
