@@ -17,8 +17,16 @@ on:
 permissions:
   contents: read
 
+env:
+  # vcpkg (GameNetworkingSockets, protobuf, OpenSSL), pinned so that releases are
+  # reproducible and the binary caches stay valid; bump it to update the ports
+  VCPKG_COMMIT: 9a5dfef5d1a0438a7d24856a85bd60f309d355e9
+
 jobs:
   build:
+    # The release archives, built with GameNetworkingSockets (Internet games in
+    # P2P, through the lobby's TURN relay when nothing else passes), then unpacked
+    # and checked as a player gets them (tests/check_package.py).
     strategy:
       fail-fast: false
       matrix:
@@ -30,6 +38,8 @@ jobs:
           - os: windows-2022
             name: windows
     runs-on: ${{ matrix.os }}
+    env:
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/vcpkg-cache
     steps:
       - uses: actions/checkout@v4
 
@@ -49,26 +59,43 @@ jobs:
 
       - name: Install build tools (macOS)
         if: matrix.name == 'macos'
-        run: brew install ninja
+        run: brew install ninja pkg-config
 
-      - name: Install build tools (Linux)
+      - name: Install build tools, virtual display and software OpenGL (Linux)
         if: matrix.name == 'linux'
         timeout-minutes: 20
         run: |
-          .github/scripts/apt-install.sh build-essential cmake ninja-build libglu1-mesa-dev \
+          .github/scripts/apt-install.sh build-essential cmake ninja-build pkg-config libglu1-mesa-dev \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev \
-            libxkbcommon-dev libwayland-dev libasound2-dev libpulse-dev libcurl4-openssl-dev
+            libxkbcommon-dev libwayland-dev libasound2-dev libpulse-dev libcurl4-openssl-dev \
+            xvfb libgl1-mesa-dri
 
-      - name: Build and package
+      - name: vcpkg
         shell: bash
-        env:
-          # macOS: one universal binary for Intel and Apple Silicon
-          EDIFICE_CMAKE_ARGS: ${{ matrix.name == 'macos' && '-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13' || '' }}
-        run: python build.py --config Release --package
+        run: .github/scripts/vcpkg-setup.sh
 
-      - name: Unit tests
+      - uses: actions/cache@v4
+        with:
+          path: vcpkg-cache
+          key: vcpkg-release-${{ matrix.name }}-${{ env.VCPKG_COMMIT }}-${{ hashFiles('vcpkg.json', 'cmake/triplets/*') }}
+          restore-keys: vcpkg-release-${{ matrix.name }}-
+
+      - name: Build, unit tests and package
         shell: bash
-        run: ctest --test-dir build/${{ matrix.name }}-release -C Release --output-on-failure
+        # macOS: one universal binary for Intel and Apple Silicon (static vcpkg
+        # libraries, cmake/triplets/universal-osx.cmake); Linux: static too;
+        # Windows: GameNetworkingSockets and its DLLs + the C++ runtime DLLs
+        run: python build.py --config Release --gns --package --test ${{ matrix.name == 'macos' && '--universal' || '' }}
+
+      - name: Check the archive (contents, dependencies, a short run)
+        shell: bash
+        timeout-minutes: 10
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a python3 tests/check_package.py dist/Edifice-*-linux.tar.gz --gns
+          else
+            python tests/check_package.py dist/Edifice-*.zip --gns
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
@@ -117,11 +144,11 @@ jobs:
           path: netplay-logs
 
   gns:
-    # Experimental (roadmap M7): GameNetworkingSockets built through vcpkg, an
-    # encrypted loopback connection test, and the game built with EDIFICE_GNS=ON.
+    # GameNetworkingSockets (roadmap M7, in the releases since M7e): an encrypted
+    # loopback connection test, and the game built with EDIFICE_GNS=ON.
     # On Linux, netplay through GameNetworkingSockets (tests/run_gns_netplay_test.sh),
     # and Internet games joined P2P through edifice-lobby (tests/net_p2p.py).
-    # Not required for releases yet.
+    # Not required for releases (the build job checks the archives themselves).
     strategy:
       fail-fast: false
       matrix:
@@ -151,15 +178,12 @@ jobs:
 
       - name: vcpkg
         shell: bash
-        run: |
-          mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
-          git clone --depth 1 https://github.com/microsoft/vcpkg "$RUNNER_TEMP/vcpkg"
-          if [ "$RUNNER_OS" = Windows ]; then "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.bat" -disableMetrics; else "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.sh" -disableMetrics; fi
+        run: .github/scripts/vcpkg-setup.sh
 
       - uses: actions/cache@v4
         with:
           path: vcpkg-cache
-          key: gns-${{ matrix.os }}-${{ hashFiles('vcpkg.json') }}
+          key: gns-${{ matrix.os }}-${{ env.VCPKG_COMMIT }}-${{ hashFiles('vcpkg.json') }}
           restore-keys: gns-${{ matrix.os }}-
 
       - name: Configure with GameNetworkingSockets
@@ -168,7 +192,7 @@ jobs:
           extra=""
           if [ "$RUNNER_OS" = Windows ]; then extra="-DVCPKG_TARGET_TRIPLET=x64-windows -A x64"; else extra="-G Ninja"; fi
           cmake -S . -B build/gns $extra -DCMAKE_BUILD_TYPE=Release -DEDIFICE_GNS=ON -DVCPKG_MANIFEST_FEATURES=gns \
-            -DCMAKE_TOOLCHAIN_FILE="$RUNNER_TEMP/vcpkg/scripts/buildsystems/vcpkg.cmake"
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
 
       - name: Build the game and the tests, run the loopback test
         shell: bash
@@ -293,7 +317,9 @@ jobs:
           files: dist/*
           generate_release_notes: true
           body: |
-            Builds for macOS (universal), Linux (x86_64) and Windows (x64). No dependency to install.
+            Builds for macOS (universal, 10.13+), Linux (x86_64) and Windows (x64, 10+). No dependency to install.
+            Internet games (Join → Internet, or a game code) connect peer to peer, encrypted, through the
+            lobby's relay when needed: nothing to open on your router.
 
             - **macOS**: unzip, then right-click `Edifice.app` → Open the first time (the app is not notarized).
             - **Linux**: `tar xzf`, then `./Edifice` (keep the `data/` folder next to it).

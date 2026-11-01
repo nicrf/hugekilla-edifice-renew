@@ -92,7 +92,11 @@ if(EDIFICE_LOBBY)
     set(ENABLE_CURL_MANUAL OFF CACHE BOOL "" FORCE)
     set(CURL_DISABLE_INSTALL ON CACHE BOOL "" FORCE)
     set(CURL_ENABLE_EXPORT_TARGET OFF CACHE BOOL "" FORCE)
-    set(CURL_STATIC_CRT ON CACHE BOOL "" FORCE)        # same static CRT as the game
+    if(EDIFICE_GNS)
+      set(CURL_STATIC_CRT OFF CACHE BOOL "" FORCE)     # same shared CRT as the game
+    else()
+      set(CURL_STATIC_CRT ON CACHE BOOL "" FORCE)      # same static CRT as the game
+    endif()
     set(CURL_USE_SCHANNEL ON CACHE BOOL "" FORCE)
     set(CURL_USE_LIBPSL OFF CACHE BOOL "" FORCE)
     set(CURL_USE_LIBSSH2 OFF CACHE BOOL "" FORCE)
@@ -295,9 +299,10 @@ add_executable(signaling_test tests/signaling_test.cpp src/net/signaling.cpp)
 target_include_directories(signaling_test PRIVATE ${SRC}/net)
 add_test(NAME signaling COMMAND signaling_test)
 
-# ---- GameNetworkingSockets (experimental, roadmap M7) --------------------------
-# Encrypted connections and P2P. Off by default: configure with the vcpkg
-# toolchain and the "gns" feature of vcpkg.json, e.g.
+# ---- GameNetworkingSockets (roadmap M7) ---------------------------------------
+# Encrypted connections and P2P Internet games; on in the release archives.
+# Off by default: python3 build.py --gns, or configure with the vcpkg toolchain
+# and the "gns" feature of vcpkg.json, e.g.
 #   cmake -B build/gns -DEDIFICE_GNS=ON -DVCPKG_MANIFEST_FEATURES=gns \
 #     -DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake
 option(EDIFICE_GNS "Build with GameNetworkingSockets (needs vcpkg)" OFF)
@@ -319,6 +324,25 @@ if(EDIFICE_GNS)
   target_sources(Edifice PRIVATE src/net/gnslink.cpp src/net/gnssignal.cpp)
   target_compile_definitions(Edifice PRIVATE EDIFICE_GNS)
   target_link_libraries(Edifice PRIVATE ${HK_GNS_LIB})
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # The static OpenSSL of GameNetworkingSockets (vcpkg) must not be exported:
+    # the system libcurl's libssl would bind to it instead of the system libcrypto.
+    target_link_options(Edifice PRIVATE -Wl,--exclude-libs,ALL)
+  endif()
+  if(MSVC)
+    # Release archives run on a clean Windows: the C++ runtime DLLs go next to
+    # Edifice.exe (app-local deployment, allowed by the Visual Studio redist
+    # terms), as do GameNetworkingSockets.dll and its DLLs (copied by vcpkg).
+    set(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP TRUE)
+    include(InstallRequiredSystemLibraries)
+    if(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS)
+      add_custom_command(TARGET Edifice POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS} $<TARGET_FILE_DIR:Edifice>
+        COMMENT "Copying the C++ runtime DLLs next to Edifice.exe")
+    else()
+      message(WARNING "MSVC runtime DLLs not found: Edifice.exe will need the VC++ redistributable")
+    endif()
+  endif()
   # Sock over GnsLink against a game server (tests/run_gns_netplay_test.sh)
   add_executable(gns_netplay_test tests/gns_netplay_test.cpp src/net/gnslink.cpp src/net/gnssignal.cpp src/net/signaling.cpp
     src/net/sock.cpp src/net/udplink.cpp src/game/Vector.cpp)

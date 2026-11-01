@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """Build Edifice (HugeKilla) on macOS, Linux or Windows.
 
-    python3 build.py [--config Debug|Release] [--clean] [--run] [--package]
+    python3 build.py [--config Debug|Release] [--clean] [--run] [--package] [--test]
+                     [--gns] [--universal]
 
-Configures into build/<os>-<config>, builds, and optionally runs the game or
-packages it into dist/Edifice-<version>-<os>.(zip|tar.gz). Python 3 stdlib only.
+Configures into build/<os>-<config>[-gns][-universal], builds, and optionally runs
+the game or its unit tests, or packages it into dist/Edifice-<version>-<os>.(zip|tar.gz).
+--gns adds GameNetworkingSockets (P2P Internet games) through vcpkg (VCPKG_ROOT),
+as in the releases. Python 3 stdlib only.
 """
 import argparse
+import glob
 import os
 import platform
 import re
@@ -19,6 +23,8 @@ import zipfile
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(ROOT, "data")
+# --universal: oldest macOS the release runs on (same as cmake/triplets/universal-osx.cmake)
+MACOS_MIN = "10.13"
 
 
 def host_os():
@@ -92,17 +98,68 @@ def find_cmake():
     return cmake
 
 
+def find_ctest(cmake):
+    cand = os.path.join(os.path.dirname(cmake), "ctest.exe" if OS == "windows" else "ctest")
+    if os.path.exists(cand):
+        return cand
+    return shutil.which("ctest") or die("ctest not found next to cmake")
+
+
+def gns_args(args, extra):
+    """CMake arguments of a GameNetworkingSockets build: vcpkg toolchain, the
+    "gns" feature of vcpkg.json, and the triplet of the releases."""
+    root = os.environ.get("VCPKG_ROOT")
+    if not root and shutil.which("vcpkg"):
+        root = os.path.dirname(os.path.realpath(shutil.which("vcpkg")))
+    toolchain = os.path.join(root or "", "scripts", "buildsystems", "vcpkg.cmake")
+    if not root or not os.path.isfile(toolchain):
+        die("--gns needs vcpkg (see BUILD.md):\n"
+            "    git clone https://github.com/microsoft/vcpkg\n"
+            "    vcpkg/bootstrap-vcpkg.sh   (Windows: vcpkg\\bootstrap-vcpkg.bat)\n"
+            "  then set VCPKG_ROOT to that folder.", hint=False)
+    cfg = ["-DEDIFICE_GNS=ON", "-DVCPKG_MANIFEST_FEATURES=gns",
+           "-DCMAKE_TOOLCHAIN_FILE=" + toolchain,
+           "-DVCPKG_OVERLAY_TRIPLETS=" + os.path.join(ROOT, "cmake", "triplets")]
+    if any(a.startswith("-DVCPKG_TARGET_TRIPLET") for a in extra):
+        return cfg
+    release = args.config == "Release"
+    triplet = None                           # else vcpkg's default for the host
+    if args.universal:
+        triplet = "universal-osx"            # static, both architectures
+    elif OS == "windows":
+        # DLLs + shared C++ runtime (/MD): the static triplet doesn't link
+        arch = "x86" if os.environ.get("EDIFICE_ARCH", "x64") == "Win32" else "x64"
+        triplet = arch + "-windows" + ("-release" if release and arch == "x64" else "")
+    elif OS == "linux" and release and platform.machine() in ("x86_64", "AMD64"):
+        triplet = "x64-linux-release"        # static, like x64-linux
+    if triplet:
+        cfg.append("-DVCPKG_TARGET_TRIPLET=" + triplet)
+    return cfg
+
+
 def main():
     ap = argparse.ArgumentParser(description="Build Edifice (HugeKilla).")
     ap.add_argument("--config", choices=["Debug", "Release"], default="Release")
     ap.add_argument("--clean", action="store_true", help="delete the build directory first")
     ap.add_argument("--run", action="store_true", help="launch the game after building")
     ap.add_argument("--package", action="store_true", help="create an archive in dist/")
+    ap.add_argument("--test", action="store_true", help="run the unit tests (ctest) after building")
     ap.add_argument("--generator", help="override the CMake generator (e.g. Ninja)")
+    ap.add_argument("--gns", action="store_true",
+                    help="with GameNetworkingSockets (P2P Internet games), built by vcpkg (VCPKG_ROOT)")
+    ap.add_argument("--universal", action="store_true",
+                    help="macOS: one binary for Apple Silicon and Intel (macOS %s or later)" % MACOS_MIN)
     args, game_args = ap.parse_known_args()
+    if args.universal and OS != "macos":
+        die("--universal is for macOS only", hint=False)
 
     cmake = find_cmake()
-    bdir = os.path.join(ROOT, "build", "%s-%s" % (OS, args.config.lower()))
+    name = "%s-%s" % (OS, args.config.lower())
+    if args.gns:
+        name += "-gns"
+    if args.universal:
+        name += "-universal"
+    bdir = os.path.join(ROOT, "build", name)
     if args.clean:
         if os.path.isdir(bdir):
             print("Removing " + bdir)
@@ -131,8 +188,13 @@ def main():
             # 64-bit by default; EDIFICE_ARCH=Win32 for a 32-bit build.
             cfg += ["-A", os.environ.get("EDIFICE_ARCH", "x64")]
         cfg += ["-DCMAKE_BUILD_TYPE=" + args.config]
-        # Extra CMake arguments, e.g. EDIFICE_CMAKE_ARGS="-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"
-        cfg += shlex.split(os.environ.get("EDIFICE_CMAKE_ARGS", ""))
+        # Extra CMake arguments, e.g. EDIFICE_CMAKE_ARGS="-DEDIFICE_LOBBY=OFF"
+        extra = shlex.split(os.environ.get("EDIFICE_CMAKE_ARGS", ""))
+        if args.universal:
+            cfg += ["-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64", "-DCMAKE_OSX_DEPLOYMENT_TARGET=" + MACOS_MIN]
+        if args.gns:
+            cfg += gns_args(args, extra)
+        cfg += extra
         print("+ " + " ".join(cfg), flush=True)
         if subprocess.call(cfg) != 0:
             shutil.rmtree(bdir, ignore_errors=True)  # don't keep a half-configured tree
@@ -143,8 +205,10 @@ def main():
     exe_dir, exe = locate_binary(bdir, args.config)
     print("Built: " + exe)
 
+    if args.test:
+        run([find_ctest(cmake), "--test-dir", bdir, "-C", args.config, "--output-on-failure"])
     if args.package:
-        package(exe_dir, exe)
+        package(bdir, exe_dir, exe)
     if args.run:
         launch(exe_dir, exe, game_args)
 
@@ -172,13 +236,46 @@ def launch(exe_dir, exe, game_args):
     sys.exit(subprocess.call(cmd, cwd=exe_dir))
 
 
-def package(exe_dir, exe):
+def cache_value(bdir, key):
+    try:
+        with open(os.path.join(bdir, "CMakeCache.txt"), encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if line.startswith(key + ":"):
+                    return line.split("=", 1)[1].strip()
+    except OSError:
+        pass
+    return ""
+
+
+def third_party_licenses(bdir):
+    """(name, license file) of the libraries built into the game: SDL2, opus and
+    (Windows) curl from FetchContent, and with --gns the vcpkg ports
+    (GameNetworkingSockets, protobuf, abseil, OpenSSL...)."""
+    out = []
+    for name, f in (("SDL2", "LICENSE.txt"), ("opus", "COPYING"), ("curl", "COPYING")):
+        p = os.path.join(bdir, "_deps", name.lower() + "-src", f)
+        if os.path.isfile(p):
+            out.append((name, p))
+    triplet = cache_value(bdir, "VCPKG_TARGET_TRIPLET")
+    if triplet and cache_value(bdir, "EDIFICE_GNS").upper() in ("ON", "1", "TRUE"):
+        share = os.path.join(bdir, "vcpkg_installed", triplet, "share")
+        for p in sorted(glob.glob(os.path.join(share, "*", "copyright"))):
+            port = os.path.basename(os.path.dirname(p))
+            if not port.startswith("vcpkg-"):
+                out.append((port, p))
+    return out
+
+
+def package(bdir, exe_dir, exe):
     version = project_version()
     dist = os.path.join(ROOT, "dist")
     os.makedirs(dist, exist_ok=True)
     base = "Edifice-%s-%s" % (version, OS)
     docs = [os.path.join(ROOT, f) for f in ("readme.txt", "license.txt", "lgpl-3.0.txt")]
     docs = [d for d in docs if os.path.isfile(d)]
+    # licenses/<library>.txt: the third-party libraries in the binary, whose
+    # licenses (zlib, BSD, Apache 2.0...) ask for their text in binary releases
+    licenses = [("licenses/%s.txt" % n, p) for n, p in third_party_licenses(bdir)]
 
     if OS == "macos":
         out = os.path.join(dist, base + ".zip")
@@ -194,6 +291,9 @@ def package(exe_dir, exe):
         shutil.copytree(exe, app, symlinks=True)
         for d in docs:
             shutil.copy2(d, stage)
+        for rel, p in licenses:
+            os.makedirs(os.path.join(stage, "licenses"), exist_ok=True)
+            shutil.copy2(p, os.path.join(stage, rel))
         run(["codesign", "--force", "--sign", "-", app])
         run(["codesign", "--verify", "--deep", "--strict", app])
         # No AppleDouble (__MACOSX/._*) entries: resource forks and xattrs left out.
@@ -203,9 +303,15 @@ def package(exe_dir, exe):
         out = os.path.join(dist, base + ".zip")
         with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
             z.write(exe, base + "/Edifice.exe")
+            # --gns: GameNetworkingSockets.dll and its dependencies (copied there by
+            # vcpkg) and the C++ runtime DLLs (app-local, copied by CMakeLists.txt)
+            for dll in sorted(glob.glob(os.path.join(exe_dir, "*.dll"))):
+                z.write(dll, base + "/" + os.path.basename(dll))
             add_tree_zip(z, DATA, base + "/data")  # data/ next to the exe, as on Linux
             for d in docs:
                 z.write(d, base + "/" + os.path.basename(d))
+            for rel, p in licenses:
+                z.write(p, base + "/" + rel)
     else:
         out = os.path.join(dist, base + ".tar.gz")
         with tarfile.open(out, "w:gz") as t:
@@ -214,6 +320,8 @@ def package(exe_dir, exe):
                   filter=lambda ti: None if os.path.basename(ti.name) == ".DS_Store" else ti)
             for d in docs:
                 t.add(d, base + "/" + os.path.basename(d))
+            for rel, p in licenses:
+                t.add(p, base + "/" + rel)
     print("Package: " + out)
 
 
