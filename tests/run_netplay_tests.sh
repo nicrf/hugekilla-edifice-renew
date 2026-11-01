@@ -27,12 +27,24 @@ export HK_ANTICHEAT_LOG=1
 status=0
 # name@N: the same test in the world of HK_SEED=N, on top of the random one
 # (10, 26, 40: worlds where players 2 units apart stood ~100 units apart in height)
+# net_cookie@require: the same server vars plus ac_requirecookie 1 (docs/M11.md)
 for run in net_handshake net_identity net_join net_fuzz net_voice net_voice@1 net_voice@2 \
-		net_voice@3 net_voice@10 net_voice@26 net_voice@40 net_map net_anticheat; do
+		net_voice@3 net_voice@10 net_voice@26 net_voice@40 net_map net_anticheat \
+		net_cookie net_cookie@require; do
 	t="${run%@*}"
 	log="$LOGDIR/$run.log"
 	args=()
-	if [ "$run" != "$t" ]; then export HK_SEED="${run#*@}"; else unset HK_SEED; fi
+	unset HK_SEED HK_AC_VARS
+	if [ "$t" = net_cookie ]; then
+		# short cookie time buckets (expiry check), room for its join requests
+		export HK_AC_VARS="ac_cookietime=1000 ac_ipenter=600"
+		if [ "$run" = net_cookie@require ]; then
+			HK_AC_VARS="$HK_AC_VARS ac_requirecookie=1"
+			args=(require)
+		fi
+	elif [ "$run" != "$t" ]; then
+		export HK_SEED="${run#*@}"
+	fi
 	if [ "$t" = net_voice ]; then export HK_VOICE_LOG=1; else unset HK_VOICE_LOG; fi
 	if [ "$t" = net_map ]; then
 		# a server started with a saved map (HK_MAPFILE), written by the test itself;

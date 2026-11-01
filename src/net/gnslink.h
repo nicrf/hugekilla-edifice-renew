@@ -59,6 +59,8 @@ public:
 	//data link of the connection named peer (server: a client's request address;
 	//client: the server's), 0 when peer is no connection (a plain UDP peer)
 	static GnsLink *OpenData(const SOCKADDR_IN *peer);
+	//1 if peer names an open connection (its handshake proved the address)
+	static int IsConnection(const SOCKADDR_IN *peer);
 	//the info link opened last, 0 if none is open
 	static GnsLink *CurrentInfo();
 	//closes everything and stops GameNetworkingSockets (links must be closed first)

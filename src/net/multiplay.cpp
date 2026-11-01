@@ -27,6 +27,7 @@
 #include "voice.h"
 #include "lobbygame.h"
 #include "anticheat.h"
+#include "hmac.h"
 #include <stdarg.h>
 #define MAXLOCALLIST 128
 #define PEERTIMEOUT 70000     //ms without a message before a peer is dropped
@@ -104,10 +105,16 @@ SOCKADDR_IN MakeSockAddr(char a1,char a2,char a3,char a4,WORD port)
 
 //---- game/protocol version: src/net/version.h, version.cpp ----
 
-//client asks infosock.dest to join, with its version
+//join cookie the server at entercookieip asked for (ENTERCOOKIE, M11 phase 2)
+static unsigned char entercookie[HELLOCOOKIE_SIZE];
+static unsigned int entercookieip;
+static int haveentercookie;
+
+//client asks infosock.dest to join, with its version, its capabilities and the
+//cookie that server gave it, if any
 static void SendRequestEnter()
 {
-	char buf[2+32+VERSIONTRAILER_MAX];
+	char buf[2+32+VERSIONTRAILER_MAX+HELLOCAPS_MAX];
 	int nl=strlen(netsettings.playername);
 	if(nl>31) nl=31;
 	buf[0]=REQUESTENTER;
@@ -116,14 +123,18 @@ static void SendRequestEnter()
 	buf[2+nl]=0;
 	int len=2+nl+1;
 	len+=WriteVersionTrailer(&buf[len]);
+	int cookie=haveentercookie&&entercookieip==infosock.dest.sin_addr.s_addr;
+	len+=WriteHelloCaps(&buf[len],HELLOCAP_COOKIE,cookie?entercookie:0);
 	infosock.Send(buf,len);
 	infosock.Flush();
 }
 
+extern int ac_enable,ac_requirecookie;
+
 //server answers an info request, with its version
 static void SendInfo(SOCKADDR_IN dest)
 {
-	char buf[2+100+VERSIONTRAILER_MAX+4];
+	char buf[2+100+VERSIONTRAILER_MAX+5];
 	int nl=strlen(netsettings.servername);
 	if(nl>99) nl=99;
 	buf[0]=INFO;
@@ -137,6 +148,8 @@ static void SendInfo(SOCKADDR_IN dest)
 	buf[len++]=(char)MAXPLAYERS;
 	buf[len++]=(char)sv.gamemode;
 	buf[len++]=(char)sv.capturelimit;
+	//capabilities (M11 phase 2, version.h; ignored by older clients)
+	buf[len++]=(char)(ac_enable?HELLOCAP_COOKIE|(ac_requirecookie?HELLOCAP_REQUIRECOOKIE:0):0);
 	infosock.dest=dest;
 	infosock.Send(buf,len);
 	infosock.Flush();
@@ -214,6 +227,8 @@ int ac_builddist=50;        //blocks from the player a block may be placed or re
 int ac_ipinfo=5;            //info requests answered per second and IP
 int ac_ipenter=30;          //join requests per minute and IP
 int ac_ippackets=50;        //messages per second and IP on the info port
+int ac_requirecookie=0;     //1: refuse clients that can't answer a join cookie (0.5.x and older)
+int ac_cookietime=30000;    //ms of a join cookie time bucket (valid one to two buckets)
 
 #define AC_KILL 0
 #define AC_DEATH 1
@@ -294,10 +309,25 @@ static void AcInitVars()
 		{0,&ac_firetolerance,"ac_firetolerance"},{&ac_fireburst,0,"ac_fireburst"},{&ac_ammoslack,0,"ac_ammoslack"},
 		{0,&ac_maxspeed,"ac_maxspeed"},{&ac_firedist,0,"ac_firedist"},{&ac_builddist,0,"ac_builddist"},
 		{&ac_ipinfo,0,"ac_ipinfo"},{&ac_ipenter,0,"ac_ipenter"},{&ac_ippackets,0,"ac_ippackets"},
+		{&ac_requirecookie,0,"ac_requirecookie"},{&ac_cookietime,0,"ac_cookietime"},
 	};
+	//debug (tests): HK_AC_VARS="ac_requirecookie=1 ac_cookietime=1000" wins over sv.ini
+	const char *env=getenv("HK_AC_VARS");
 	for(unsigned int v=0;v<sizeof(vars)/sizeof(vars[0]);v++)
 	{
 		char *val=loaded?svini.GetValues(vars[v].name):0;
+		static char envval[32];
+		int nl=strlen(vars[v].name);
+		for(const char *e=env;e&&*e;)
+		{
+			while(*e==' '||*e==',') e++;
+			if(!strncmp(e,vars[v].name,nl)&&e[nl]=='=')
+			{
+				snprintf(envval,sizeof(envval),"%.*s",(int)strcspn(e+nl+1," ,"),e+nl+1);
+				val=envval;
+			}
+			e+=strcspn(e," ,");
+		}
 		if(vars[v].i)
 		{
 			if(val) *vars[v].i=atoi(val);
@@ -540,6 +570,62 @@ static int AcIpAllowed(SOCKADDR_IN source,int kind)
 	return ok;
 }
 
+//---- join cookie (M11 phase 2, docs/M11.md) ----
+//A UDP source address can be spoofed: before a slot, a port and a stream of data
+//go to the address of a REQUESTENTER, the client must send back the cookie of that
+//address, HMAC-SHA256(secret, IP, port, time bucket) (hmac.h). Stateless: nothing is
+//kept for a request without a valid cookie, and its answer (ENTERCOOKIE, 12 bytes)
+//is never bigger than the request (version trailer alone: 11 bytes, plus caps).
+static unsigned char joinsecret[JOINSECRET_SIZE];
+static int joinsecretset;
+
+static unsigned int JoinBucket()
+{
+	return curtime/(DWORD)(ac_cookietime>=500?ac_cookietime:500);
+}
+
+static void SendSimpleTo(SOCKADDR_IN dest,char type,DWORD msg,DWORD msg2)
+{
+	SimpleBuf s=MakeSimple(type,msg,msg2);
+	infosock.dest=dest;
+	infosock.Send(s.b,sizeof(s.b));
+	infosock.Flush();
+}
+
+//REQUESTENTER (msglen bytes, caps) from source: 1 if its address is proven and it
+//may get a slot; else it was answered (a cookie, or a refusal) and 0
+static int JoinAddressProven(SOCKADDR_IN source,const HelloCaps *caps,int msglen)
+{
+	if(!ac_enable) return 1;
+	//GameNetworkingSockets: an encrypted connection, its handshake proved the address
+	if(NetSourceIsConnection(&source)) return 1;
+	if(!(caps->caps&HELLOCAP_COOKIE))
+	{
+		if(!ac_requirecookie) return 1;   //a build before cookies: as before phase 2
+		//the SIMPLE alone (12 bytes, the request has at least 14): the client says
+		//"update the game"; no text, which would be bigger than the request
+		ConsoleDisplayText("refused, client without join cookie (ac_requirecookie 1)");
+		if(msglen>=SIMPLESIZE) SendSimpleTo(source,VERSIONMISMATCH,EDIFICE_PROTOCOL_VERSION,0);
+		return 0;
+	}
+	if(!joinsecretset)
+	{
+		JoinSecretRandom(joinsecret);
+		joinsecretset=1;
+	}
+	unsigned int bucket=JoinBucket();
+	if(caps->caps&HELLOCAP_HASCOOKIE)
+	{
+		if(JoinCookieValid(joinsecret,source.sin_addr.s_addr,source.sin_port,bucket,caps->cookie)) return 1;
+		ConsoleDisplayText("join cookie expired or wrong, sending a new one");
+	}
+	if(msglen<SIMPLESIZE) return 0;
+	unsigned char c[JOINCOOKIE_SIZE];
+	JoinCookie(joinsecret,source.sin_addr.s_addr,source.sin_port,bucket,c);
+	SendSimpleTo(source,ENTERCOOKIE,WireGetU32(c),WireGetU32(c+4));
+	return 0;
+}
+
 void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pnum);
 void ReceivePosition(const char *msg,int msglen,int sender);
 static void RelayVoice(VoiceMessage *voice);
@@ -590,6 +676,7 @@ void StartServer()
 	if(server) return;
 	Disconnect();
 	server=1;
+	joinsecretset=0;   //a new join cookie secret for each game hosted (M11 phase 2)
 	LoadNetSettings();
 	numplayers=1;
 	
@@ -894,7 +981,11 @@ void ServerLoop()
 					infosock.Flush();
 					break;
 				}
-				if(numplayers>=MAXPLAYERS) 
+				//no slot, nothing sent but a small answer, before the address is proven
+				HelloCaps caps;
+				ReadHelloCaps((char *)&msg+trailer,msglen-trailer,&caps);
+				if(!JoinAddressProven(source,&caps,msglen)) break;
+				if(numplayers>=MAXPLAYERS)
 				{
 					ConsoleDisplayText("server was full");
 					RefuseClient(source,SERVERFULL,"The server is full.");
@@ -1143,6 +1234,26 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 #ifndef HK_WIN32_NATIVE
 				JoinScreenShowError(text);
 #endif
+				break;
+			}
+		case ENTERCOOKIE:
+			{
+				//the server wants its join cookie back (M11 phase 2): asks again with it,
+				//at once if it is a new one (else the retry timer sends it)
+				if(GetLocalPlayer()->playstate!=1||connected) break;
+				unsigned char c[HELLOCOOKIE_SIZE];
+				WirePutU32(c,msg);
+				WirePutU32(c+4,msg2);
+				int fresh=!haveentercookie||entercookieip!=source.sin_addr.s_addr||memcmp(c,entercookie,sizeof(c));
+				memcpy(entercookie,c,sizeof(c));
+				entercookieip=source.sin_addr.s_addr;
+				haveentercookie=1;
+				if(fresh)
+				{
+					ConsoleDisplayText("received join cookie");
+					SendRequestEnter();
+				}
+				GetPlayer(0)->timeout=curtime+2000;
 				break;
 			}
 		case ENTER:

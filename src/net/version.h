@@ -11,7 +11,10 @@
 //  - quantization, tick rate, transport;
 //  - a new message type (an older build would ignore it, or log "Unknown
 //    message received" for every packet), e.g. VOICE in protocol 5.
-// Both sides must have the same protocol version; there is no negotiation.
+// Both sides must have the same protocol version. The one negotiation within a
+// protocol is the capability byte of REQUESTENTER and INFO below (HELLOCAP_*):
+// bytes appended where older builds of the same protocol stop reading, and a new
+// message (ENTERCOOKIE) only sent to a peer that announced it understands it.
 // EDIFICE_VERSION_STRING (the release, from CMakeLists.txt) is informative only.
 
 #ifndef EDIFICE_VERSION_H
@@ -44,8 +47,30 @@ struct PeerVersion
 	char version[16];
 };
 
+// Capabilities (M11 phase 2, docs/M11.md), still protocol 5. After the version
+// trailer, where builds before them stop reading:
+//   REQUESTENTER: ... trailer | uint8 caps | cookie[HELLOCOOKIE_SIZE] if caps & HELLOCAP_HASCOOKIE
+//   INFO:         ... trailer | 4 bytes of details | uint8 caps
+#define HELLOCAP_COOKIE 1        // REQUESTENTER: the client answers ENTERCOOKIE; INFO: the server sends it
+#define HELLOCAP_HASCOOKIE 2     // REQUESTENTER: the cookie follows
+#define HELLOCAP_REQUIRECOOKIE 4 // INFO: clients without HELLOCAP_COOKIE are refused (ac_requirecookie)
+#define HELLOCOOKIE_SIZE 8
+#define HELLOCAPS_MAX (1+HELLOCOOKIE_SIZE)
+
+struct HelloCaps
+{
+	int caps;            // 0: a build without capabilities
+	unsigned char cookie[HELLOCOOKIE_SIZE];   // valid if caps & HELLOCAP_HASCOOKIE
+};
+
 int WriteVersionTrailer(char *buf);
 void ReadVersionTrailer(const char *buf, int len, PeerVersion *out);
+// caps byte of a REQUESTENTER, and the cookie if not 0; returns its size
+int WriteHelloCaps(char *buf, int caps, const unsigned char *cookie);
+// buf, len: from the start of the version trailer of a REQUESTENTER. caps 0 if
+// there is no trailer or nothing after it; HELLOCAP_HASCOOKIE dropped if the
+// cookie is cut short.
+void ReadHelloCaps(const char *buf, int len, HelloCaps *out);
 // 1 if a peer can play with this build; otherwise 0 and a readable reason.
 int VersionCompatible(const PeerVersion *peer, char *reason, int reasonsize);
 
