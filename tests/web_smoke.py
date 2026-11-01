@@ -179,6 +179,34 @@ def main():
         page.wait_for_timeout(1500)
         page.keyboard.up("w")
         check(sample(page, os.path.join(args.out, "solo-walk.png")) > 8, "still drawing after walking")
+        # a gamepad through the browser's Gamepad API (Emscripten's SDL2): a fake
+        # standard pad, its left stick then pushed forward, must walk the player.
+        # SDL only reports what changes after it connects, and takes the first value
+        # of an axis as its rest: a tiny move first, as a real stick's noise does
+        page.evaluate("""() => {
+            const pad = {id: 'Web smoke pad (STANDARD GAMEPAD)', index: 0, connected: true,
+                mapping: 'standard', timestamp: performance.now(),
+                axes: [0, 0, 0, 0],
+                buttons: Array.from({length: 17}, () => ({pressed: false, touched: false, value: 0}))};
+            window.__smokepad = pad;
+            navigator.getGamepads = () => [window.__smokepad];
+            const e = new Event('gamepadconnected');
+            e.gamepad = pad;
+            window.dispatchEvent(e);
+            // the browser bumps the timestamp when a pad changes; SDL reads it
+            window.__smokepadtimer = setInterval(() => { pad.timestamp = performance.now(); }, 16);
+        }""")
+        page.wait_for_timeout(300)
+        page.evaluate("""() => { window.__smokepad.axes = [.001, .001, .001, .001]; }""")
+        page.wait_for_timeout(300)
+        pos0 = page.evaluate("[0, 2].map(a => Module._HKWebPlayerPos(a))")
+        page.evaluate("""() => { window.__smokepad.axes[1] = -1; }""")
+        page.wait_for_timeout(1500)
+        pos1 = page.evaluate("[0, 2].map(a => Module._HKWebPlayerPos(a))")
+        page.evaluate("""() => { window.__smokepad.axes[1] = 0; }""")
+        moved = ((pos1[0] - pos0[0]) ** 2 + (pos1[1] - pos0[1]) ** 2) ** .5
+        print("     gamepad: moved %.2f units" % moved)
+        check(moved > 1, "a gamepad's left stick walks (Gamepad API)")
         # headless Chromium refuses pointer lock (no real window): not the game's
         errors[:] = [e for e in errors if "pointer lock" not in e]
         check(not errors, "no page error in the game")

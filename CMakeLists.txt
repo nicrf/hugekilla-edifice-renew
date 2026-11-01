@@ -276,6 +276,7 @@ set(SOURCES
   src/audio/sound_sdl.cpp
   src/audio/voice.cpp
   src/platform/platform_sdl.cpp
+  src/platform/gamepad.cpp
   src/platform/fileio.cpp
   src/platform/system_sdl.cpp
 )
@@ -485,11 +486,15 @@ add_test(NAME lobby COMMAND lobby_test)
 add_executable(signaling_test tests/signaling_test.cpp src/net/signaling.cpp)
 target_include_directories(signaling_test PRIVATE ${SRC}/net)
 add_test(NAME signaling COMMAND signaling_test)
+# the gamepad's dead zone and curve, sticks as movement, the menus' focus moves
+add_executable(input_test tests/input_test.cpp)
+target_include_directories(input_test PRIVATE ${SRC}/ui)
+add_test(NAME input COMMAND input_test)
 if(EMSCRIPTEN)
   # the web build's unit tests run in Node.js (the toolchain's emulator), on the
   # real files (fileio_test makes folders)
   foreach(t worldrandom_test wire_test voice_test anticheat_test hmac_test fileio_test map_test
-      lobby_test signaling_test)
+      lobby_test signaling_test input_test)
     target_link_options(${t} PRIVATE -sNODERAWFS=1 -sALLOW_MEMORY_GROWTH=1 -sSTACK_SIZE=1MB)
   endforeach()
   target_link_options(lobby_test PRIVATE -sFETCH=1)   # lobby.cpp's emscripten_fetch

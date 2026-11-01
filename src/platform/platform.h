@@ -23,4 +23,11 @@ void LockCursor(int lock);
 const char *UserFile(const char *name);   //name in the per-user settings folder
 void HKMessageBox(const char *caption,const char *text,int error);   //also on stderr (system_sdl.cpp)
 
+//input from the gamepad (gamepad.cpp), down the keyboard's and the mouse's paths
+int HKInGame();             //the game has the input: playing, the mouse captured, no menu over it
+void HKInjectKey(int vk,int down);           //a key (hkkeys.h) as if pressed or released
+void HKInjectClick(int down,int clicks=1);   //the left mouse button at mousepos
+void HKInjectLook(int dx,int dy);            //mouse counts of looking around
+void HKSaveFrame(const char *path);          //debug: saves the next frame presented (PPM)
+
 #endif

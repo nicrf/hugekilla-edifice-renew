@@ -19,6 +19,7 @@
 #include "sound.h"
 #include "ui.h"
 #include "voice.h"
+#include "gamepad.h"
 #include <SDL.h>
 #include <time.h>   //time(), the seed of rand()
 #ifdef __EMSCRIPTEN__
@@ -48,14 +49,24 @@ void HKWindowSize(int *w, int *h)
 	if (window) RDrawableSize(w, h);
 }
 
-// Debug aid: HK_SHOT=file.ppm saves the HK_SHOT_FRAME-th frame (default 120).
+// Debug aid: HK_SHOT=file.ppm saves the HK_SHOT_FRAME-th frame (default 120);
+// HKSaveFrame (HK_PADTEST's shot steps) the frame being presented.
+static char shotnow[1024];
+
+void HKSaveFrame(const char *path)
+{
+	snprintf(shotnow, sizeof(shotnow), "%s", path);
+}
+
 static void DebugScreenshot()
 {
 	static int frame;
-	static const char *shot = getenv("HK_SHOT");
-	if (!shot) return;
+	static const char *env = getenv("HK_SHOT");
+	const char *shot = env;
 	int target = getenv("HK_SHOT_FRAME") ? atoi(getenv("HK_SHOT_FRAME")) : 120;
-	if (++frame != target) return;
+	if (env) frame++;
+	if (shotnow[0]) shot = shotnow;
+	else if (!shot || frame != target) return;
 	int vp[4];
 	RGetViewport(vp);
 	int w = vp[2], h = vp[3];
@@ -70,6 +81,7 @@ static void DebugScreenshot()
 		fprintf(stderr, "saved %s (%dx%d)\n", shot, w, h);
 	}
 	delete[] px;
+	shotnow[0] = 0;
 }
 
 // Debug aid: HK_FRAMETIME=N prints the mean time of the N frames (default 300) after
@@ -267,8 +279,86 @@ static void KeyDown(int vk, int repeat)
 	HandleKey(vk, flags);
 }
 
+// the left mouse button: the menus (join screen, build menu, the others) when the
+// mouse is free, else the game
+static void LeftButton(int down, int clicks)
+{
+	HKSetKeyDown(KEY_LBUTTON, down);
+	if (!down)
+	{
+		HandleKeyUp(KEY_LBUTTON, 0);
+		return;
+	}
+	if (IsJoinScreenOpen())
+	{
+		JoinScreenClick(clicks);
+		return;
+	}
+	if (IsBuildMenuOpen())
+	{
+		BuildMenuClick();
+		return;
+	}
+	if (GetLocalPlayer()->playstate == 0 || lockedcursor == 0)
+	{
+		MenuMouseDown();
+		return;
+	}
+	HandleKey(KEY_LBUTTON, 0);
+}
+
+int HKInGame()
+{
+	return GetLocalPlayer()->playstate != 0 && lockedcursor == 1 && !IsBuildMenuOpen();
+}
+
+// a key from the gamepad as the keyboard's would go: the join screen takes SDL's key
+// codes, the rest the game's (only the keys it uses are mapped)
+void HKInjectKey(int vk, int down)
+{
+	if (!vk) return;
+	if (vk == KEY_LBUTTON)
+	{
+		LeftButton(down, 1);
+		return;
+	}
+	if (down && IsJoinScreenOpen())
+	{
+		SDL_Keycode sym = vk == KEY_ESCAPE ? SDLK_ESCAPE : vk == KEY_RETURN ? SDLK_RETURN :
+			vk == KEY_UP ? SDLK_UP : vk == KEY_DOWN ? SDLK_DOWN : vk == KEY_TAB ? SDLK_TAB : 0;
+		if (sym && HandleJoinScreenKey(sym)) return;
+	}
+	HKSetKeyDown(vk, down);
+	if (!down)
+	{
+		HandleKeyUp(vk, (1u << 30) | (1u << 31));
+		return;
+	}
+	if (vk == KEY_RBUTTON)
+	{
+		// as the right mouse button: the menus that close on it first
+		if (OptionsHandleKey(KEY_RBUTTON) || BuildMenuHandleKey(KEY_RBUTTON) || SpawnScreenBlocksKey(KEY_RBUTTON)) return;
+		HandleKey(KEY_RBUTTON, 0);
+		return;
+	}
+	KeyDown(vk, 0);
+}
+
+void HKInjectClick(int down, int clicks)
+{
+	LeftButton(down, clicks);
+}
+
+void HKInjectLook(int dx, int dy)
+{
+	if (!lockedcursor) return;
+	mousedx += dx;
+	mousedy += dy;
+}
+
 static void HandleEvent(const SDL_Event &ev)
 {
+	if (PadHandleEvent(ev)) return;
 	switch (ev.type)
 	{
 	case SDL_QUIT:
@@ -285,6 +375,7 @@ static void HandleEvent(const SDL_Event &ev)
 		break;
 	case SDL_KEYDOWN:
 	{
+		UIFocusShow(0);   // the keyboard has its own ways around the screens
 		if (HandleJoinScreenKey(ev.key.keysym.sym)) break;
 		int vk = SDLKeyToKey(ev.key.keysym);
 		if (!vk) break;
@@ -311,6 +402,7 @@ static void HandleEvent(const SDL_Event &ev)
 	{
 		int w, h;
 		SDL_GetWindowSize(window, &w, &h);
+		if (ev.motion.xrel || ev.motion.yrel) UIFocusShow(0);   // the mouse points again
 		mousepos.x = (float)ev.motion.x / w * 2 - 1;
 		mousepos.y = (float)ev.motion.y / h * -2 + 1;
 		if (lockedcursor)
@@ -322,25 +414,7 @@ static void HandleEvent(const SDL_Event &ev)
 	}
 	case SDL_MOUSEBUTTONDOWN:
 		if (ev.button.button == SDL_BUTTON_LEFT)
-		{
-			HKSetKeyDown(KEY_LBUTTON, 1);
-			if (IsJoinScreenOpen())
-			{
-				JoinScreenClick(ev.button.clicks);
-				break;
-			}
-			if (IsBuildMenuOpen())
-			{
-				BuildMenuClick();
-				break;
-			}
-			if (GetLocalPlayer()->playstate == 0 || lockedcursor == 0)
-			{
-				MenuMouseDown();
-				break;
-			}
-			HandleKey(KEY_LBUTTON, 0);
-		}
+			LeftButton(1, ev.button.clicks);
 		else if (ev.button.button == SDL_BUTTON_RIGHT)
 		{
 			HKSetKeyDown(KEY_RBUTTON, 1);
@@ -350,10 +424,7 @@ static void HandleEvent(const SDL_Event &ev)
 		break;
 	case SDL_MOUSEBUTTONUP:
 		if (ev.button.button == SDL_BUTTON_LEFT)
-		{
-			HKSetKeyDown(KEY_LBUTTON, 0);
-			HandleKeyUp(KEY_LBUTTON, 0);
-		}
+			LeftButton(0, 1);
 		else if (ev.button.button == SDL_BUTTON_RIGHT)
 		{
 			HKSetKeyDown(KEY_RBUTTON, 0);
@@ -481,6 +552,7 @@ static void EnterDataDir(int argc, char **argv)
 
 static void Shutdown()
 {
+	PadShutdown();
 	CloseSocks();
 	VoiceShutdown();
 	UnInitSound();
@@ -505,6 +577,13 @@ extern "C" EMSCRIPTEN_KEEPALIVE void HKWebSynced()
 extern "C" EMSCRIPTEN_KEEPALIVE int HKWebPlayState()
 {
 	return GetLocalPlayer()->playstate;
+}
+
+// for tests/web_smoke.py: the local player's position (0 x, 1 y, 2 z), to see it move
+extern "C" EMSCRIPTEN_KEEPALIVE float HKWebPlayerPos(int axis)
+{
+	Vector p = GetLocalPlayer()->pos;
+	return axis == 0 ? p.x : axis == 1 ? p.y : p.z;
 }
 
 // for tests/net_webrtc.py: one block edit sent to the server as the build menu sends
@@ -560,6 +639,7 @@ static void Frame()
 	SDL_Event ev;
 	while (SDL_PollEvent(&ev))
 		HandleEvent(ev);
+	PadFrame();   // sticks and triggers, the menus' repeat
 #ifdef __EMSCRIPTEN__
 	WebFrame();
 #endif
@@ -717,6 +797,7 @@ int main(int argc, char **argv)
 	}
 	LoadControls();
 	LoadOptions();
+	PadInit();
 	RedrawSplash(TEX_SPLASH, 0, 1);
 	PlaySound(0, 1);
 
@@ -769,6 +850,7 @@ int main(int argc, char **argv)
 	{
 		if (!strcmp(m, "options")) OpenOptions();
 		if (!strcmp(m, "options2")) { OpenOptions(); mousepos = Vector(-.06f, .83f, 0); OptionsClick(); }
+		if (!strcmp(m, "options3")) { OpenOptions(); mousepos = Vector(.54f, .83f, 0); OptionsClick(); }   // Gamepad
 		if (!strcmp(m, "credits")) { mousepos = Vector(0, -.92f, 0); MenuMouseDown(); }
 		if (!strcmp(m, "join")) OpenJoinScreen();
 		if (!strcmp(m, "internet")) JoinScreenJoinCode("");   // the Internet tab

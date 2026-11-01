@@ -7,6 +7,7 @@
 #include "ui.h"
 #include "vector.h"
 #include "redrawing.h"
+#include "inputlogic.h"
 
 Button button[50];
 int numbuttons;
@@ -284,6 +285,7 @@ void UIArrow(float x1,float y1,float x2,float y2,const char *label)
 int UIButton(float x1,float y1,float x2,float y2,const char *label,int enabled,int strong)
 {
 	int over=enabled&&UIInside(x1,y1,x2,y2);
+	if(enabled) UIFocusable(x1,y1,x2,y2);
 	if(!enabled)
 		UIRect(x1,y1,x2,y2,1,1,1,.04f);
 	else if(strong)
@@ -328,6 +330,135 @@ void UIField(float x1,float y1,float x2,float y2,const char *text,int focused,co
 		UIRect(x+.006f,y+UITEXTH*.12f,x+.011f,y+UITEXTH*.8f,1,1,.5f,.9f);
 }
 
+
+//---- focus for the gamepad ----
+
+//the areas registered while drawing this frame, and the last complete frame's, which
+//the pad moves through (a frame's list is only complete once it is drawn)
+#define MAXFOCUS 160
+struct FocusArea
+{
+	InRect r;
+	float stepleft,stepright;
+};
+static FocusArea focusdrawn[MAXFOCUS],focuslast[MAXFOCUS];
+static int numfocusdrawn,numfocuslast;
+static InRect focusrect;        //the focused area, kept by its place: screens draw anew each frame
+static int hasfocus;
+static int focusshown;
+static DWORD lastactivate;      //two A presses on the same area: a double click (join list)
+
+void UIFocusable(float x1,float y1,float x2,float y2,float stepleft,float stepright)
+{
+	if(numfocusdrawn>=MAXFOCUS) return;
+	FocusArea *a=&focusdrawn[numfocusdrawn++];
+	a->r.x1=x1;
+	a->r.y1=y1;
+	a->r.x2=x2;
+	a->r.y2=y2;
+	a->stepleft=stepleft;
+	a->stepright=stepright;
+}
+
+int UIFocusCount()
+{
+	return numfocuslast;
+}
+
+void UIFocusShow(int on)
+{
+	focusshown=on;
+}
+
+static int FocusIndex(const FocusArea *list,int n)
+{
+	if(!hasfocus) return -1;
+	for(int i=0;i<n;i++)
+		if(InSameRect(list[i].r,focusrect)) return i;
+	return -1;
+}
+
+static void FocusOn(const InRect &r)
+{
+	focusrect=r;
+	hasfocus=1;
+	mousepos=Vector((r.x1+r.x2)/2,(r.y1+r.y2)/2,0);   //hovered, as under the mouse
+}
+
+static int FocusFirst()
+{
+	InRect rects[MAXFOCUS];
+	for(int i=0;i<numfocuslast;i++) rects[i]=focuslast[i].r;
+	int first=InFocusFirst(rects,numfocuslast);
+	if(first<0) return 0;
+	FocusOn(rects[first]);
+	return 1;
+}
+
+int UIFocusMove(int dir)
+{
+	focusshown=1;
+	int cur=FocusIndex(focuslast,numfocuslast);
+	if(cur<0&&!hasfocus) return FocusFirst();
+	//a row that steps a value: Left and Right click its "<" and ">"
+	if(cur>=0&&(dir==IN_LEFT||dir==IN_RIGHT)&&focuslast[cur].stepleft!=UINOSTEP)
+	{
+		const InRect &r=focuslast[cur].r;
+		mousepos=Vector(dir==IN_LEFT?focuslast[cur].stepleft:focuslast[cur].stepright,(r.y1+r.y2)/2,0);
+		HKInjectClick(1);
+		HKInjectClick(0);
+		return 1;
+	}
+	InRect rects[MAXFOCUS];
+	for(int i=0;i<numfocuslast;i++) rects[i]=focuslast[i].r;
+	//from where the focus was, even if that screen is gone: the nearest on this one
+	int next=InFocusNext(rects,numfocuslast,focusrect,dir);
+	if(next<0) return cur<0?FocusFirst():0;
+	FocusOn(rects[next]);
+	return 1;
+}
+
+void UIFocusActivate()
+{
+	focusshown=1;
+	if(FocusIndex(focuslast,numfocuslast)<0)
+	{
+		FocusFirst();
+		return;
+	}
+	FocusOn(focusrect);
+	int clicks=curtime-lastactivate<500?2:1;
+	lastactivate=clicks==2?0:curtime;
+	HKInjectClick(1,clicks);
+	HKInjectClick(0);
+}
+
+void UIFrameEnd()
+{
+	if(focusshown&&numfocusdrawn)
+	{
+		//a new screen: its first area; else the focused one, framed and pulsing
+		if(FocusIndex(focusdrawn,numfocusdrawn)<0)
+		{
+			InRect rects[MAXFOCUS];
+			for(int i=0;i<numfocusdrawn;i++) rects[i]=focusdrawn[i].r;
+			int first=InFocusFirst(rects,numfocusdrawn);
+			focusrect=rects[first];
+			hasfocus=1;
+		}
+		RPushAttrib(RATTR_ENABLE|RATTR_CURRENT|RATTR_COLOR);
+		RDisable(RCAP_DEPTHTEST);
+		REnable(RCAP_BLEND);
+		RBlendFunc(RBLEND_ALPHA);
+		float a=.6f+.3f*sinf((curtime%1000)/1000.f*2*3.14159f);
+		const InRect &r=focusrect;
+		Outline(r.x1-.006f,r.y1-.008f,r.x2+.006f,r.y2+.008f,.007f,1,.85f,.2f,a);
+		RPopAttrib();
+	}
+	memcpy(focuslast,focusdrawn,sizeof(FocusArea)*numfocusdrawn);
+	numfocuslast=numfocusdrawn;
+	numfocusdrawn=0;
+}
 
 //adds a button to the screen
 
@@ -392,6 +523,7 @@ void DrawMenu()
 	int covered=IsJoinScreenOpen()||IsServerSetupOpen()||IsOptionsOpen()||showcredits;
 	for(int i=0;i<numbuttons&&!covered;i++)
 	{
+		UIFocusable(button[i].x1,button[i].y1,button[i].x2,button[i].y2);
 		TexBind(TEX_MENU0+button[i].tex);
 		if(i==over)
 			RColor3f(1,1,1);
@@ -427,6 +559,7 @@ void DrawMenu()
 	if(showcredits)
 		DrawCredits();
 	DrawJoinScreen();
+	UIFrameEnd();
 
 	HKSwapWindow();	
 }

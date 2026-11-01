@@ -151,6 +151,9 @@ struct Controls
 };
 
 void LoadControls();
+//analog walking of the local player (a gamepad's stick): -1..1 forward and right,
+//and the key flags to show for it; inactive: back to the keys held
+void SetPadMove(int active,float fwd,float strafe,int up,int down,int left,int right);
 void SetLocalNum(int num);
 int GetLocalNum();
 Player *GetLocalPlayer();

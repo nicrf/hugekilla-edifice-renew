@@ -1,5 +1,6 @@
-//options screen opened from the main menu: key bindings, video and audio settings.
-//everything is applied immediately and written back to control.ini when closed.
+//options screen opened from the main menu: key bindings, video and audio settings,
+//the gamepad's. Everything is applied immediately and written back to control.ini
+//when closed.
 
 
 #include "renderer.h"
@@ -12,9 +13,10 @@
 #include "ui.h"
 #include "voice.h"
 #include "hkkeys.h"
+#include "gamepad.h"
 
 int showoptions;
-static int optionstab;     //0 controls, 1 video/audio, 2 player
+static int optionstab;     //0 controls, 1 video/audio, 2 player, 3 gamepad
 static int capturing=-1;   //binding row waiting for a key
 static float volume=1;
 static char playername[32];
@@ -73,12 +75,63 @@ static const char *settinglabels[NUMSETTINGS]=
 #define TAB_CONTROLS -.5f,.79f,-.22f,.88f
 #define TAB_VIDEO -.2f,.79f,.08f,.88f
 #define TAB_PLAYER .1f,.79f,.38f,.88f
+#define TAB_PAD .4f,.79f,.68f,.88f
 #define BTN_CLOSE .6f,-.87f,.9f,-.76f
 
 //bottom of a row
 static float RowY(int row)
 {
 	return ROWTOP-(row+1)*ROWHEIGHT;
+}
+
+//Gamepad tab: settings rows, then the actions' buttons in two columns of cells
+#define NUMPADSETTINGS 5
+static const char *padlabels[NUMPADSETTINGS]={"Look sensitivity","Dead zone","Response curve","Invert look","Rumble"};
+#define PADBINDROW (NUMPADSETTINGS+1)     //first row of the bindings (one for the pad's name)
+#define PADCOLROWS 8
+#define PADCOLX2 -.02f                    //end of the left column
+#define PADCOLX1 .02f                     //start of the right one
+#define PADVALUEW .34f
+
+static int PadCellRow(int action)
+{
+	return PADBINDROW+action%PADCOLROWS;
+}
+
+static void PadCellX(int action,float &x1,float &x2)
+{
+	x1=action<PADCOLROWS?ROWX1:PADCOLX1;
+	x2=action<PADCOLROWS?PADCOLX2:ROWX2;
+}
+
+static int PadIsStepper(int row)
+{
+	return row<3;
+}
+
+static void ChangePadSetting(int row,int dir)
+{
+	PadSettings &p=padsettings;
+	switch(row)
+	{
+	case 0: p.sensitivity=fminf(4,fmaxf(.25f,p.sensitivity+dir*.25f)); break;
+	case 1: p.deadzone=fminf(.5f,fmaxf(.04f,p.deadzone+dir*.02f)); break;
+	case 2: p.curve=fminf(3,fmaxf(1,p.curve+dir*.2f)); break;
+	case 3: p.invert=!p.invert; break;
+	case 4: p.rumble=!p.rumble; break;
+	}
+}
+
+static void PadSettingText(int row,char *text)
+{
+	switch(row)
+	{
+	case 0: sprintf(text,"%.2f",padsettings.sensitivity); break;
+	case 1: sprintf(text,"%d%%",(int)(padsettings.deadzone*100+.5f)); break;
+	case 2: sprintf(text,"%.1f",padsettings.curve); break;
+	case 3: strcpy(text,padsettings.invert?"On":"Off"); break;
+	case 4: strcpy(text,padsettings.rumble?"On":"Off"); break;
+	}
 }
 
 static int RowAt(float y,int numrows)
@@ -183,8 +236,10 @@ void SetIniValues(const char *filename,const char *keys[],const char *values[],i
 static void SaveOptions()
 {
 #define NUMNUMBERS 13
-	const char *keys[NUMBINDINGS+NUMNUMBERS];
-	const char *values[NUMBINDINGS+NUMNUMBERS];
+#define MAXPADVALUES 32
+	const char *keys[NUMBINDINGS+NUMNUMBERS+MAXPADVALUES];
+	const char *values[NUMBINDINGS+NUMNUMBERS+MAXPADVALUES];
+	static char padvalues[MAXPADVALUES][32];
 	char numbers[NUMNUMBERS][32];
 	int n=0;
 	for(int i=0;i<NUMBINDINGS;i++)
@@ -217,6 +272,9 @@ static void SaveOptions()
 		values[n]=numbers[i];
 		n++;
 	}
+	int numpad=PadIniValues(&keys[n],padvalues,MAXPADVALUES);
+	for(int i=0;i<numpad;i++)
+		values[n++]=padvalues[i];
 	SetIniValues(UserFile("control.ini"),keys,values,n);
 	for(int i=0;i<firstnumber;i++)
 		free((void *)values[i]);
@@ -250,6 +308,7 @@ void OpenOptions()
 {
 	showoptions=1;
 	capturing=-1;
+	PadCapture(-1);
 	editingname=0;
 	CfgFile net;
 	playername[0]=0;
@@ -262,6 +321,7 @@ static void CloseOptions()
 {
 	showoptions=0;
 	capturing=-1;
+	PadCapture(-1);
 	editingname=0;
 	if(!playername[0]) strcpy(playername,"Player");
 	SaveOptions();
@@ -364,6 +424,11 @@ static void SettingText(int row,char *text)
 int OptionsHandleKey(int vk)
 {
 	if(!showoptions) return 0;
+	if(PadCapturing()>=0)
+	{
+		if(vk==KEY_ESCAPE||vk==KEY_RBUTTON) PadCapture(-1);
+		return 1;
+	}
 	if(capturing>=0)
 	{
 		if(vk==KEY_ESCAPE)
@@ -396,15 +461,34 @@ void OptionsClick()
 		OptionsHandleKey(KEY_LBUTTON);
 		return;
 	}
+	if(PadCapturing()>=0)
+	{
+		PadCapture(-1);   //a click elsewhere: never mind
+		return;
+	}
 	editingname=0;
 	if(Inside(TAB_CONTROLS)) { optionstab=0; return; }
 	if(Inside(TAB_VIDEO)) { optionstab=1; return; }
 	if(Inside(TAB_PLAYER)) { optionstab=2; return; }
+	if(Inside(TAB_PAD)) { optionstab=3; return; }
 	if(Inside(BTN_CLOSE)) { CloseOptions(); return; }
 	if(mousepos.x<ROWX1||mousepos.x>ROWX2) return;
 	if(optionstab==2)
 	{
 		if(RowAt(mousepos.y,1)==0) editingname=1;
+		return;
+	}
+	if(optionstab==3)
+	{
+		int row=RowAt(mousepos.y,PADBINDROW+PADCOLROWS);
+		if(row>=0&&row<NUMPADSETTINGS)
+			ChangePadSetting(row,PadIsStepper(row)&&mousepos.x<VALUEX+ARROWW?-1:1);
+		for(int a=0;a<PadActionCount()&&row>=PADBINDROW;a++)
+		{
+			float x1,x2;
+			PadCellX(a,x1,x2);
+			if(PadCellRow(a)==row&&mousepos.x>x1&&mousepos.x<x2) PadCapture(a);
+		}
 		return;
 	}
 	if(optionstab==0)
@@ -430,6 +514,7 @@ void OptionsClick()
 //a tab of the title bar (the join screen's)
 static void Tab(float x1,float y1,float x2,float y2,const char *label,int active)
 {
+	UIFocusable(x1,y1,x2,y2);
 	int over=!active&&Inside(x1,y1,x2,y2);
 	UIRect(x1,y1,x2,y2,1,1,active?.5f:1,active?.2f:over?.14f:.06f);
 	if(active) UIRect(x1,y1,x2,y1+.006f,1,1,.5f,.9f);
@@ -438,24 +523,27 @@ static void Tab(float x1,float y1,float x2,float y2,const char *label,int active
 	UIText((x1+x2-UITextWidth(label))/2,UITextY(y1,y2),label);
 }
 
-//label of a row, brighter under the mouse; returns the value's y1,y2
-static void RowLabel(int row,const char *label,float &y1,float &y2)
+//label of a row (or a cell of one: x1..x2), brighter under the mouse; returns the
+//value's y1,y2. stepper: the pad's Left and Right click its "<" and ">"
+static void RowLabel(int row,const char *label,float &y1,float &y2,int stepper=0,float x1=ROWX1,float x2=ROWX2)
 {
 	y1=RowY(row)+.008f;
 	y2=RowY(row)+ROWHEIGHT-.008f;
-	int hover=Inside(ROWX1,RowY(row),ROWX2,RowY(row)+ROWHEIGHT);
-	if(hover) UIRect(ROWX1,RowY(row),ROWX2,RowY(row)+ROWHEIGHT,1,1,1,.06f);
+	if(stepper) UIFocusable(x1,RowY(row),x2,RowY(row)+ROWHEIGHT,VALUEX+ARROWW/2,VALUEX2-ARROWW/2);
+	else UIFocusable(x1,RowY(row),x2,RowY(row)+ROWHEIGHT);
+	int hover=Inside(x1,RowY(row),x2,RowY(row)+ROWHEIGHT);
+	if(hover) UIRect(x1,RowY(row),x2,RowY(row)+ROWHEIGHT,1,1,1,.06f);
 	RColor3f(hover?1:.75f,hover?1:.75f,hover?1:.75f);
-	UIText(LABELX,UITextY(y1,y2),label);
+	UIText(x1+LABELX-ROWX1,UITextY(y1,y2),label);
 }
 
 //value box with centered text
-static void Value(float y1,float y2,const char *text,int highlight)
+static void Value(float y1,float y2,const char *text,int highlight,float x1=VALUEX,float x2=VALUEX2)
 {
-	UIRect(VALUEX,y1,VALUEX2,y2,0,0,0,.55f);
+	UIRect(x1,y1,x2,y2,0,0,0,.55f);
 	if(highlight) RColor3f(1,1,.5f);
 	else RColor3f(1,1,1);
-	UIText((VALUEX+VALUEX2-UITextWidth(text))/2,UITextY(y1,y2),text);
+	UITextFit((x1+x2-fminf(UITextWidth(text),x2-x1-.02f))/2,UITextY(y1,y2),text,x2-x1-.02f);
 }
 
 void DrawOptions()
@@ -468,11 +556,43 @@ void DrawOptions()
 	Tab(TAB_CONTROLS,"Controls",optionstab==0);
 	Tab(TAB_VIDEO,"Video/Audio",optionstab==1);
 	Tab(TAB_PLAYER,"Player",optionstab==2);
+	Tab(TAB_PAD,"Gamepad",optionstab==3);
 
 	char text[100];
 	float y1,y2;
 	const char *help;
-	if(optionstab==2)
+	if(optionstab==3)
+	{
+		for(int i=0;i<NUMPADSETTINGS;i++)
+		{
+			RowLabel(i,padlabels[i],y1,y2,1);
+			PadSettingText(i,text);
+			Value(y1,y2,text,0);
+			if(PadIsStepper(i))
+			{
+				UIArrow(VALUEX,y1,VALUEX+ARROWW,y2,"<");
+				UIArrow(VALUEX2-ARROWW,y1,VALUEX2,y2,">");
+			}
+		}
+		//which pad, then what its buttons do
+		y1=RowY(NUMPADSETTINGS);
+		char name[120];
+		if(PadConnected()) snprintf(name,sizeof(name),"Gamepad: %s",PadName());
+		else strcpy(name,"No gamepad connected");
+		RColor3f(.6f,.6f,.6f);
+		UITextFit(LABELX,UITextY(y1,y1+ROWHEIGHT),name,PANELX2-.05f-LABELX);
+		for(int a=0;a<PadActionCount();a++)
+		{
+			float x1,x2;
+			PadCellX(a,x1,x2);
+			RowLabel(PadCellRow(a),PadActionLabel(a),y1,y2,0,x1,x2);
+			int waiting=PadCapturing()==a;
+			Value(y1,y2,waiting?"press a button...":PadActionInput(a),waiting,x2-.04f-PADVALUEW,x2-.04f);
+		}
+		help=PadCapturing()>=0?"Press a button of the gamepad (Esc: cancel)":
+			"Click an action, then press a button of the gamepad";
+	}
+	else if(optionstab==2)
 	{
 		RowLabel(0,"Name",y1,y2);
 		UIField(VALUEX,y1,VALUEX2,y2,playername,editingname,"Player");
@@ -492,7 +612,7 @@ void DrawOptions()
 	{
 		for(int i=0;i<NUMSETTINGS;i++)
 		{
-			RowLabel(i,settinglabels[i],y1,y2);
+			RowLabel(i,settinglabels[i],y1,y2,1);
 			SettingText(i,text);
 			Value(y1,y2,text,0);
 			if(IsStepper(i))
