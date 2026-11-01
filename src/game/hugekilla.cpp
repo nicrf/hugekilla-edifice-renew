@@ -22,6 +22,7 @@
 
 extern PhysicsVars physics;
 extern int consolevisible;
+extern char menu;
 extern GraphicsPrefs graphicsprefs;
 extern Block blocks[BLOCKGRIDSIZE][BLOCKGRIDHEIGHT][BLOCKGRIDSIZE];
 extern char nextblock[BLOCKGRIDSIZE][BLOCKGRIDHEIGHT][BLOCKGRIDSIZE];
@@ -424,6 +425,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	case WM_MOUSEWHEEL:
 		{
 			int ud=(short)HIWORD(wParam)/120;
+			if(menu==BUILDING&&ud)
+			{
+				BuildPreviewWheel(ud,(GetKeyState(VK_CONTROL)&0x8000)!=0);
+				break;
+			}
 			if(ud==-1) SwitchGun(50);
 			if(ud==1) SwitchGun(51);
 			break;

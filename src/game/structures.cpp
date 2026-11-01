@@ -14,6 +14,23 @@ extern char menu;
 
 char curstructurepath[1000];
 
+//placement of the preview, set with the mouse wheel: extra quarter turns, and blocks
+//forward from the player (kept well within the server's ac_builddist)
+#define MAXBUILDDIST 15
+static int buildrot;
+static int builddist;
+
+void BuildPreviewWheel(int dir,int distance)
+{
+	if(distance)
+	{
+		builddist+=dir;
+		if(builddist<0) builddist=0;
+		if(builddist>MAXBUILDDIST) builddist=MAXBUILDDIST;
+	}
+	else buildrot=(buildrot+(dir>0?1:3))&3;
+}
+
 
 //after the player selects a structure or type, the filename is gotten with this function.
 
@@ -161,6 +178,10 @@ void PlaceStructure(int task)
 		if(pdir.z>0) rot=1;
 		else rot=3;
 	}
+	//forward from the player, along the axis the structure faces
+	static const int fwdx[4]={1,0,-1,0},fwdz[4]={0,1,0,-1};
+	int fwd=rot;
+	rot=(rot+buildrot)&3;
 	CopyMemory(rotstructure,curstructure,sizeof(curstructure));
 	for(int i=0;i<rot;i++)
 	{
@@ -186,6 +207,8 @@ void PlaceStructure(int task)
 	offx=ppos.x/BLOCKSIZE-refx+BLOCKGRIDSIZE;
 	offy=ppos.y/BLOCKSIZE-refy-.5;
 	offz=ppos.z/BLOCKSIZE-refz+BLOCKGRIDSIZE;
+	offx+=fwdx[fwd]*builddist;
+	offz+=fwdz[fwd]*builddist;
 	int px,py,pz;
 	px=ppos.x;
 	py=ppos.y;

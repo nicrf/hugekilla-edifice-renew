@@ -1166,7 +1166,7 @@ int HandleMenuKey(DWORD key)
 			}
 			LoadStructure(name);
 			menu=BUILDING;
-			strcpy(menutext,"Left click / 1: build here\rRight click / 2: cancel");
+			strcpy(menutext,"Left click / 1: build here\rRight click / 2: cancel\rWheel: rotate\rCtrl/Cmd + wheel: distance");
 			return 1;
 		}
 		
