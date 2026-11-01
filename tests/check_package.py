@@ -3,8 +3,8 @@
     python3 tests/check_package.py dist/Edifice-<version>-<os>.(zip|tar.gz) [--gns]
 
 Unpacks it into a temporary folder, then
-  - contents: the game, data/, license texts (with --gns: licenses/ of
-    GameNetworkingSockets, protobuf, abseil, OpenSSL);
+  - contents: the game, data/, license texts (sokol_gfx's among them; with --gns:
+    licenses/ of GameNetworkingSockets, protobuf, abseil, OpenSSL);
   - dependencies: only the OS's own libraries or what the archive ships
     (macOS: otool -L, both architectures, signature; Linux: readelf, nothing of
     GameNetworkingSockets/protobuf/OpenSSL linked dynamically or exported;
@@ -12,7 +12,7 @@ Unpacks it into a temporary folder, then
   - a short run: the unpacked game started as a headless server (HK_AUTOSTART=1,
     with --gns HK_TRANSPORT=gns, which needs GameNetworkingSockets and OpenSSL to
     start: "gns: listening on port"), then tests/net_handshake.py against it
-    (only a warning on Windows, where the runners have no OpenGL 2);
+    (only a warning on Windows, whose runners have no GPU);
   - with --lobby <edifice-lobby> (server/, go build): a real HTTPS exchange from
     the unpacked game: a local lobby over TLS (self-signed certificate, trusted
     through EDIFICE_TEST_CA_FILE; needs openssl), the server announces itself
@@ -79,7 +79,7 @@ def check_contents(top, gns):
     lic = os.path.join(top, "licenses")
     have = sorted(os.listdir(lic)) if os.path.isdir(lic) else []
     print("licenses/: " + ", ".join(have))
-    need = ["stb_image.txt", "SDL2.txt", "opus.txt"]
+    need = ["stb_image.txt", "SDL2.txt", "opus.txt", "sokol.txt"]   # the releases render with sokol_gfx
     if gns:
         need += ["gamenetworkingsockets.txt", "protobuf.txt", "abseil.txt", "openssl.txt"]
     for n in need:
@@ -269,10 +269,11 @@ def run_game(exe, gns, tmp, lobby=None):
                     fail("no '%s' within 90 s" % want)
                     ok = False
         if ok:
-            # On the Windows runners (no GPU, Windows' own OpenGL 1.1) the game dies
-            # of a stack overflow (0xC00000FD) right after creating the land, the
-            # v0.4.1 release too. The run still proves that every DLL loads and
-            # GameNetworkingSockets starts; the handshake is informative only.
+            # On Windows the handshake stays informative: the game used to die of a
+            # stack overflow (0xC00000FD) right after creating the land there (1 MB
+            # buffers on the stack, fixed with M13.3), and the runners have no GPU
+            # (Direct3D 11 on WARP). The run proves that every DLL loads and
+            # GameNetworkingSockets starts.
             report = warn if SYSTEM == "Windows" else fail
             r = subprocess.run([sys.executable, os.path.join(HERE, "net_handshake.py")], timeout=120)
             if r.returncode:
