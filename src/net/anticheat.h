@@ -1,5 +1,5 @@
-//the server's anti-cheat checks (roadmap M11 phase 1, docs/M11.md): the pure
-//logic, apart from multiplay.cpp so that tests/anticheat_test.cpp can check it
+//the server's anti-cheat checks (roadmap M11 phases 1 and 3a, docs/M11.md): the
+//pure logic, apart from multiplay.cpp so that tests/anticheat_test.cpp can check it
 //without the game. Times are in ms (curtime), distances in world units.
 
 #ifndef ANTICHEATH
@@ -214,6 +214,107 @@ inline int AcBulletHits(float bx,float by,float bz,float px,float py,float pz,fl
 	float hx=AcWrap(bx-px,worldsize),hz=AcWrap(bz-pz,worldsize);
 	float vdiff=py-by;
 	return sqrtf(hx*hx+hz*hz)<.5f&&vdiff<2&&vdiff>0;
+}
+
+//---- server-decided hits (M11 phase 3a): lag compensation, swept bullets ----
+
+//where a player was: what the server had of it, one entry every few tens of ms
+#define ACHISTORY 32
+struct AcHistory
+{
+	float x[ACHISTORY],y[ACHISTORY],z[ACHISTORY];
+	unsigned int time[ACHISTORY];
+	int count;   //entries, newest at next-1; 0: none (joined, dead, respawned)
+	int next;
+};
+
+//adds a position, at most one every spacing ms (32 entries then cover the
+//longest rewind with a few to spare)
+inline void AcHistoryAdd(AcHistory *h,float x,float y,float z,unsigned int now,int spacing)
+{
+	if(h->count)
+	{
+		int last=(h->next+ACHISTORY-1)%ACHISTORY;
+		if((int)(now-h->time[last])<spacing) return;
+	}
+	h->x[h->next]=x;h->y[h->next]=y;h->z[h->next]=z;
+	h->time[h->next]=now;
+	h->next=(h->next+1)%ACHISTORY;
+	if(h->count<ACHISTORY) h->count++;
+}
+
+//the position at time t, between the two entries around it; the current one
+//(cx,cy,cz at now) is the newest, the oldest entry is as far back as it goes.
+//Interpolated on the wrapped world (the server re-wraps positions near its own
+//player).
+inline void AcHistoryAt(const AcHistory *h,unsigned int t,float cx,float cy,float cz,unsigned int now,
+	float *out,float worldsize)
+{
+	float nx=cx,ny=cy,nz=cz;
+	unsigned int nt=now;
+	for(int k=0;k<h->count;k++)
+	{
+		if((int)(t-nt)>=0) break;
+		int e=(h->next+ACHISTORY-1-k)%ACHISTORY;
+		float ex=h->x[e],ey=h->y[e],ez=h->z[e];
+		unsigned int et=h->time[e];
+		if((int)(t-et)>=0&&(int)(nt-et)>0)
+		{
+			float f=(float)(int)(t-et)/(float)(int)(nt-et);
+			out[0]=ex+AcWrap(nx-ex,worldsize)*f;
+			out[1]=ey+(ny-ey)*f;
+			out[2]=ez+AcWrap(nz-ez,worldsize)*f;
+			return;
+		}
+		nx=ex;ny=ey;nz=ez;
+		nt=et;
+	}
+	out[0]=nx;out[1]=ny;out[2]=nz;
+}
+
+//does the segment a -> b (one step of a bullet) cross the hitbox of a player at p:
+//the client's rule (AcBulletHits: within .5 on x and z, between 2 below its
+//position and its position), tol larger on every side, tested along the whole
+//step instead of at its end (a fast bullet or a slow server frame skips over it)
+inline int AcSegmentHits(float ax,float ay,float az,float bx,float by,float bz,
+	float px,float py,float pz,float tol,float worldsize)
+{
+	float dx=AcWrap(bx-ax,worldsize),dy=by-ay,dz=AcWrap(bz-az,worldsize);
+	float cx=AcWrap(px-ax,worldsize),cz=AcWrap(pz-az,worldsize);
+	float r=.5f+tol;
+	float t0=0,t1=1;
+	//on x and z: |t*d - c| < r
+	float A=dx*dx+dz*dz,B=-2*(dx*cx+dz*cz),C=cx*cx+cz*cz-r*r;
+	if(A<1e-12f)
+	{
+		if(C>=0) return 0;
+	}
+	else
+	{
+		float disc=B*B-4*A*C;
+		if(disc<=0) return 0;
+		float sq=sqrtf(disc);
+		float e0=(-B-sq)/(2*A),e1=(-B+sq)/(2*A);
+		if(e0>t0) t0=e0;
+		if(e1<t1) t1=e1;
+		if(t0>=t1) return 0;
+	}
+	//in height: py-2-tol < ay + t*dy < py+tol
+	float lo=py-2-tol,hi=py+tol;
+	if(fabsf(dy)<1e-12f) return ay>lo&&ay<hi;
+	float h0=(lo-ay)/dy,h1=(hi-ay)/dy;
+	if(h0>h1) { float k=h0;h0=h1;h1=k; }
+	if(h0>t0) t0=h0;
+	if(h1<t1) t1=h1;
+	return t0<t1;
+}
+
+//how far back to look for a shooter with this ping (round trip, ms): what it saw
+//when it fired had come from the server about a round trip earlier
+inline int AcRewind(int ping,int lagcomp)
+{
+	if(ping<0) ping=0;
+	return ping<lagcomp?ping:lagcomp;
 }
 
 #endif

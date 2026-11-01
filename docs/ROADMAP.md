@@ -156,6 +156,7 @@ Détail complet en section 5.
   - Phase 2 (M, seulement sans Steam ni ENet connectID) : handshake avec cookie HMAC, sans allouer de slot avant la validation.
     *Fait :* `docs/M11.md` (phase 2). Cookie HMAC-SHA256 (IP, port, seau de temps) renvoyé par le client avant tout slot, toujours au protocole 5 (octet de capacités après le trailer de version) ; les anciens clients rejoignent tant que `ac_requirecookie` vaut 0 (défaut) ; pas de cookie par GameNetworkingSockets.
   - Phase 3 (XL) : entrées numérotées, tick fixe sur une horloge réelle, tirs et morts décidés par le serveur (pour remplacer `Killed()` côté victime, playing.cpp:385 et 460), snapshots delta, prédiction et réconciliation côté client, slots stables au lieu du décalage de `DeletePlayer` (multiplay.cpp:1296).
+    *Partiel (3a) :* `docs/M11.md` (phase 3a). Le serveur décide des coups (sa propre balle, testée en segment contre la position que le tireur voyait, rembobinée de son ping, `ac_lagcomp` ; ligne de vue par le relief et les blocs ; origine du tir imposée), des dégâts de grenade (sa propre grenade) et des morts ; les KILLED des victimes n'accusent plus personne. Toujours le protocole 5 : capacité `HELLOCAP_SERVERHITS`, messages HITMODE/SERVERHIT pour les nouveaux clients seulement ; un nouveau client sur un ancien serveur compte ses dégâts comme avant. Restent pour la 3b : slots stables, entrées numérotées, tick fixe.
 - **Fait quand :** on ne peut plus être invulnérable en n'envoyant pas KILLED.
 
 ### M12 - Restructuration lourde (XL, à mener par petites PR)

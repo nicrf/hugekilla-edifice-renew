@@ -70,7 +70,7 @@ for run in net_handshake net_identity net_join net_fuzz net_voice net_voice@1 ne
 	kill "$pid" 2>/dev/null
 	wait "$pid" 2>/dev/null
 	if [ "$t" != net_anticheat ] && [ "$t" != net_fuzz ] &&
-			grep -E "anticheat: (kill|death|fire|ammo|build|state|ip):" "$log"; then
+			grep -E "anticheat: (kill|death|fire|ammo|build|state|ip|origin):" "$log"; then
 		echo "anti-cheat false positive during $run"
 		status=1
 	fi

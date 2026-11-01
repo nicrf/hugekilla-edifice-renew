@@ -51,6 +51,13 @@
 //(8 bytes, little-endian), to send back in the next REQUESTENTER. Only to clients
 //whose REQUESTENTER has HELLOCAP_COOKIE (version.h; M11 phase 2, docs/M11.md).
 #define ENTERCOOKIE 27
+//M11 phase 3a (docs/M11.md): the server decides hits and deaths. Only to clients
+//whose REQUESTENTER has HELLOCAP_SERVERHITS (version.h); older ones never get them.
+//HITMODE: msg 1 = the server decides, stop counting your own damage (0: count it
+//as before). Sent at the join and when ac_serverhits changes.
+//SERVERHIT: you were hit, msg = by whom, msg2 = your life now (0: KILLED follows).
+#define SERVERHIT 28
+#define HITMODE 29
 
 //Decoded messages. None of these structs goes onto the wire as it is: each
 //message has explicit Write/Read functions (netmsg.h, src/net/wire.h).
