@@ -3,6 +3,7 @@
 
 #include "lobby.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 //---- JSON reader ----
@@ -436,6 +437,13 @@ int LobbyParseSession(const char *json,int len,LobbySession *s)
 			StrValue(j,s->signaling,sizeof(s->signaling),&ok,1);
 			if(!ok||!ListItem(s->signaling)) s->signaling[0]=0;
 		}
+		else if(!strcmp(key,"signaling_url"))
+		{
+			int ok=1;
+			StrValue(j,s->signalurl,sizeof(s->signalurl),&ok,1);
+			if(!ok||!ListItem(s->signalurl)||(strncmp(s->signalurl,"wss://",6)&&strncmp(s->signalurl,"ws://",5)))
+				s->signalurl[0]=0;
+		}
 		else if(!strcmp(key,"ice")&&Peek(j)=='{')
 		{
 			j.p++;
@@ -653,6 +661,10 @@ static void Perform(LobbyRequest *r)
 	curl_easy_setopt(curl,CURLOPT_TIMEOUT,10L);
 	curl_easy_setopt(curl,CURLOPT_MAXREDIRS,0L);
 	if(r->ipv4) curl_easy_setopt(curl,CURLOPT_IPRESOLVE,(long)CURL_IPRESOLVE_V4);
+	//tests only: a lobby with a self-signed certificate (tests/net_p2p.py); the
+	//certificate is still checked, against that file instead of the system's
+	const char *ca=getenv("EDIFICE_TEST_CA_FILE");
+	if(ca&&ca[0]) curl_easy_setopt(curl,CURLOPT_CAINFO,ca);
 	CURLcode result=curl_easy_perform(curl);
 	long status=0;
 	curl_easy_getinfo(curl,CURLINFO_RESPONSE_CODE,&status);

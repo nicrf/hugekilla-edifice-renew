@@ -91,7 +91,8 @@ def listed(name):
 
 try:
     start("lobby", [LOBBY, "-http", "127.0.0.1:18080", "-signal", "127.0.0.1:18081",
-                    "-turn", "127.0.0.1:18478", "-ttl", "%ds" % TTL, "-rate-limit", "600"])
+                    "-turn", "127.0.0.1:18478", "-ttl", "%ds" % TTL, "-rate-limit", "600",
+                    "-allow-private"])   # the games announce themselves from 127.0.0.1
     if not wait_for("lobby answers", lambda: get("/healthz")[0] == 200 or None, 20):
         raise Abort
 

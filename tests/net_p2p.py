@@ -1,11 +1,15 @@
 """Internet games joined P2P (roadmap M7d), end to end on one machine:
     python3 tests/net_p2p.py <Edifice binary> <edifice-lobby binary> <gns_p2p_test binary>
-Needs a build with -DEDIFICE_GNS=ON. Starts the lobby (server/) with its STUN/TURN
-server, on this machine's LAN address: GameNetworkingSockets never uses loopback
-addresses for ICE (neither host candidates nor TURN relays), so 127.0.0.1 would
-not do. Then, twice: as is (ICE finds the direct route), and with p2p=relay on
-both sides (only TURN relay candidates: the traffic goes through the lobby's
-relay):
+Needs a build with -DEDIFICE_GNS=ON, and openssl. Starts the lobby (server/) over
+HTTPS with a self-signed certificate (trusted through EDIFICE_TEST_CA_FILE, a
+test-only setting: the certificate is still checked), so that the signaling goes
+through its WebSocket relay (wss://.../v1/signal), as with the public lobby behind
+its reverse proxy; the second gns_p2p_test pair uses the TCP relay (HK_SIGNAL_TCP)
+for older games. With its STUN/TURN server, on this machine's LAN address:
+GameNetworkingSockets never uses loopback addresses for ICE (neither host
+candidates nor TURN relays), so 127.0.0.1 would not do. Then, twice: as is (ICE
+finds the direct route), and with p2p=relay on both sides (only TURN relay
+candidates: the traffic goes through the lobby's relay):
   1. tests/gns_p2p_test.cpp: two processes, each with its own lobby session, one
      listening, one connecting to its identity through the signaling relay; the
      connection must be encrypted, direct or relayed as expected
@@ -21,14 +25,19 @@ the NAT traversal itself.
 The games run on Linux (XDG_DATA_HOME gives each its own net.ini; they need a
 display, e.g. xvfb-run), and on macOS with NET_P2P_GAMES=1 (CFFIXED_USER_HOME; the
 screen must not be locked). HK_P2P_ADDRESS overrides the LAN address used."""
-import json, os, platform, shutil, signal, socket, subprocess, sys, tempfile, time, urllib.request
+import json, os, platform, shutil, signal, socket, ssl, subprocess, sys, tempfile, time, urllib.request
 
 GAME, LOBBY, P2PTEST = (os.path.abspath(a) for a in sys.argv[1:4])
 LOGDIR = os.path.abspath(os.environ.get("NET_P2P_LOGS", "p2p-logs"))
-URL = "http://127.0.0.1:18090"
+URL = "https://127.0.0.1:18090"
 MAC = platform.system() == "Darwin"
 os.makedirs(LOGDIR, exist_ok=True)
 work = tempfile.mkdtemp(prefix="edifice-p2p-")
+CERT, KEY = os.path.join(work, "lobby-cert.pem"), os.path.join(work, "lobby-key.pem")
+subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "2", "-subj", "/CN=127.0.0.1",
+                "-addext", "subjectAltName=IP:127.0.0.1", "-keyout", KEY, "-out", CERT], check=True, capture_output=True)
+TLS = ssl.create_default_context(cafile=CERT)
+os.environ["EDIFICE_TEST_CA_FILE"] = CERT   # every game and test process trusts the lobby's certificate
 procs = []
 failures = 0
 
@@ -73,7 +82,7 @@ def log_of(name):
 
 def get(path):
     try:
-        with urllib.request.urlopen(URL + path, timeout=5) as r:
+        with urllib.request.urlopen(URL + path, timeout=5, context=TLS) as r:
             body = r.read()
             try:
                 return r.status, json.loads(body or b"null")
@@ -106,11 +115,14 @@ def stop(p):
             p.wait()
 
 
-def pair(tag, relay):
-    """gns_p2p_test: a host process and a joining one"""
+def pair(tag, relay, tcp):
+    """gns_p2p_test: a host process and a joining one (signaling over the TCP relay
+    with tcp, else the WebSocket one)"""
     idfile = os.path.join(work, "hostid-" + tag)
     extra = ["relay"] if relay else []
     env = dict(os.environ, HK_GNS_DEBUG="1")
+    if tcp:
+        env["HK_SIGNAL_TCP"] = "1"
     host = start("p2ptest-host-" + tag, [P2PTEST, URL, "host", idfile] + extra, env)
     identity = wait_for("p2p test host has a session", lambda: os.path.exists(idfile) and open(idfile).read().strip(), 20)
     if not identity:
@@ -133,6 +145,9 @@ def pair(tag, relay):
             print("    " + line)
     check(join.returncode == 0, "gns_p2p_test (%s): joined P2P, %s" % (tag, "relayed" if relay else "direct"))
     check(host.returncode == 0, "gns_p2p_test (%s): the host saw it" % tag)
+    via = "signaling: connected to " + ("%s:18091" % address if tcp else "wss://127.0.0.1:18090/v1/signal")
+    check(via in out and via in log_of("p2ptest-host-" + tag),
+          "gns_p2p_test (%s): signaling over %s" % (tag, "TCP" if tcp else "WebSocket (wss)"))
 
 
 def game_env(name, ports, extra):
@@ -181,6 +196,8 @@ def games(tag, relay):
     route = "P2P relayed (TURN)" if relay else "P2P direct"
     check(("gns: connected with %s, encrypted, %s" % (game["identity"], route)) in clog,
           "an encrypted connection, %s (%s)" % (route, tag))
+    check("signaling: connected to wss://" in clog and "signaling: connected to wss://" in hlog,
+          "both games signal over the WebSocket relay (%s)" % tag)
     check("console: received landinfo" in clog, "the client got the land (%s)" % tag)
     check(" at 0.0." in hlog and "requests to connect" in hlog,
           "the host saw the client come P2P, from a made-up 0.0.x.y address (%s)" % tag)
@@ -193,18 +210,22 @@ def games(tag, relay):
 try:
     address = lan_address()
     check(not address.startswith("127."), "LAN address for ICE and TURN: " + address)
+    # -allow-private: the games announce themselves from this machine's addresses
     start("lobby", [LOBBY, "-http", "127.0.0.1:18090", "-signal", ":18091", "-turn", ":18478",
-                    "-public-host", address, "-turn-relay-ip", address, "-rate-limit", "600"])
+                    "-public-host", address, "-turn-relay-ip", address, "-rate-limit", "600",
+                    "-tls-cert", CERT, "-tls-key", KEY, "-allow-private"])
     if not wait_for("lobby answers", lambda: get("/healthz")[0] == 200 or None, 20):
         raise Abort
     req = urllib.request.Request(URL + "/v1/sessions", method="POST")
-    with urllib.request.urlopen(req, timeout=5) as r:
+    with urllib.request.urlopen(req, timeout=5, context=TLS) as r:
         sess = json.loads(r.read())
     check(sess.get("signaling") == "%s:18091" % address and sess["ice"]["turn"],
           "sessions give the signaling relay and a TURN server")
+    check(sess.get("signaling_url") == "wss://127.0.0.1:18090/v1/signal",
+          "sessions give the WebSocket relay: %s" % sess.get("signaling_url"))
 
-    pair("direct", False)
-    pair("relay", True)
+    pair("direct", False, False)
+    pair("relay", True, True)
     if platform.system() == "Linux" or (MAC and os.environ.get("NET_P2P_GAMES") == "1"):
         games("direct", False)
         games("relay", True)

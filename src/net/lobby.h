@@ -63,7 +63,8 @@ struct LobbySession
 {
 	char identity[65];          //GameNetworkingSockets identity, str:edifice-...
 	char token[65];             //proves it to the signaling relay: never logged
-	char signaling[128];        //host:port of the signaling relay, "" if not given
+	char signaling[128];        //host:port of the signaling relay over TCP, "" if not given
+	char signalurl[160];        //the same over WebSocket, wss://host/v1/signal, "" if not given
 	int numstun;
 	char stun[LOBBY_MAXICE][128];   //stun:host:port
 	int numturn;
@@ -99,7 +100,7 @@ int LobbyParseList(const char *json,int len,LobbyGame *games,int max);
 int LobbyParseGame(const char *json,int len,LobbyGame *game);
 //POST /v1/servers: id, token, refresh_seconds (clamped to 2..300). 1 if valid
 int LobbyParseAnnounced(const char *json,int len,char *id,int idsize,char *token,int tokensize,int *refresh);
-//POST /v1/sessions: identity, token, signaling relay, STUN/TURN servers (invalid
+//POST /v1/sessions: identity, token, signaling relays, STUN/TURN servers (invalid
 //servers are skipped). 1 if valid
 int LobbyParseSession(const char *json,int len,LobbySession *session);
 //{"error":"..."}: 1 and the printable text if present

@@ -37,13 +37,14 @@ struct GnsP2PConfig
 {
 	const char *identity;       //ours, str:edifice-...
 	const char *token;          //of its session, for the signaling relay: never logged
-	const char *signalhost;     //the signaling relay
+	const char *signalhost;     //the signaling relay over TCP, "" if none
 	int signalport;
 	const char *stun;           //STUN servers, "host:port,host:port", may be ""
 	const char *turn;           //TURN servers, same form
 	const char *turnusers;      //...their user names and passwords, in the same order
 	const char *turnpasses;
 	int relayonly;              //only TURN relay candidates offered (tests, strict networks)
+	const char *signalurl;      //the same relay over WebSocket (wss://), preferred; 0 or "" if none
 };
 
 class GnsLink : public DatagramLink

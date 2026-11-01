@@ -174,7 +174,7 @@ func TestSignalingRelay(t *testing.T) {
 }
 
 func TestHTTPAPI(t *testing.T) {
-	api := &API{registry: NewRegistry(time.Minute, 4, 100), sessions: NewSessions(time.Hour, 10, nil, nil, "x"),
+	api := &API{registry: NewRegistry(time.Minute, 4, 100), sessions: NewSessions(time.Hour, 10, nil, nil, "x"), allowPrivate: true,
 		limiter: newRateLimiter(600, 100), refresh: 20 * time.Second}
 	ts := httptest.NewServer(api)
 	defer ts.Close()
