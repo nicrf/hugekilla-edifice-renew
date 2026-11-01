@@ -146,6 +146,7 @@ set(SOURCES
   src/net/sock.cpp
   src/net/udplink.cpp
   src/net/version.cpp
+  src/net/hmac.cpp
   src/ui/console.cpp
   src/ui/ui.cpp
   src/ui/options.cpp
@@ -284,6 +285,10 @@ add_test(NAME voice COMMAND voice_test)
 add_executable(anticheat_test tests/anticheat_test.cpp)
 target_include_directories(anticheat_test PRIVATE ${SRC}/net)
 add_test(NAME anticheat COMMAND anticheat_test)
+# SHA-256 / HMAC-SHA256 (RFC 4231) and the join cookie (roadmap M11 phase 2)
+add_executable(hmac_test tests/hmac_test.cpp src/net/hmac.cpp)
+target_include_directories(hmac_test PRIVATE ${SRC}/net)
+add_test(NAME hmac COMMAND hmac_test)
 set(HK_TEST_INCLUDES ${SRC}/game ${SRC}/net ${SRC}/compat)
 if(NOT WIN32)
   list(APPEND HK_TEST_INCLUDES ${SRC}/compat/include)   # "windows.h": DWORD...
