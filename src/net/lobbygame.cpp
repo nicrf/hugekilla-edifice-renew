@@ -205,7 +205,8 @@ static void ReadVisibility()
 	if(strcmp(hostvisibility,"public")&&strcmp(hostvisibility,"friends")&&strcmp(hostvisibility,"private"))
 		strcpy(hostvisibility,"lan");
 #ifdef __EMSCRIPTEN__
-	//a game hosted in a browser can't be reached yet (no UDP, WebRTC to come,
+	//a game hosted in a browser can't be reached (no UDP; a browser joins native
+	//hosts over WebRTC, but hosting would need the same bridge in JavaScript,
 	//roadmap M14 task 3): never announced, the list would show a game nobody joins
 	strcpy(hostvisibility,"lan");
 #endif
@@ -252,6 +253,7 @@ static void HostSend(int players)
 	a.visibility=hostvisibility;
 	a.identity=hostp2p&&s?s->identity:"";   //the lobby lists it with its token only
 	a.session=hostp2p&&s?s->token:"";
+	a.webrtc=hostp2p&&NetWebRtcHost();     //browsers join through the same identity
 	a.numlan=hostnumlan;
 	for(int i=0;i<hostnumlan;i++) a.lan[i]=hostlan[i];
 	if(LobbyAnnouncementJSON(&a,body,sizeof(body)))

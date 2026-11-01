@@ -279,6 +279,9 @@ set(SOURCES
   src/platform/fileio.cpp
   src/platform/system_sdl.cpp
 )
+if(EMSCRIPTEN)
+  list(APPEND SOURCES src/net/webrtclink.cpp)   # joins native hosts over WebRTC (M14 task 3)
+endif()
 
 # The sources include headers by bare name ("vector.h", "redrawing.h"...), so every
 # module directory is on the include path. Each file includes what it uses from
@@ -305,6 +308,7 @@ if(EMSCRIPTEN)
     -sENVIRONMENT=web
     -sFETCH=1   # the lobby (src/net/lobby.cpp: emscripten_fetch, M14 task 2)
     -lidbfs.js
+    "SHELL:--js-library ${HK_WEB_DIR}/webrtc.js"   # WebSocket relay and DataChannels (webrtclink.cpp)
     "SHELL:--pre-js ${HK_WEB_DIR}/pre.js"
     "SHELL:--shell-file ${HK_WEB_DIR}/shell.html"
     "SHELL:--preload-file ${DATA_DIR}@/data"
@@ -312,7 +316,7 @@ if(EMSCRIPTEN)
     $<$<CONFIG:Debug>:-sASSERTIONS=2>)
   file(GLOB_RECURSE DATA_FILES CONFIGURE_DEPENDS ${DATA_DIR}/*)
   set_property(TARGET Edifice APPEND PROPERTY LINK_DEPENDS
-    ${HK_WEB_DIR}/pre.js ${HK_WEB_DIR}/shell.html ${DATA_FILES})
+    ${HK_WEB_DIR}/pre.js ${HK_WEB_DIR}/shell.html ${HK_WEB_DIR}/webrtc.js ${DATA_FILES})
 elseif(APPLE)
   # Ship the game data inside Edifice.app/Contents/Resources/data
   file(GLOB_RECURSE DATA_FILES RELATIVE ${DATA_DIR} CONFIGURE_DEPENDS ${DATA_DIR}/*)
@@ -566,6 +570,24 @@ if(EDIFICE_GNS)
         -Wno-deprecated-declarations $<$<CXX_COMPILER_ID:GNU>:-fpermissive>)
     endforeach()
   endif()
+endif()
+
+# ---- WebRTC bridge (roadmap M14 task 3) ----------------------------------------
+# A native host also takes browser players, over WebRTC DataChannels
+# (src/net/rtchost.cpp): libdatachannel (MPL 2.0, with libjuice, usrsctp, plog,
+# and the OpenSSL GameNetworkingSockets already has), the webrtc feature of
+# vcpkg.json. Needs EDIFICE_GNS: the browsers' offers come through its signaling
+# client (gnssignal.cpp). python3 build.py turns it on with --gns (--no-webrtc
+# leaves it out). The browser side (webrtclink.cpp) is always in the web build.
+option(EDIFICE_WEBRTC "Native hosts take browser players over WebRTC (needs EDIFICE_GNS, vcpkg)" OFF)
+if(EDIFICE_WEBRTC AND NOT EDIFICE_GNS)
+  message(FATAL_ERROR "EDIFICE_WEBRTC needs EDIFICE_GNS (the signaling client and STUN/TURN setup are GnsLink's)")
+endif()
+if(EDIFICE_WEBRTC)
+  find_package(LibDataChannel CONFIG REQUIRED)
+  target_sources(Edifice PRIVATE src/net/rtchost.cpp)
+  target_compile_definitions(Edifice PRIVATE EDIFICE_WEBRTC)
+  target_link_libraries(Edifice PRIVATE LibDataChannel::LibDataChannel)
 endif()
 
 # ---- Warnings as errors --------------------------------------------------------

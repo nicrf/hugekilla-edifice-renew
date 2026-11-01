@@ -12,6 +12,9 @@
 #include <steam/isteamnetworkingutils.h>
 #include "gnssignal.h"
 #include "signaling.h"
+#ifdef EDIFICE_WEBRTC
+#include "rtchost.h"
+#endif
 #ifndef _WIN32
 #include <errno.h>
 #include <fcntl.h>
@@ -178,6 +181,20 @@ static int Handle(const std::string &line)
 	static char sender[SIGNAL_MAXIDENTITY+1],claimed[SIGNAL_MAXIDENTITY+1];
 	static unsigned char payload[SIGNAL_MAXPAYLOAD];
 	int size;
+#ifdef EDIFICE_WEBRTC
+	//a browser's WebRTC signal (M14 task 3): for the bridge, only while hosting
+	static SignalRtc rtc;
+	if(SignalRtcParseLine(line.data(),(int)line.size(),sender,sizeof(sender),&rtc))
+	{
+		int hosting;
+		{
+			std::lock_guard<std::mutex> l(lock);
+			hosting=listening>0;
+		}
+		if(hosting) RtcHostSignal(sender,rtc);
+		return 1;
+	}
+#endif
 	int r=SignalParseLine(line.data(),(int)line.size(),sender,sizeof(sender),payload,sizeof(payload),&size);
 	if(r<0) return 0;
 	if(r==0) return 1;   //not a signal: ignored
@@ -597,6 +614,14 @@ void GnsSignalStop()
 	running=0;
 	queue.clear();
 	hello.clear();
+}
+
+void GnsSignalSendLine(const std::string &line)
+{
+	std::lock_guard<std::mutex> l(lock);
+	if(!running) return;
+	if(queue.size()>=SIGNAL_MAXQUEUE) queue.pop_front();
+	queue.push_back(line);
 }
 
 ISteamNetworkingConnectionSignaling *GnsSignalFor(const char *peer)

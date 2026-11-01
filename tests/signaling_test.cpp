@@ -239,8 +239,79 @@ static void WebSocket()
 	}
 }
 
+// WebRTC signals (M14 task 3): offer, answer, candidates through the same relay
+static void Rtc()
+{
+	SignalRtc s,back;
+	char sender[SIGNAL_MAXIDENTITY+1];
+	std::string line;
+	const char *sdp="v=0\r\no=- 46117 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0\r\n"
+		"m=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\na=sctp-port:5000\r\n";
+	s.kind='o';
+	strcpy(s.cid,"k3J9");
+	s.a=sdp;
+	CHECK(SignalRtcFormat(HOST,&s,&line));
+	CHECK(line.compare(0,strlen(HOST)+13,std::string(HOST)+" rtc1:o:k3J9:")==0&&line[line.size()-1]=='\n');
+	CHECK(line.find(' ',strlen(HOST)+1)==std::string::npos&&line.find('=')==std::string::npos);
+	// the relay hands it on as "SENDER PAYLOAD": the same text after the space
+	std::string relayed=std::string(ME)+line.substr(strlen(HOST),line.size()-strlen(HOST)-1);
+	CHECK(SignalRtcParseLine(relayed.data(),(int)relayed.size(),sender,sizeof(sender),&back)==1);
+	CHECK(!strcmp(sender,ME)&&back.kind=='o'&&!strcmp(back.cid,"k3J9")&&back.a==sdp&&back.b.empty());
+	// ... and it isn't a GameNetworkingSockets line, nor the reverse
+	unsigned char payload[SIGNAL_MAXPAYLOAD];
+	int plen;
+	CHECK(SignalParseLine(relayed.data(),(int)relayed.size(),sender,sizeof(sender),payload,sizeof(payload),&plen)==0);
+	std::string hex;
+	CHECK(SignalFormatLine(ME,"\x0a\x02hi",4,&hex));
+	CHECK(SignalRtcParseLine(hex.data(),(int)hex.size()-1,sender,sizeof(sender),&back)==0&&!sender[0]);
+	// every length of text survives (base64url without padding)
+	for(int n=1;n<40;n++)
+	{
+		s.kind='c';
+		s.a=std::string(n,'a'+n%26)+" udp 2122260223 192.168.1.2 54321 typ host";
+		s.b=std::string(n%3,'0');
+		CHECK(SignalRtcFormat(HOST,&s,&line));
+		CHECK(SignalRtcParse(line.data()+strlen(HOST)+1,(int)line.size()-(int)strlen(HOST)-2,&back)==1);
+		CHECK(back.kind=='c'&&back.a==s.a&&back.b==s.b);
+	}
+	// refused: bad kind, cid, texts, sizes, a mid on an answer
+	s.kind='x';
+	CHECK(!SignalRtcFormat(HOST,&s,&line));
+	s.kind='a';
+	s.b="0";
+	CHECK(!SignalRtcFormat(HOST,&s,&line));
+	s.b.clear();
+	strcpy(s.cid,"a-b");
+	CHECK(!SignalRtcFormat(HOST,&s,&line));
+	strcpy(s.cid,"");
+	CHECK(!SignalRtcFormat(HOST,&s,&line));
+	strcpy(s.cid,"c1");
+	s.a="bad\x01";
+	CHECK(!SignalRtcFormat(HOST,&s,&line));
+	s.a=std::string(SIGNAL_RTC_MAXTEXT+1,'v');
+	CHECK(!SignalRtcFormat(HOST,&s,&line));
+	s.a=std::string(SIGNAL_RTC_MAXTEXT,'v');   // the largest text still fits a relay line
+	CHECK(SignalRtcFormat(HOST,&s,&line)&&(int)line.size()<=SIGNAL_MAXLINE);
+	CHECK(!SignalRtcFormat("nobody",&s,&line));
+	const char *bad[]={"rtc1:o:c1:","rtc1:o::YQ","rtc1:o:c1:Y","rtc1:o:c1:YQ:YQ","rtc1:c:c1:YQ:YQ:YQ","rtc1:q:c1:YQ",
+		"rtc1:o:c1:YQ==","rtc1:o:c1:Y+Q","rtc1:oo:c1:YQ","rtc2:o:c1:YQ","rtc1:o:01234567890123456:YQ","rtc1:o:c1:AQ",
+		"rtc1:o","rtc1:c:c1::YQ","rtc1:o:c-1:YQ"};
+	for(size_t i=0;i<sizeof(bad)/sizeof(bad[0]);i++)
+	{
+		CHECK(SignalRtcParse(bad[i],(int)strlen(bad[i]),&back)==0);
+		CHECK(back.kind==0&&!back.cid[0]&&back.a.empty()&&back.b.empty());
+	}
+	CHECK(SignalRtcParse("rtc1:o:c1:YQ",12,&back)==1&&back.a=="a");
+	CHECK(SignalRtcParse("rtc1:c:c1:YQ:",13,&back)==1&&back.a=="a"&&back.b.empty());
+	std::string spaced=std::string(ME)+" rtc1:o:c1:YQ\r";
+	CHECK(SignalRtcParseLine(spaced.data(),(int)spaced.size(),sender,sizeof(sender),&back)==1);
+	std::string noid="bob rtc1:o:c1:YQ";
+	CHECK(SignalRtcParseLine(noid.data(),(int)noid.size(),sender,sizeof(sender),&back)==0);
+}
+
 int main()
 {
+	Rtc();
 	Lines();
 	Reader();
 	FromIdentity();

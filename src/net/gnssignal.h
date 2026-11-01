@@ -18,6 +18,7 @@
 #ifndef GNSSIGNALH
 #define GNSSIGNALH
 
+#include <string>
 #include <steam/steamnetworkingcustomsignaling.h>
 
 //(re)starts the client as identity, with the token of its session, for the relay at
@@ -27,6 +28,9 @@
 void GnsSignalStart(const char *host,int port,const char *url,const char *identity,const char *token);
 //stops the thread (after GameNetworkingSockets_Kill: connections may still send)
 void GnsSignalStop();
+//a line for the relay ("DESTINATION PAYLOAD\n"), sent once connected; from any
+//thread (the WebRTC bridge, rtchost.h)
+void GnsSignalSendLine(const std::string &line);
 //the signaling of a new connection to peer (taken by ConnectP2PCustomSignaling)
 ISteamNetworkingConnectionSignaling *GnsSignalFor(const char *peer);
 //client: signals from peer are now expected (the host it connects to)

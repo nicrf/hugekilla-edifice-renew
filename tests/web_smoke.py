@@ -205,7 +205,8 @@ def main():
                 check(bool(ok), "the lobby answers the page (CORS)")
                 check(bool(ok) and "Web smoke fort" in ok[0].text(), "the Internet tab gets the game list")
                 check(not [l for l in log if "CORS" in l], "no CORS error")
-                # joining needs WebRTC (task 3): the screen says so
+                # this game's host doesn't take browsers (no "webrtc", no identity): the
+                # screen says so (joining one that does: tests/net_webrtc.py)
                 page.mouse.dblclick(100, 186)
                 page.wait_for_timeout(500)
                 sample(page, os.path.join(args.out, "internet-join.png"))

@@ -292,6 +292,12 @@ static int GameObject(JsonIn &j,LobbyGame *g,int depth)
 		else if(!strcmp(key,"visibility")) StrValue(j,g->visibility,sizeof(g->visibility),&valid,1);
 		else if(!strcmp(key,"identity")) StrValue(j,g->identity,sizeof(g->identity),&valid,1);
 		else if(!strcmp(key,"lan")) LanList(j,g,depth+1);
+		else if(!strcmp(key,"webrtc"))
+		{
+			//an extra like "lan": anything but true is false, the game stays valid
+			if(Peek(j)=='t') { Literal(j,"true"); g->webrtc=j.ok; }
+			else Skip(j,depth+1);
+		}
 		else if(!strcmp(key,"port"))
 		{
 			v=IntValue(j,&valid);
@@ -331,6 +337,7 @@ static int GameObject(JsonIn &j,LobbyGame *g,int depth)
 	if(strcmp(g->visibility,"public")&&strcmp(g->visibility,"friends")&&strcmp(g->visibility,"private"))
 		valid=0;
 	if(strchr(g->identity,' ')) g->identity[0]=0;
+	if(!g->identity[0]) g->webrtc=0;   //browsers reach the host through its identity
 	return valid&&have==31&&Alnum(g->id,LOBBY_CODELEN)&&g->name[0]&&IPv4(g->address);
 }
 
@@ -566,6 +573,8 @@ int LobbyAnnouncementJSON(const LobbyAnnouncement *a,char *out,int size)
 		Put(out,size,pos,",\"visibility\":")&&PutString(out,size,pos,a->visibility)&&
 		Put(out,size,pos,",\"identity\":")&&PutString(out,size,pos,a->identity)&&
 		Put(out,size,pos,",\"session\":")&&PutString(out,size,pos,a->session);
+	//only with an identity, like the lobby keeps it; older lobbies ignore it
+	if(ok&&a->webrtc&&a->identity&&a->identity[0]) ok=Put(out,size,pos,",\"webrtc\":true");
 	if(ok&&a->numlan>0)
 	{
 		//only private IPv4 (the lobby drops anything else too); old lobbies ignore it

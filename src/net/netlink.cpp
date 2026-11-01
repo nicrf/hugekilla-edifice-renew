@@ -10,6 +10,10 @@
 #include "lobby.h"
 #include "signaling.h"
 
+#ifdef EDIFICE_WEBRTC
+#include "rtchost.h"
+#endif
+
 #define SIGNAL_DEFAULTPORT 10000   //edifice-lobby's -signal default
 
 //transport=gns in net.ini, HK_TRANSPORT overrides it; port: gnsport, else datasendport
@@ -26,9 +30,12 @@ static int UseGns(int *port)
 #endif
 
 #ifdef __EMSCRIPTEN__
+#include "lobby.h"
+#include "webrtclink.h"
+
 //The browser has no UDP (roadmap M14): Emscripten would turn each address into a
-//WebSocket connection. Solo games still open their info socket, which then sends
-//nothing and never receives; network games wait for the WebRTC link (M14 task 3).
+//WebSocket connection. A solo game's info socket sends into the void; an Internet
+//game is joined over a WebRTC DataChannel (WebRtcLink, M14 task 3).
 class NullLink:public DatagramLink
 {
 public:
@@ -41,7 +48,7 @@ DatagramLink *NetOpenInfoLink(WORD port,int host,int p2p)
 {
 #ifdef __EMSCRIPTEN__
 	(void)port;(void)host;(void)p2p;
-	return new NullLink;
+	return WebRtcLink::OpenInfo();
 #else
 	UdpLink *udp=UdpLink::Open(port,1);
 #ifdef EDIFICE_GNS
@@ -50,6 +57,10 @@ DatagramLink *NetOpenInfoLink(WORD port,int host,int p2p)
 	if(ip||(p2p&&NetP2PMode()))
 	{
 		GnsLink *link=GnsLink::OpenInfo(udp,host,gnsport,ip);
+#ifdef EDIFICE_WEBRTC
+		//an Internet host also takes browsers, over WebRTC (rtchost.h)
+		if(link&&host&&p2p&&NetP2PMode()) return RtcHostInfoLink(link);
+#endif
 		if(link) return link;
 		fprintf(stderr,"gns: unavailable, plain UDP only\n");
 	}
@@ -61,8 +72,9 @@ DatagramLink *NetOpenInfoLink(WORD port,int host,int p2p)
 DatagramLink *NetOpenDataLink(WORD port,const SOCKADDR_IN *server)
 {
 #ifdef __EMSCRIPTEN__
-	(void)port;(void)server;
-	return new NullLink;
+	(void)port;
+	DatagramLink *link=WebRtcLink::OpenData(server);
+	return link?link:new NullLink;
 #else
 #ifdef EDIFICE_GNS
 	GnsLink *link=GnsLink::OpenData(server);
@@ -74,6 +86,9 @@ DatagramLink *NetOpenDataLink(WORD port,const SOCKADDR_IN *server)
 
 DatagramLink *NetOpenPeerLink(const SOCKADDR_IN *source)
 {
+#ifdef EDIFICE_WEBRTC
+	if(DatagramLink *browser=RtcHostOpenData(source)) return browser;
+#endif
 #ifdef EDIFICE_GNS
 	return GnsLink::OpenData(source);
 #else
@@ -83,6 +98,9 @@ DatagramLink *NetOpenPeerLink(const SOCKADDR_IN *source)
 
 int NetSourceIsConnection(const SOCKADDR_IN *source)
 {
+#ifdef EDIFICE_WEBRTC
+	if(RtcHostIsPeer(source)) return 1;   //DTLS proved who it is
+#endif
 #ifdef EDIFICE_GNS
 	return GnsLink::IsConnection(source);
 #else
@@ -101,15 +119,33 @@ void NetQueryHost(const SOCKADDR_IN *dest)
 
 void NetLinkShutdown()
 {
+#ifdef EDIFICE_WEBRTC
+	RtcHostShutdown();   //first: its peers still signal through GnsLink's relay client
+#endif
 #ifdef EDIFICE_GNS
 	GnsLink::Shutdown();
 #endif
+#ifdef __EMSCRIPTEN__
+	WebRtcLink::Shutdown();
+#endif
 }
 
-int NetLinkIsGns(DatagramLink *link)
+int NetLinkIsP2P(DatagramLink *link)
 {
 #ifdef EDIFICE_GNS
 	return link&&dynamic_cast<GnsLink *>(link)!=0;
+#elif defined(__EMSCRIPTEN__)
+	return link&&dynamic_cast<WebRtcLink *>(link)!=0;
+#else
+	(void)link;
+	return 0;
+#endif
+}
+
+int NetWebRtcHost()
+{
+#ifdef EDIFICE_WEBRTC
+	return 1;
 #else
 	return 0;
 #endif
@@ -117,7 +153,7 @@ int NetLinkIsGns(DatagramLink *link)
 
 int NetP2PMode()
 {
-#ifdef EDIFICE_GNS
+#if defined(EDIFICE_GNS)||defined(__EMSCRIPTEN__)
 	CfgFile netsetfile;
 	netsetfile.Load(UserFile("net.ini"));
 	const char *mode=getenv("HK_P2P");
@@ -155,7 +191,11 @@ static void Append(std::string &list,const char *item)
 
 int NetP2PStart(const LobbySession *s,const char *lobbyurl)
 {
-#ifdef EDIFICE_GNS
+#ifdef __EMSCRIPTEN__
+	(void)lobbyurl;
+	int mode=NetP2PMode();
+	return mode&&WebRtcLink::Start(s,mode==2);
+#elif defined(EDIFICE_GNS)
 	int mode=NetP2PMode();
 	if(!mode) return 0;
 	char host[254]="";
@@ -189,6 +229,9 @@ int NetP2PStart(const LobbySession *s,const char *lobbyurl)
 	}
 	GnsP2PConfig config={s->identity,s->token,host,port,stun.c_str(),turn.c_str(),users.c_str(),passes.c_str(),mode==2,
 		s->signalurl};
+#ifdef EDIFICE_WEBRTC
+	RtcHostConfigure(stun.c_str(),turn.c_str(),users.c_str(),passes.c_str(),mode==2);   //the same servers for browsers
+#endif
 	return GnsLink::StartP2P(&config);
 #else
 	return 0;
@@ -197,7 +240,10 @@ int NetP2PStart(const LobbySession *s,const char *lobbyurl)
 
 int NetQueryHostP2P(const SOCKADDR_IN *dest,const char *identity)
 {
-#ifdef EDIFICE_GNS
+#ifdef __EMSCRIPTEN__
+	WebRtcLink *info=WebRtcLink::CurrentInfo();
+	return info&&info->ConnectP2P(dest,identity);
+#elif defined(EDIFICE_GNS)
 	GnsLink *info=GnsLink::CurrentInfo();
 	return info&&info->ConnectP2P(dest,identity);
 #else

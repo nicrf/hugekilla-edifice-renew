@@ -7,6 +7,10 @@
     "gns": {
       "description": "GameNetworkingSockets: encrypted UDP connections and P2P (CMake option EDIFICE_GNS)",
       "dependencies": ["gamenetworkingsockets"]
+    },
+    "webrtc": {
+      "description": "libdatachannel: WebRTC DataChannels, so that browser players join native hosts (CMake option EDIFICE_WEBRTC, with gns)",
+      "dependencies": [{ "name": "libdatachannel", "default-features": false }]
     }
   }
 }

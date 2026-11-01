@@ -31,6 +31,8 @@ struct LobbyGame
 	int mode;                   //sv.gamemode
 	char visibility[8];         //public, friends, private
 	char identity[65];          //GameNetworkingSockets identity (P2P, M7d), may be empty
+	int webrtc;                 //the host takes WebRTC DataChannels under identity (a
+	                            //browser joins it, M14 task 3; lobby API 4)
 	//the host's private IPv4 addresses (10/8, 172.16/12, 192.168/16), dotted: the
 	//lobby gives them only to players from the host's own public address, who are
 	//on its network and reach it there (routers seldom loop back to their LAN)
@@ -52,6 +54,7 @@ struct LobbyAnnouncement
 	const char *identity;
 	const char *session;        //token of identity's session: the lobby lists the
 	                            //identity only with it (0 or "": no identity)
+	int webrtc;                 //browsers may join (EDIFICE_WEBRTC, listening P2P)
 	int numlan;                 //the host's LAN addresses (private IPv4, dotted)
 	const char *lan[LOBBY_MAXLAN];
 };
