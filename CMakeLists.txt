@@ -138,6 +138,7 @@ set(SOURCES
   src/net/lobbygame.cpp
   src/net/multiplay.cpp
   src/net/netlink.cpp
+  src/net/signaling.cpp
   src/net/sock.cpp
   src/net/udplink.cpp
   src/net/version.cpp
@@ -289,6 +290,10 @@ if(HK_CURL_LIB)
   target_compile_definitions(lobby_test PRIVATE EDIFICE_LOBBY_CURL)
 endif()
 add_test(NAME lobby COMMAND lobby_test)
+# the signaling relay's lines and the checks on P2P signals (roadmap M7d)
+add_executable(signaling_test tests/signaling_test.cpp src/net/signaling.cpp)
+target_include_directories(signaling_test PRIVATE ${SRC}/net)
+add_test(NAME signaling COMMAND signaling_test)
 
 # ---- GameNetworkingSockets (experimental, roadmap M7) --------------------------
 # Encrypted connections and P2P. Off by default: configure with the vcpkg
@@ -311,22 +316,36 @@ if(EDIFICE_GNS)
   add_test(NAME gns_loopback COMMAND gns_loopback_test)
 
   # The game: GnsLink (docs/M7.md), used with transport=gns in net.ini
-  target_sources(Edifice PRIVATE src/net/gnslink.cpp)
+  target_sources(Edifice PRIVATE src/net/gnslink.cpp src/net/gnssignal.cpp)
   target_compile_definitions(Edifice PRIVATE EDIFICE_GNS)
   target_link_libraries(Edifice PRIVATE ${HK_GNS_LIB})
   # Sock over GnsLink against a game server (tests/run_gns_netplay_test.sh)
-  add_executable(gns_netplay_test tests/gns_netplay_test.cpp src/net/gnslink.cpp
+  add_executable(gns_netplay_test tests/gns_netplay_test.cpp src/net/gnslink.cpp src/net/gnssignal.cpp src/net/signaling.cpp
     src/net/sock.cpp src/net/udplink.cpp src/game/Vector.cpp)
   target_include_directories(gns_netplay_test PRIVATE ${INCLUDE_DIRS})
   target_link_libraries(gns_netplay_test PRIVATE ${HK_GNS_LIB})
+  # P2P between two processes through a running lobby (tests/net_p2p.py)
+  add_executable(gns_p2p_test tests/gns_p2p_test.cpp src/net/gnslink.cpp src/net/gnssignal.cpp
+    src/net/signaling.cpp src/net/udplink.cpp src/net/lobby.cpp)
+  target_include_directories(gns_p2p_test PRIVATE ${INCLUDE_DIRS})
+  target_link_libraries(gns_p2p_test PRIVATE ${HK_GNS_LIB})
+  if(HK_CURL_LIB)
+    target_link_libraries(gns_p2p_test PRIVATE ${HK_CURL_LIB})
+    target_compile_definitions(gns_p2p_test PRIVATE EDIFICE_LOBBY_CURL)
+  endif()
   if(MSVC)
-    set_property(TARGET gns_loopback_test gns_netplay_test PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+    set_property(TARGET gns_loopback_test gns_netplay_test gns_p2p_test PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
     target_compile_definitions(gns_netplay_test PRIVATE WIN32 _WINDOWS _MBCS _USE_MATH_DEFINES NOMINMAX
       _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS _WINSOCK_DEPRECATED_NO_WARNINGS)
+    target_compile_definitions(gns_p2p_test PRIVATE WIN32 _WINDOWS _MBCS _USE_MATH_DEFINES NOMINMAX
+      _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS _WINSOCK_DEPRECATED_NO_WARNINGS)
     target_link_libraries(gns_netplay_test PRIVATE ws2_32 opengl32)
+    target_link_libraries(gns_p2p_test PRIVATE ws2_32 opengl32)
   else()
-    target_compile_options(gns_netplay_test PRIVATE -fsigned-char -fwrapv -Wno-write-strings
-      -Wno-deprecated-declarations $<$<CXX_COMPILER_ID:GNU>:-fpermissive>)
+    foreach(t gns_netplay_test gns_p2p_test)
+      target_compile_options(${t} PRIVATE -fsigned-char -fwrapv -Wno-write-strings
+        -Wno-deprecated-declarations $<$<CXX_COMPILER_ID:GNU>:-fpermissive>)
+    endforeach()
   endif()
 endif()
 
@@ -394,6 +413,7 @@ if(EDIFICE_FUZZ)
   hk_fuzzer(map tests/fuzz/fuzz_map.cpp src/game/mapfile.cpp)
   hk_fuzzer(map_legacy tests/fuzz/fuzz_map_legacy.cpp src/game/mapfile.cpp)
   hk_fuzzer(lobby tests/fuzz/fuzz_lobby.cpp src/net/lobby.cpp)
+  hk_fuzzer(signaling tests/fuzz/fuzz_signaling.cpp src/net/signaling.cpp)
   # regenerates the seeds of tests/fuzz/corpus (see tests/fuzz/make_seeds.cpp)
   add_executable(fuzz_make_seeds tests/fuzz/make_seeds.cpp src/net/sock.cpp src/net/version.cpp
     src/game/mapfile.cpp src/game/Vector.cpp)

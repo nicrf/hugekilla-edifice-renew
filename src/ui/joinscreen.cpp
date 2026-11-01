@@ -2,8 +2,10 @@
 //typed in, or joined recently, with version, players, mode and ping. Sortable,
 //filterable, mouse and keyboard driven. The networking side is in multiplay.cpp.
 //The Internet tab lists the public games of the lobby (edifice-lobby, through
-//lobbygame.cpp) and joins private ones by their game code; the connection is then
-//the same direct UDP one, to the address the lobby saw the host at.
+//lobbygame.cpp) and joins private ones by their game code. A game with an identity
+//is joined P2P (M7d: a lobby session first, then GameNetworkingSockets through the
+//NATs, netlink.h); otherwise, or when that fails, through the direct UDP one, to
+//the address the lobby saw the host at.
 
 #include "StdAfx.h"
 #include "redrawing.h"
@@ -11,6 +13,7 @@
 #include "multiplay.h"
 #include "ui.h"
 #include "lobbygame.h"
+#include "netlink.h"
 #include <SDL.h>
 
 extern Vector mousepos;
@@ -51,9 +54,12 @@ static int inetstate;           //0 not asked, 1 waiting for the lobby, 2 listed
 static char inetmsg[200];       //shown when the list is empty
 static char code[LOBBY_CODELEN+5];
 static int lookingup;           //waiting for the lobby to find a game code
-//the Internet game being joined: waiting for its answer to an info request
+//the Internet game being joined: waiting for a lobby session (P2P), then for its
+//answer to an info request
+enum { JOINING_OFF, JOINING_SESSION, JOINING_QUERY };
 static LobbyGame joining;
 static int joiningactive;
+static int joiningp2p;          //asked through a P2P connection
 static DWORD joiningsince,joininglastquery;
 
 //columns: x of each, header label, sort mode it sets
@@ -203,10 +209,33 @@ static void JoinInternet(const LobbyGame *g)
 	}
 	SaveName();
 	joining=*g;
-	joiningactive=1;
+	joiningactive=JOINING_QUERY;
+	joiningp2p=0;
 	joiningsince=GetTickCount();
 	joininglastquery=joiningsince-1000;
 	snprintf(status,sizeof(status),"Contacting %s at %s:%d...",g->name,g->address,g->port);
+	//P2P if the host listens for it (it then has an identity) and we can
+	if(g->identity[0]&&NetP2PMode()&&LobbySessionStart()>=0)
+	{
+		joiningactive=JOINING_SESSION;
+		snprintf(status,sizeof(status),"Connecting to %s (P2P)...",g->name);
+	}
+}
+
+//the session is there (or not): P2P if it can be, else directly
+static void JoinInternetQuery(int sessionok)
+{
+	const LobbySession *s=LobbySessionGet();
+	joiningactive=JOINING_QUERY;
+	joiningsince=GetTickCount();
+	joininglastquery=joiningsince;
+	joiningp2p=sessionok&&s&&NetP2PStart(s,LobbyGetURL())&&
+		JoinNetQueryP2P(joining.address,joining.port,joining.identity);
+	if(!joiningp2p)
+	{
+		joininglastquery=joiningsince-1000;
+		snprintf(status,sizeof(status),"Contacting %s at %s:%d...",joining.name,joining.address,joining.port);
+	}
 }
 
 static void LookupCode()
@@ -253,7 +282,14 @@ static void Update()
 		if(r>0) JoinInternet(&g);
 		else if(r<0) snprintf(status,sizeof(status),"%s",err);
 	}
-	if(joiningactive)
+	if(joiningactive==JOINING_SESSION)
+	{
+		int r=LobbySessionResult(err,sizeof(err));
+		if(r<0) fprintf(stderr,"%s\n",err);
+		if(r) JoinInternetQuery(r>0);
+		else if(GetTickCount()-joiningsince>10000) JoinInternetQuery(0);
+	}
+	else if(joiningactive)
 	{
 		DWORD now=GetTickCount();
 		int i=JoinNetFind(joining.address,joining.port);
@@ -265,15 +301,21 @@ static void Update()
 			if(JoinNetConnect(i,reason,sizeof(reason))) joinscreen=0;
 			else snprintf(status,sizeof(status),"Can't join: %s",reason);
 		}
-		else if(now-joiningsince>6000)
+		else if(now-joiningsince>(joiningp2p?20000u:6000u))
 		{
 			joiningactive=0;
-			snprintf(status,sizeof(status),"No answer from %s:%d (the host may have to open its UDP ports)",
-				joining.address,joining.port);
+			if(joiningp2p)
+				snprintf(status,sizeof(status),"No answer from %s, neither P2P nor directly",joining.name);
+			else
+				snprintf(status,sizeof(status),"No answer from %s:%d (the host may have to open its UDP ports)",
+					joining.address,joining.port);
 		}
-		else if(now-joininglastquery>=1000)   //UDP: asked again every second
+		else if(now-joininglastquery>=(joiningp2p?2000u:1000u))   //UDP: asked again every second
 		{
-			JoinNetQuery(joining.address,joining.port);
+			//P2P: through the connection once it is up; if it failed (GameNetworkingSockets
+			//gives up after 10 s), directly
+			if(joiningp2p) JoinNetRequestInfo(joining.address,joining.port);
+			else JoinNetQuery(joining.address,joining.port);
 			joininglastquery=now;
 		}
 	}

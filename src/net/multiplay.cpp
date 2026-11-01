@@ -242,7 +242,9 @@ void StartServer()
 	LoadNetSettings();
 	numplayers=1;
 	
-	infosock.Open(NetOpenInfoLink(netsettings.infosendport,1));
+	//an Internet game also listens for P2P connections, once the lobby gave it an
+	//identity (lobbygame.cpp)
+	infosock.Open(NetOpenInfoLink(netsettings.infosendport,1,LobbyHostInternet()));
 
 	SetLocalNum(0);
 	GetLocalPlayer()->playstate=10;
@@ -1222,6 +1224,34 @@ int JoinNetQuery(const char *host,int port)
 	NetQueryHost(&dest);
 	SendInfoRequest(dest);
 	return 1;
+}
+
+//an Internet game joined P2P (M7d): the host identity the lobby lists, named by the
+//address and info port it lists (they then find its INFO answer, JoinNetFind). The
+//info link becomes a GameNetworkingSockets one if it isn't. Returns 0 if P2P can't
+//be used (the caller asks the host directly, JoinNetQuery).
+int JoinNetQueryP2P(const char *address,int port,const char *identity)
+{
+	if(!NetLinkIsGns(infosock.link))
+	{
+		infosock.Close();
+		infosock.Open(NetOpenInfoLink(netsettings.infosendport,0,1));
+		if(!NetLinkIsGns(infosock.link)) return 0;
+	}
+	SOCKADDR_IN dest=MakeSockAddr(0,0,0,0,htons((WORD)port));
+	dest.sin_addr.s_addr=inet_addr(address);
+	if(dest.sin_addr.s_addr==INADDR_NONE||!NetQueryHostP2P(&dest,identity)) return 0;
+	SendInfoRequest(dest);   //goes out once connected
+	return 1;
+}
+
+//asks a server for its info again, without opening anything (an Internet game
+//being joined: P2P, or UDP if that failed)
+void JoinNetRequestInfo(const char *address,int port)
+{
+	SOCKADDR_IN dest=MakeSockAddr(0,0,0,0,htons((WORD)port));
+	dest.sin_addr.s_addr=inet_addr(address);
+	if(dest.sin_addr.s_addr!=INADDR_NONE) SendInfoRequest(dest);
 }
 
 //index in the list of the server that answered from address:port (an Internet

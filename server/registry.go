@@ -41,6 +41,9 @@ type Announcement struct {
 	Mode       int    `json:"mode"`
 	Visibility string `json:"visibility"` // public, friends, private
 	Identity   string `json:"identity"`
+	// Session is the token of the session Identity comes from: an identity is
+	// only listed when it is the announcer's own (see API.vouch). Never stored.
+	Session string `json:"session"`
 }
 
 var (

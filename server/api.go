@@ -15,6 +15,7 @@ import (
 //
 //	POST   /v1/sessions          -> identity, token, STUN/TURN servers
 //	POST   /v1/servers           -> announce a game: id, token, refresh interval
+//	                                (its identity listed only with its session token)
 //	PUT    /v1/servers/{id}      -> refresh it (Authorization: Bearer token)
 //	DELETE /v1/servers/{id}      -> remove it (Authorization: Bearer token)
 //	GET    /v1/servers?protocol=N -> public games
@@ -73,6 +74,17 @@ func readAnnouncement(w http.ResponseWriter, r *http.Request) (Announcement, boo
 	return a, true
 }
 
+// vouch keeps the announced identity only if the announcer proves it is theirs
+// with its session token: clients connect P2P to the identity the lobby lists,
+// so nobody may list a game under someone else's. Without proof the game is
+// still listed, without identity (clients then join it by its address).
+func (a *API) vouch(ann *Announcement) {
+	if ann.Identity != "" && !a.sessions.Check(ann.Identity, ann.Session) {
+		ann.Identity = ""
+	}
+	ann.Session = ""
+}
+
 func statusFor(err error) int {
 	switch {
 	case errors.Is(err, ErrBadRequest):
@@ -118,6 +130,7 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			return
 		}
+		a.vouch(&ann)
 		id, token, err := a.registry.Register(a.clientIP(r), ann)
 		if err != nil {
 			writeError(w, statusFor(err), err.Error())
@@ -142,6 +155,7 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
+			a.vouch(&ann)
 			if err := a.registry.Refresh(id, bearer(r), ann); err != nil {
 				writeError(w, statusFor(err), err.Error())
 				return

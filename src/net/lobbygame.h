@@ -2,7 +2,8 @@
 //kept listed, the Internet games and game codes of the join screen. lobby.h does
 //the HTTP and the JSON; nothing here waits for the network.
 //net.ini: lobby=<https://...> (empty: no Internet games), servervisibility=
-//lan (not announced), public (listed), friends or private (joined by game code).
+//lan (not announced), public (listed), friends or private (joined by game code);
+//p2p= (netlink.h) whether Internet games are joined P2P.
 
 #ifndef LOBBYGAMEH
 #define LOBBYGAMEH
@@ -12,7 +13,17 @@
 //1 if the lobby can be used; otherwise why not, in why (may be 0)
 int LobbyReady(char *why=0,int whysize=0);
 
-//host (multiplay.cpp): called when the server starts, every frame, and when it stops
+//a lobby session (M7d): our identity for P2P, host and client alike. Start: 1 if
+//one is ready, 0 if it is being asked for, -1 if the lobby can't be used. Result: 0
+//while waiting, 1 ready, -1 failed (why in err). Get: the session, 0 if none.
+int LobbySessionStart();
+int LobbySessionResult(char *err,int errsize);
+const LobbySession *LobbySessionGet();
+
+//host (multiplay.cpp): 1 if the server about to start will be announced (net.ini
+//servervisibility, a usable lobby), so that it listens for P2P connections
+int LobbyHostInternet();
+//called when the server starts, every frame, and when it stops
 void LobbyHostStart();
 void LobbyHostLoop(int players);
 void LobbyHostStop();

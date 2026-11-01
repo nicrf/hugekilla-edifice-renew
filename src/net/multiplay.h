@@ -27,6 +27,8 @@ void JoinNetClose();
 void JoinNetClearList();
 void JoinNetSearchLAN();
 int JoinNetQuery(const char *host,int port=0);
+int JoinNetQueryP2P(const char *address,int port,const char *identity);
+void JoinNetRequestInfo(const char *address,int port);
 int JoinNetFind(const char *address,int port);
 int JoinNetConnect(int index,char *reason,int reasonsize);
 int JoinGameCount();

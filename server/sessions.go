@@ -18,6 +18,9 @@ type Session struct {
 	Token    string    `json:"token"`
 	Expires  time.Time `json:"expires"`
 	ICE      ICEConfig `json:"ice"`
+	// Signaling is the host:port of the signaling relay, empty when the lobby
+	// doesn't know its public name (the game then uses the lobby's host, port 10000)
+	Signaling string `json:"signaling,omitempty"`
 }
 
 type ICEConfig struct {
@@ -39,6 +42,7 @@ type Sessions struct {
 	stunURLs   []string
 	turnURLs   []string // empty: TURN disabled
 	turnSecret string
+	signaling  string // host:port handed out with each session, may be empty
 	now        func() time.Time
 }
 
@@ -72,10 +76,11 @@ func (s *Sessions) Create() (*Session, error) {
 	}
 	expires := s.now().Add(s.lifetime)
 	sess := &Session{
-		Identity: "str:edifice-" + randomHex(8),
-		Token:    randomHex(16),
-		Expires:  expires,
-		ICE:      ICEConfig{STUN: s.stunURLs, TURN: []TURNServer{}},
+		Identity:  "str:edifice-" + randomHex(8),
+		Token:     randomHex(16),
+		Expires:   expires,
+		ICE:       ICEConfig{STUN: s.stunURLs, TURN: []TURNServer{}},
+		Signaling: s.signaling,
 	}
 	if len(s.turnURLs) > 0 {
 		user, pass := turnCredentials(s.turnSecret, sess.Identity, expires)
