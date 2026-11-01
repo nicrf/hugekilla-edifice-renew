@@ -15,6 +15,13 @@ import (
 	"time"
 )
 
+// version and commit of this build, set by the Docker build (-ldflags -X, from
+// the release tag or the branch); "dev" for a plain go build
+var (
+	version = "dev"
+	commit  = ""
+)
+
 func env(name, fallback string) string {
 	if v := os.Getenv(name); v != "" {
 		return v
@@ -38,8 +45,15 @@ func main() {
 	tlsKey := flag.String("tls-key", env("EDIFICE_TLS_KEY", ""), "...and this key")
 	ttl := flag.Duration("ttl", 60*time.Second, "a game disappears when its host hasn't refreshed it for this long")
 	rateLimit := flag.Int("rate-limit", 30, "write requests and game code lookups allowed per minute and per IP (burst: a third)")
+	showVersion := flag.Bool("version", false, "print the version and exit")
 	healthcheck := flag.Bool("healthcheck", false, "check that the HTTP API of a running instance answers, then exit (for Docker)")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(versionString())
+		return
+	}
+	log.Printf("%s", versionString())
 
 	if *healthcheck {
 		_, port, _ := net.SplitHostPort(*httpAddr)
@@ -125,4 +139,15 @@ func main() {
 	}
 	log.Printf("HTTP API on %s", *httpAddr)
 	log.Fatal(srv.ListenAndServe())
+}
+
+func versionString() string {
+	if commit == "" {
+		return "edifice-lobby " + version
+	}
+	short := commit
+	if len(short) > 7 {
+		short = short[:7]
+	}
+	return "edifice-lobby " + version + " (" + short + ")"
 }

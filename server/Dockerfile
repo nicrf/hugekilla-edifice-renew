@@ -7,7 +7,10 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY *.go ./
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /edifice-lobby .
+# version and commit, given by the image workflow (docker build --build-arg ...)
+ARG VERSION=dev COMMIT=
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
+	-ldflags="-s -w -X main.version=$VERSION -X main.commit=$COMMIT" -o /edifice-lobby .
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /edifice-lobby /edifice-lobby

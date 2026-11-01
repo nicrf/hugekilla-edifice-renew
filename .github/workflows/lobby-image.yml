@@ -58,5 +58,9 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # what GET /v1/version and -version report: the release (1.2.3) or the branch (main)
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            COMMIT=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
