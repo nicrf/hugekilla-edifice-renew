@@ -1,6 +1,8 @@
 # Builds Edifice on macOS, Linux and Windows.
 #  - push to main / pull request: build check, archives kept as workflow artifacts
 #  - tag v* (git tag v0.2.0 && git push origin v0.2.0): build + GitHub release with the 3 archives
+#    (only the 3 builds: the network tests and fuzzing already ran on the PR / main)
+#  - fuzzing: on main, every Monday, or by hand (Actions > Run workflow), not on PRs
 name: Build & release
 
 on:
@@ -9,6 +11,8 @@ on:
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * 1'
 
 permissions:
   contents: read
@@ -73,6 +77,7 @@ jobs:
           if-no-files-found: error
 
   netplay-tests:
+    if: "!startsWith(github.ref, 'refs/tags/v') && github.event_name != 'schedule'"
     # Network tests against a headless server built with AddressSanitizer:
     # version handshake, join bookkeeping, malformed packets (tests/net_*.py).
     runs-on: ubuntu-22.04
@@ -172,6 +177,7 @@ jobs:
           if-no-files-found: ignore
 
   fuzzing:
+    if: github.event_name != 'pull_request' && !startsWith(github.ref, 'refs/tags/v')
     # libFuzzer harnesses of every network and file parser (tests/fuzz): seeds
     # first, then about a minute of fuzzing each; any crash fails the job.
     runs-on: ubuntu-22.04
@@ -246,7 +252,7 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build, netplay-tests]
+    needs: [build]
     runs-on: ubuntu-latest
     permissions:
       contents: write

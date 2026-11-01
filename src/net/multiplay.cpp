@@ -612,7 +612,11 @@ void ServerLoop()
 						VoiceMessage voice;
 						if(!ReadVoice(&msg,clen,&voice)) break;
 						voice.player=i;   //a client only speaks for itself
-						if(GetPlayer(i)->playstate<10) break;
+						if(GetPlayer(i)->playstate<10)
+						{
+							if(getenv("HK_VOICE_LOG")) fprintf(stderr,"voice from %d dropped: state %d\n",i,GetPlayer(i)->playstate);
+							break;
+						}
 						RelayVoice(&voice);
 						break;
 					}
@@ -1546,6 +1550,15 @@ static void RelayVoice(VoiceMessage *voice)
 	char buf[VOICEMSGSIZE];
 	int size=WriteVoice(buf,sizeof(buf),voice);
 	if(!size) return;
+	static int voicelog=getenv("HK_VOICE_LOG")!=0;
+	if(voicelog)   //debug: why a frame went (or not) to each player
+		for(int i=0;i<numplayers;i++)
+		{
+			Vector pa=GetPlayer(speaker)->pos,pb=GetPlayer(i)->pos;
+			fprintf(stderr,"relay %d seq %d -> %d: state %d/%d dist %.1f (%.1f %.1f %.1f)-(%.1f %.1f %.1f)\n",
+				speaker,voice->seq,i,GetPlayer(speaker)->playstate,GetPlayer(i)->playstate,
+				VoiceDistance(pa.x,pa.y,pa.z,pb.x,pb.y,pb.z),pa.x,pa.y,pa.z,pb.x,pb.y,pb.z);
+		}
 	for(int i=1;i<numplayers;i++)
 		if(i!=speaker&&GetPlayer(i)->playstate>=10&&VoiceNear(speaker,i))
 			clientsock[i].Send(buf,size);
