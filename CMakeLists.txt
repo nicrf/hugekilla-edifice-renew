@@ -247,7 +247,8 @@ else()
       -Wno-implicit-const-int-float-conversion)
   elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     # GCC turns some VC6-isms into errors that clang only warns about.
-    target_compile_options(Edifice PRIVATE -fpermissive -Wno-narrowing)
+    # snprintf cutting a long name or line is what the code wants (-Wformat-truncation).
+    target_compile_options(Edifice PRIVATE -fpermissive -Wno-narrowing -Wno-format-truncation)
   endif()
   if(WIN32)   # MinGW
     target_compile_definitions(Edifice PRIVATE _USE_MATH_DEFINES)
