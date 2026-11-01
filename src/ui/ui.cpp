@@ -8,6 +8,7 @@
 #include "vector.h"
 #include "redrawing.h"
 #include "inputlogic.h"
+#include "touch.h"
 
 Button button[50];
 int numbuttons;
@@ -435,6 +436,7 @@ void UIFocusActivate()
 
 void UIFrameEnd()
 {
+	DrawTouchControls();   //the on-screen gamepad (touch.cpp), under the focus
 	if(focusshown&&numfocusdrawn)
 	{
 		//a new screen: its first area; else the focused one, framed and pulsing

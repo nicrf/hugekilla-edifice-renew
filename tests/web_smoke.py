@@ -199,14 +199,67 @@ def main():
         page.wait_for_timeout(300)
         page.evaluate("""() => { window.__smokepad.axes = [.001, .001, .001, .001]; }""")
         page.wait_for_timeout(300)
-        pos0 = page.evaluate("[0, 2].map(a => Module._HKWebPlayerPos(a))")
+        pos0 = page.evaluate("[0, 2].map(a => Module._HKWebPlayer(a))")
         page.evaluate("""() => { window.__smokepad.axes[1] = -1; }""")
         page.wait_for_timeout(1500)
-        pos1 = page.evaluate("[0, 2].map(a => Module._HKWebPlayerPos(a))")
+        pos1 = page.evaluate("[0, 2].map(a => Module._HKWebPlayer(a))")
         page.evaluate("""() => { window.__smokepad.axes[1] = 0; }""")
         moved = ((pos1[0] - pos0[0]) ** 2 + (pos1[1] - pos0[1]) ** 2) ** .5
         print("     gamepad: moved %.2f units" % moved)
         check(moved > 1, "a gamepad's left stick walks (Gamepad API)")
+        # a phone held sideways (touch events, 844x390 CSS pixels): the touch controls
+        # (src/platform/touch.cpp) show at the first touch; a tap plays; a stick finger
+        # walks while a second one looks and a third fires; the Menu button pauses
+        tctx = browser.new_context(viewport={"width": 844, "height": 390}, has_touch=True, is_mobile=True,
+                                   device_scale_factor=2)
+        tpage = tctx.new_page()
+        tpage.on("console", lambda m: log.append("%s: %s" % (m.type, m.text)))
+        tpage.on("pageerror", lambda e: errors.append(str(e)))
+        tpage.goto(url + "?HK_MENU=serverstart&HK_SEED=42")
+        tpage.wait_for_function("document.getElementById('status').classList.contains('hidden')", timeout=60000)
+        tpage.wait_for_timeout(5000)
+        tpage.touchscreen.tap(422, 195)
+        tpage.wait_for_timeout(1500)
+        check(tpage.evaluate("Module._HKWebPlayState()") == 10, "touch: a tap on the spawn screen plays")
+        check(tpage.evaluate("Module._HKWebPlayer(7)") == 1, "touch: the controls show")
+        check(tpage.is_visible("#fullscreen"), "touch: the page offers fullscreen")
+        cdp = tctx.new_cdp_session(tpage)
+
+        def touch(kind, points):
+            cdp.send("Input.dispatchTouchEvent", {"type": kind, "touchPoints":
+                     [{"x": x, "y": y, "id": i, "radiusX": 5, "radiusY": 5, "force": 1} for i, x, y in points]})
+        pos0 = tpage.evaluate("[0, 2, 3].map(a => Module._HKWebPlayer(a))")
+        touch("touchStart", [(0, 110, 280)])
+        touch("touchMove", [(0, 110, 200)])
+        touch("touchStart", [(0, 110, 200), (1, 500, 150)])
+        for k in range(1, 11):
+            touch("touchMove", [(0, 110, 200), (1, 500 + 6 * k, 150)])
+            tpage.wait_for_timeout(30)
+        fire = (2, 844 - 92, 390 - 92)
+        touch("touchStart", [(0, 110, 200), (1, 560, 150), fire])
+        tpage.wait_for_timeout(300)
+        firing = tpage.evaluate("Module._HKWebPlayer(5)")
+        sample(tpage, os.path.join(args.out, "touch.png"))
+        tpage.wait_for_timeout(1000)
+        pos1 = tpage.evaluate("[0, 2, 3].map(a => Module._HKWebPlayer(a))")
+        touch("touchEnd", [])
+        moved = ((pos1[0] - pos0[0]) ** 2 + (pos1[1] - pos0[1]) ** 2) ** .5
+        turned = (pos1[2] - pos0[2] + 180) % 360 - 180
+        print("     touch: moved %.2f units, turned %.1f degrees" % (moved, turned))
+        check(moved > 1, "touch: the stick walks")
+        check(abs(turned) > 5, "touch: a second finger looks around")
+        check(firing == 1, "touch: a third finger fires")
+        check(tpage.evaluate("window.scrollX === 0 && window.scrollY === 0 && "
+                             "getComputedStyle(document.getElementById('canvas')).touchAction === 'none'"),
+              "touch: the page doesn't scroll")
+        tpage.touchscreen.tap(34, 84)
+        tpage.wait_for_timeout(500)
+        check(tpage.evaluate("Module._HKWebPlayer(6)") == 0, "touch: Menu pauses")
+        sample(tpage, os.path.join(args.out, "touch-pause.png"))
+        tpage.touchscreen.tap(34, 84)
+        tpage.wait_for_timeout(500)
+        check(tpage.evaluate("Module._HKWebPlayer(6)") == 1, "touch: Resume plays again")
+        tctx.close()
         # headless Chromium refuses pointer lock (no real window): not the game's
         errors[:] = [e for e in errors if "pointer lock" not in e]
         check(not errors, "no page error in the game")

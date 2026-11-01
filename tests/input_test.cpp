@@ -1,5 +1,6 @@
 // Unit test of src/ui/inputlogic.h: the gamepad's dead zone and response curve, a
-// stick as movement and look, the menus' repeat and focus moves.
+// stick as movement and look, the menus' repeat and focus moves, and the touch
+// controls' layout and hit tests.
 #include "inputlogic.h"
 #include <stdio.h>
 
@@ -108,6 +109,47 @@ int main()
 	CHECK(InFocusNext(g,5,g[3],IN_UP)==0);
 	CHECK(InSameRect(g[0],g[0])&&!InSameRect(g[0],g[1]));
 	CHECK(InFocusFirst(r,0)==-1);
+
+	// touch layout on a landscape phone (844x390 points)
+	InTouchLayout l;
+	InTouchLayoutFor(844,390,1,&l);
+	CHECK(l.scale==1);
+	for(int i=0;i<TB_COUNT;i++)
+	{
+		// every button on the window, away from the stick and its zone
+		CHECK(l.b[i].x-l.b[i].r>=0&&l.b[i].x+l.b[i].r<=l.w&&l.b[i].y-l.b[i].r>=0&&l.b[i].y+l.b[i].r<=l.h);
+		CHECK(InTouchHit(&l,l.b[i].x,l.b[i].y)==i);
+		for(int j=0;j<i;j++)
+		{
+			float dx=l.b[i].x-l.b[j].x,dy=l.b[i].y-l.b[j].y;
+			CHECK(sqrtf(dx*dx+dy*dy)>=l.b[i].r+l.b[j].r);   // no overlap
+		}
+		if(i!=TB_MENU) CHECK(l.b[i].x-l.b[i].r>l.stickzone);
+	}
+	CHECK(l.stick.x+l.stick.r<l.stickzone);
+	CHECK(InTouchHit(&l,422,195)==-1);          // the middle: look around
+	CHECK(InTouchHit(&l,l.b[TB_FIRE].x+l.b[TB_FIRE].r*1.1f,l.b[TB_FIRE].y)==TB_FIRE);   // a little off: still fire
+	CHECK(InTouchHit(&l,l.b[TB_FIRE].x+l.b[TB_FIRE].r*1.3f,l.b[TB_FIRE].y)!=TB_FIRE);
+	// bigger setting: bigger buttons; a small window shrinks them to fit
+	InTouchLayout big;
+	InTouchLayoutFor(1366,1024,1.5f,&big);
+	CHECK(NEAR(big.b[TB_FIRE].r,l.b[TB_FIRE].r*1.5f));
+	InTouchLayout small;
+	InTouchLayoutFor(320,165,1,&small);
+	CHECK(small.scale<=.5f+1e-4f);
+	for(int i=0;i<TB_COUNT;i++)
+		CHECK(small.b[i].x-small.b[i].r>=0&&small.b[i].y-small.b[i].r>=0);
+	// the stick: clamped to its circle, and kept on the window
+	InTouchStick(100,300,60,130,300,&x,&y);
+	CHECK(NEAR(x,.5f)&&NEAR(y,0));
+	InTouchStick(100,300,60,100,100,&x,&y);
+	CHECK(NEAR(x,0)&&NEAR(y,-1));
+	float cx,cy;
+	InTouchStickCenter(&l,5,385,&cx,&cy);
+	CHECK(NEAR(cx,60)&&NEAR(cy,330));
+	InTouchStickCenter(&l,200,200,&cx,&cy);
+	CHECK(NEAR(cx,200)&&NEAR(cy,200));
+
 
 	if(failures)
 	{

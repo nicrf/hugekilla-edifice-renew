@@ -13,6 +13,7 @@ int PadHandleEvent(const SDL_Event &ev);   //1 if it was a controller event
 void PadFrame();                       //each frame, after the events: sticks, triggers, repeats
 void PadLoadConfig();                  //pad_* of control.ini (LoadControls)
 int PadConnected();                    //open gamepads
+void PadNextWeapon(int dir);           //the next (1) or previous (-1) weapon held, around the ends
 const char *PadName();                 //of the last one used, or ""
 
 //the Gamepad tab of Options (options.cpp)

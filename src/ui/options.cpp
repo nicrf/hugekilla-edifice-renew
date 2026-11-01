@@ -1,5 +1,5 @@
 //options screen opened from the main menu: key bindings, video and audio settings,
-//the gamepad's. Everything is applied immediately and written back to control.ini
+//the gamepad's and the touch controls'. Everything is applied immediately and written back to control.ini
 //when closed.
 
 
@@ -14,6 +14,7 @@
 #include "voice.h"
 #include "hkkeys.h"
 #include "gamepad.h"
+#include "touch.h"
 
 int showoptions;
 static int optionstab;     //0 controls, 1 video/audio, 2 player, 3 gamepad
@@ -85,8 +86,9 @@ static float RowY(int row)
 }
 
 //Gamepad tab: settings rows, then the actions' buttons in two columns of cells
-#define NUMPADSETTINGS 5
-static const char *padlabels[NUMPADSETTINGS]={"Look sensitivity","Dead zone","Response curve","Invert look","Rumble"};
+#define NUMPADSETTINGS 7
+static const char *padlabels[NUMPADSETTINGS]={"Look sensitivity","Dead zone","Response curve","Invert look","Rumble",
+	"Touch controls","Touch controls size"};
 #define PADBINDROW (NUMPADSETTINGS+1)     //first row of the bindings (one for the pad's name)
 #define PADCOLROWS 8
 #define PADCOLX2 -.02f                    //end of the left column
@@ -106,7 +108,7 @@ static void PadCellX(int action,float &x1,float &x2)
 
 static int PadIsStepper(int row)
 {
-	return row<3;
+	return row<3||row==6;
 }
 
 static void ChangePadSetting(int row,int dir)
@@ -119,6 +121,11 @@ static void ChangePadSetting(int row,int dir)
 	case 2: p.curve=fminf(3,fmaxf(1,p.curve+dir*.2f)); break;
 	case 3: p.invert=!p.invert; break;
 	case 4: p.rumble=!p.rumble; break;
+	case 5:
+		//on touch, always, off
+		touchsettings.mode=(touchsettings.mode+(dir>0?1:2))%3;
+		break;
+	case 6: touchsettings.size=fminf(1.6f,fmaxf(.6f,touchsettings.size+dir*.1f)); break;
 	}
 }
 
@@ -131,6 +138,8 @@ static void PadSettingText(int row,char *text)
 	case 2: sprintf(text,"%.1f",padsettings.curve); break;
 	case 3: strcpy(text,padsettings.invert?"On":"Off"); break;
 	case 4: strcpy(text,padsettings.rumble?"On":"Off"); break;
+	case 5: strcpy(text,touchsettings.mode==2?"Always":touchsettings.mode?"On touch":"Off"); break;
+	case 6: sprintf(text,"%d%%",(int)(touchsettings.size*100+.5f)); break;
 	}
 }
 
@@ -272,7 +281,8 @@ static void SaveOptions()
 		values[n]=numbers[i];
 		n++;
 	}
-	int numpad=PadIniValues(&keys[n],padvalues,MAXPADVALUES);
+	int numpad=PadIniValues(&keys[n],padvalues,MAXPADVALUES-2);
+	numpad+=TouchIniValues(&keys[n+numpad],&padvalues[numpad],MAXPADVALUES-numpad);
 	for(int i=0;i<numpad;i++)
 		values[n++]=padvalues[i];
 	SetIniValues(UserFile("control.ini"),keys,values,n);
@@ -556,7 +566,7 @@ void DrawOptions()
 	Tab(TAB_CONTROLS,"Controls",optionstab==0);
 	Tab(TAB_VIDEO,"Video/Audio",optionstab==1);
 	Tab(TAB_PLAYER,"Player",optionstab==2);
-	Tab(TAB_PAD,"Gamepad",optionstab==3);
+	Tab(TAB_PAD,"Pad / Touch",optionstab==3);
 
 	char text[100];
 	float y1,y2;

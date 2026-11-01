@@ -20,6 +20,7 @@
 #include "ui.h"
 #include "voice.h"
 #include "gamepad.h"
+#include "touch.h"
 #include <SDL.h>
 #include <time.h>   //time(), the seed of rand()
 #ifdef __EMSCRIPTEN__
@@ -358,7 +359,7 @@ void HKInjectLook(int dx, int dy)
 
 static void HandleEvent(const SDL_Event &ev)
 {
-	if (PadHandleEvent(ev)) return;
+	if (PadHandleEvent(ev) || TouchHandleEvent(ev)) return;
 	switch (ev.type)
 	{
 	case SDL_QUIT:
@@ -376,6 +377,7 @@ static void HandleEvent(const SDL_Event &ev)
 	case SDL_KEYDOWN:
 	{
 		UIFocusShow(0);   // the keyboard has its own ways around the screens
+		TouchHide();
 		if (HandleJoinScreenKey(ev.key.keysym.sym)) break;
 		int vk = SDLKeyToKey(ev.key.keysym);
 		if (!vk) break;
@@ -402,7 +404,11 @@ static void HandleEvent(const SDL_Event &ev)
 	{
 		int w, h;
 		SDL_GetWindowSize(window, &w, &h);
-		if (ev.motion.xrel || ev.motion.yrel) UIFocusShow(0);   // the mouse points again
+		if (ev.motion.xrel || ev.motion.yrel)
+		{
+			UIFocusShow(0);   // the mouse points again
+			TouchHide();
+		}
 		mousepos.x = (float)ev.motion.x / w * 2 - 1;
 		mousepos.y = (float)ev.motion.y / h * -2 + 1;
 		if (lockedcursor)
@@ -413,6 +419,7 @@ static void HandleEvent(const SDL_Event &ev)
 		break;
 	}
 	case SDL_MOUSEBUTTONDOWN:
+		TouchHide();
 		if (ev.button.button == SDL_BUTTON_LEFT)
 			LeftButton(1, ev.button.clicks);
 		else if (ev.button.button == SDL_BUTTON_RIGHT)
@@ -579,11 +586,24 @@ extern "C" EMSCRIPTEN_KEEPALIVE int HKWebPlayState()
 	return GetLocalPlayer()->playstate;
 }
 
-// for tests/web_smoke.py: the local player's position (0 x, 1 y, 2 z), to see it move
-extern "C" EMSCRIPTEN_KEEPALIVE float HKWebPlayerPos(int axis)
+// for tests/web_smoke.py: the local player's position (0 x, 1 y, 2 z), heading (3,
+// degrees), weapon (4), firing (5); the game has the input (6); the touch controls
+// are shown (7)
+extern "C" EMSCRIPTEN_KEEPALIVE float HKWebPlayer(int what)
 {
-	Vector p = GetLocalPlayer()->pos;
-	return axis == 0 ? p.x : axis == 1 ? p.y : p.z;
+	Player *me = GetLocalPlayer();
+	switch (what)
+	{
+	case 0: return me->pos.x;
+	case 1: return me->pos.y;
+	case 2: return me->pos.z;
+	case 3: return atan2f(me->fwd.x, me->fwd.z) * 180 / 3.14159265f;
+	case 4: return me->weapon;
+	case 5: return me->firing;
+	case 6: return HKInGame();
+	case 7: return TouchShown();
+	}
+	return 0;
 }
 
 // for tests/net_webrtc.py: one block edit sent to the server as the build menu sends
@@ -640,6 +660,7 @@ static void Frame()
 	while (SDL_PollEvent(&ev))
 		HandleEvent(ev);
 	PadFrame();   // sticks and triggers, the menus' repeat
+	TouchFrame(); // the touch controls' stick, after the pad's (either walks)
 #ifdef __EMSCRIPTEN__
 	WebFrame();
 #endif
@@ -720,6 +741,9 @@ int main(int argc, char **argv)
 	// instead of a blurry bitmap stretched by the system (before SDL_Init)
 	SDL_SetHint(SDL_HINT_WINDOWS_DPI_AWARENESS, "permonitorv2");
 	SDL_SetHint(SDL_HINT_WINDOWS_DPI_SCALING, "1");
+	// a finger is never also a mouse: touch.cpp turns taps into clicks itself, and
+	// fingers on the game's controls must not shoot or click through
+	SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
 	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER) != 0)
 	{
 		fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());

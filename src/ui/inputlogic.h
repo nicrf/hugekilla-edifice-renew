@@ -1,7 +1,8 @@
-//gamepad input: the pure logic, apart from gamepad.cpp and the menus' focus (ui.cpp)
-//so that tests/input_test.cpp can check it without SDL or a window. Sticks are -1..1
-//with y down, as SDL reports them; menu rects are in the menus' units (-1..1 from the
-//window center, y up, like mousepos).
+//gamepad and touch input: the pure logic, apart from gamepad.cpp, touch.cpp and the
+//menus' focus (ui.cpp) so that tests/input_test.cpp can check it without SDL or a
+//window. Sticks are -1..1 with y down, as SDL reports them; menu rects are in the
+//menus' units (-1..1 from the window center, y up, like mousepos); the touch layout
+//is in window points from the top left, like SDL's finger positions times the size.
 
 #ifndef INPUTLOGICH
 #define INPUTLOGICH
@@ -178,5 +179,113 @@ inline int InSameRect(InRect a,InRect b)
 {
 	return fabsf(a.x1-b.x1)<.002f&&fabsf(a.x2-b.x2)<.002f&&fabsf(a.y1-b.y1)<.002f&&fabsf(a.y2-b.y2)<.002f;
 }
+
+//---- touch controls (an on-screen gamepad) ----
+
+enum
+{
+	TB_FIRE,TB_JUMP,TB_JETPACK,TB_RELOAD,TB_WEAPON,TB_ZOOM,TB_CLAIM,   //right thumb
+	TB_BUILD,TB_SCORES,TB_MENU,                                        //top corners
+	TB_COUNT
+};
+
+struct InCircle
+{
+	float x,y,r;   //window points from the top left
+};
+
+struct InTouchLayout
+{
+	float w,h;          //window, in points
+	float scale;        //what the sizes were multiplied by
+	InCircle stick;     //the move stick's base when no finger holds it
+	float stickzone;    //a finger down left of this x (not on a button) holds the stick
+	InCircle b[TB_COUNT];
+};
+
+//sizes in window points (CSS pixels on the web), which the system already scales to
+//the screen's density: the fire button is about 14 mm across on a phone. size is
+//the player's setting (1 = 100%); a small window shrinks everything to fit.
+inline void InTouchLayoutFor(float w,float h,float size,InTouchLayout *l)
+{
+	float s=size;
+	float fit=fminf(w/640,h/330);
+	if(fit<1) s*=fit;
+	l->w=w;
+	l->h=h;
+	l->scale=s;
+	l->stick.x=110*s;
+	l->stick.y=h-110*s;
+	l->stick.r=60*s;
+	l->stickzone=w*.4f;
+	//right thumb, from the bottom right corner: fire biggest and nearest
+	static const float right[7][3]=
+	{
+		{92,92,44},     //fire
+		{200,52,30},    //jump
+		{52,200,30},    //jetpack
+		{180,140,24},   //reload
+		{140,205,24},   //weapon
+		{52,290,24},    //zoom
+		{280,52,24},    //claim
+	};
+	for(int i=0;i<7;i++)
+	{
+		l->b[i].x=w-right[i][0]*s;
+		l->b[i].y=h-right[i][1]*s;
+		l->b[i].r=right[i][2]*s;
+	}
+	l->b[TB_BUILD].x=w-90*s;
+	l->b[TB_BUILD].y=34*s;
+	l->b[TB_SCORES].x=w-34*s;
+	l->b[TB_SCORES].y=34*s;
+	l->b[TB_MENU].x=34*s;
+	l->b[TB_MENU].y=84*s;   //under the frame counter
+	for(int i=TB_BUILD;i<TB_COUNT;i++) l->b[i].r=22*s;
+}
+
+//the button under a finger, -1 for none: the nearest one whose circle (a little
+//bigger than drawn, fingers are wide) holds the point
+inline int InTouchHit(const InTouchLayout *l,float x,float y)
+{
+	int best=-1;
+	float bestd=0;
+	for(int i=0;i<TB_COUNT;i++)
+	{
+		float dx=x-l->b[i].x,dy=y-l->b[i].y;
+		float d=sqrtf(dx*dx+dy*dy);
+		if(d<=l->b[i].r*1.2f&&(best<0||d/l->b[i].r<bestd))
+		{
+			best=i;
+			bestd=d/l->b[i].r;
+		}
+	}
+	return best;
+}
+
+//a finger at x,y on a stick of center cx,cy and radius r: -1..1 (y down), clamped to
+//the circle
+inline void InTouchStick(float cx,float cy,float r,float x,float y,float *sx,float *sy)
+{
+	float dx=(x-cx)/r,dy=(y-cy)/r;
+	float m=sqrtf(dx*dx+dy*dy);
+	if(m>1)
+	{
+		dx/=m;
+		dy/=m;
+	}
+	*sx=dx;
+	*sy=dy;
+}
+
+//where a floating stick goes for a finger down at x,y: there, but kept whole on the
+//window
+inline void InTouchStickCenter(const InTouchLayout *l,float x,float y,float *cx,float *cy)
+{
+	float r=l->stick.r;
+	*cx=fminf(fmaxf(x,r),l->w-r);
+	*cy=fminf(fmaxf(y,r),l->h-r);
+}
+
 
 #endif
