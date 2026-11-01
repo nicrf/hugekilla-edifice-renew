@@ -79,6 +79,14 @@ docker run -p 8080:8080 -p 10000:10000 -p 3478:3478/udp -e EDIFICE_PUBLIC_HOST=l
 
 Pour le relais TURN, les ports UDP des allocations doivent aussi être joignables : fixer leur plage avec `-turn-relay-ports` et l'ouvrir (le compose le fait).
 
+## Versions
+
+Chaque image dit ce qu'elle est : `GET /v1/version` renvoie `{"version": "0.5.4", "commit": "…", "api": 2}`, `edifice-lobby -version` l'affiche, et le lobby l'écrit au démarrage dans son journal.
+
+- **Tags de l'image** (`ghcr.io/nicrf/edifice-lobby`) : `latest` suit `main` ; chaque release du jeu `vX.Y.Z` publie `X.Y.Z` et `X.Y` ; chaque commit a aussi son `sha-<commit>`.
+- **Choisir sa version** : `EDIFICE_LOBBY_TAG` dans `.env` (défaut `latest`). `EDIFICE_LOBBY_TAG=0.5` garde la ligne 0.5 avec ses correctifs ; `0.5.4` fige une version exacte ; revenir en arrière = remettre l'ancien tag puis `docker compose pull && docker compose up -d`.
+- **`api`** monte quand l'API gagne quelque chose dont un jeu peut dépendre (2 : les adresses `lan` d'une partie). Les ajouts restent compatibles : un jeu plus ancien ignore ce qu'il ne connaît pas.
+
 ## API
 
 | Requête | Réponse |

@@ -4,7 +4,9 @@
 services:
   lobby:
     # prebuilt by GitHub Actions (amd64 and arm64); "docker compose build" rebuilds it locally
-    image: ghcr.io/nicrf/edifice-lobby:latest
+    # EDIFICE_LOBBY_TAG in .env pins a release (e.g. 0.5.4, or 0.5 for its fixes);
+    # latest follows main
+    image: ghcr.io/nicrf/edifice-lobby:${EDIFICE_LOBBY_TAG:-latest}
     build: .
     restart: unless-stopped
     environment:

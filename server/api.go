@@ -14,6 +14,10 @@ import (
 	"time"
 )
 
+// APIVersion goes up with each addition to the API a game may rely on: 1 the game
+// list, sessions and signaling; 2 the "lan" addresses of a game (same network)
+const APIVersion = 2
+
 // API is the HTTP JSON interface of the lobby:
 //
 //	POST   /v1/sessions          -> identity, token, STUN/TURN servers
@@ -27,6 +31,7 @@ import (
 //	                                (both give a game's "lan" addresses only to a
 //	                                player from the host's own public address)
 //	GET    /v1/signal            -> the signaling relay over WebSocket (websocket.go)
+//	GET    /v1/version          -> {"version", "commit", "api"}: what is running
 //	GET    /healthz
 type API struct {
 	registry   *Registry
@@ -250,6 +255,10 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimSuffix(r.URL.Path, "/")
 	if path == "/healthz" {
 		w.Write([]byte("ok\n"))
+		return
+	}
+	if path == "/v1/version" && r.Method == http.MethodGet {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"version": version, "commit": commit, "api": APIVersion})
 		return
 	}
 	// writes are rate limited per IP, and so are lookups by game code (they
