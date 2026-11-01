@@ -1,0 +1,5 @@
+// Windows resources of Edifice.exe: only the program icon now (the original menus and
+// dialogs went with the native Win32 build). Explorer shows the lowest ID first; the
+// IDs are the original IDI_HUGEKILLA and IDI_SMALL.
+107 ICON "particleico.ico"
+108 ICON "icon1.ico"

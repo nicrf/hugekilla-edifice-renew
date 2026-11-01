@@ -1,8 +1,7 @@
-//SDL2 replacement for the DirectSound code in sound.cpp.  Same interface: sounds
+//SDL2 replacement for the original DirectSound code (sound.cpp, removed).  Same interface: sounds
 //are numbered slots, each slot is one buffer that can be playing once at a time.
 //3d slots are attenuated and panned against the listener like DirectSound3D.
 
-#ifndef HK_WIN32_NATIVE
 
 #include "fileio.h"
 #include "vector.h"
@@ -162,11 +161,8 @@ static void AudioCallback(void *,Uint8 *stream,int len)
 	}
 }
 
-int InitSound(HWND)
+int InitSound()
 {
-#ifdef HKDS
-	return 0;
-#endif
 	SDL_AudioSpec want;
 	SDL_zero(want);
 	want.freq=VOICE_RATE;   //48 kHz: decoded voice needs no resampling (wav sounds are converted)
@@ -202,9 +198,6 @@ int UnInitSound()
 
 int LoadSound(char *filename,int num,int is3d)
 {
-#ifdef HKDS
-	return 0;
-#endif
 	if(!device) return 1;
 	if(num<0||num>=MAXSOUNDS) return 1;
 	SDL_AudioSpec spec;
@@ -406,4 +399,3 @@ void LoadSounds()
 	LoadSound("sound/blueteamwins.wav",BLUETEAMWINS,0);
 }
 
-#endif // !HK_WIN32_NATIVE

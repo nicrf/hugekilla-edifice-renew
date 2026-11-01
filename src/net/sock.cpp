@@ -10,6 +10,7 @@
 #include "redrawing.h"
 #include "wire.h"
 #include "datagramlink.h"
+#include "hktime.h"
 
 #define RELIABLE -1
 #define LASTRELIABLE -2
@@ -47,7 +48,7 @@ int ReadSimple(const void *in,int len,SimpleMessage *out)
 
 Sock::Sock()
 {
-	ZeroMemory(this,sizeof(*this));
+	memset(this,0,sizeof(*this));
 	dest.sin_family=2;
 	reliablesenddata=0;
 }
@@ -82,7 +83,7 @@ int Sock::Send(const void *data,int size)
 	if(size+sendbufpos>MAXPACKETSIZE) Flush();
 	WirePutU16(&sendbuf.data[sendbufpos],size);
 	sendbufpos+=2;
-	CopyMemory(&sendbuf.data[sendbufpos],data,size);
+	memcpy(&sendbuf.data[sendbufpos],data,size);
 	sendbufpos+=size;
 	return 1;
 }
@@ -108,7 +109,7 @@ int Sock::Receive(void *data,SOCKADDR_IN *source,int maxsize)
 			if(left>=4&&dwsize<=left-4&&dwsize<=(DWORD)maxsize)
 			{
 				reliablerecvbufpos+=4;
-				CopyMemory(data,&reliablerecvdata[reliablerecvbufpos],dwsize);
+				memcpy(data,&reliablerecvdata[reliablerecvbufpos],dwsize);
 				reliablerecvbufpos+=dwsize;
 				return dwsize;
 			}
@@ -123,7 +124,7 @@ int Sock::Receive(void *data,SOCKADDR_IN *source,int maxsize)
 			if(ok&&recvbufpos+2+wsize<=recvbufsize&&wsize<=maxsize)
 			{
 				recvbufpos+=2;
-				CopyMemory(data,&recvbuf.data[recvbufpos],wsize);
+				memcpy(data,&recvbuf.data[recvbufpos],wsize);
 				recvbufpos+=wsize;
 				return wsize;
 			}
@@ -136,7 +137,7 @@ int Sock::Receive(void *data,SOCKADDR_IN *source,int maxsize)
 		{
 			//as recvfrom: a datagram larger than the buffer is cut; source is left as is
 			received=feedsize<(int)sizeof(recvbuf)?feedsize:(int)sizeof(recvbuf);
-			if(received>0) CopyMemory(&recvbuf,feeddata,received);
+			if(received>0) memcpy(&recvbuf,feeddata,received);
 			feeddata=0;
 		}
 		else
@@ -213,7 +214,7 @@ int Sock::Receive(void *data,SOCKADDR_IN *source,int maxsize)
 			//answer where the data came from (lets clients behind a NAT through),
 			//only once the packet passed the checksum, and never to another IP
 			if(!dest.sin_addr.s_addr||dest.sin_addr.s_addr==source->sin_addr.s_addr)
-				CopyMemory(&dest,source,sizeof(dest));
+				memcpy(&dest,source,sizeof(dest));
 			buf ack;
 			ack.type=ACK;
 			memcpy(&ack.data[0],&recvbuf.data[4],4);   //id, part number
@@ -234,7 +235,7 @@ int Sock::Receive(void *data,SOCKADDR_IN *source,int maxsize)
 				*(char *)data=0;
 				return 1;
 			}
-			CopyMemory(&reliablerecvdata[rbufpos],&recvbuf.data[8],chunk);
+			memcpy(&reliablerecvdata[rbufpos],&recvbuf.data[8],chunk);
 			if(recvbuf.type==LASTRELIABLE)
 			{
 				reliablerecvbufpos=0;
@@ -298,16 +299,16 @@ sendmore:
 	{
 		curbuf->data.type=RELIABLE;
 	}
-	CopyMemory(&curbuf->data.data[bufpos],reliablesenddata->data,thispacketsize);
+	memcpy(&curbuf->data.data[bufpos],reliablesenddata->data,thispacketsize);
 	bufpos+=thispacketsize;
 	WirePutU32(&curbuf->data.data[0],GetCheckSum(&curbuf->data.data[4],bufpos-4));
-	MoveMemory(reliablesenddata->data,&reliablesenddata->data[thispacketsize],reliablesenddata->size-thispacketsize);
+	memmove(reliablesenddata->data,&reliablesenddata->data[thispacketsize],reliablesenddata->size-thispacketsize);
 	reliablesenddata->size-=thispacketsize;
 	curbuf->size=1+bufpos;
 	curbuf->id=reliablebufid;
 	curbuf->num=reliablebufnum;
 	ResendReliable(curbuf);
-	curbuf->resendat=GetTickCount()+RELIABLEFIRSTRESEND;
+	curbuf->resendat=HKTicks()+RELIABLEFIRSTRESEND;
 	curbuf->resends=0;
 	if(reliablesenddata->size>RELIABLEPACKETSIZE)
 	{
@@ -356,7 +357,7 @@ int Sock::SendReliable(const void *data,int size,int callback)
 	(*last)->next=0;
 
 	reliabledata *newdata=*last;
-	CopyMemory(newdata->data,data,size);
+	memcpy(newdata->data,data,size);
 	if(newdata==reliablesenddata)  //only one
 	{
 		reliablebufid++;
@@ -375,7 +376,7 @@ void Sock::CheckReliableResend()
 
 		//real time, not frames; backs off, and gives up on a peer that never answers
 		//(it would otherwise be flooded forever, which spoofed requests could aim at anyone)
-		DWORD now=GetTickCount();
+		DWORD now=HKTicks();
 		if((int)(now-reliablebuf[i].resendat)<0) continue;
 		if(reliablebuf[i].resends>=RELIABLEGIVEUP)
 		{

@@ -5,8 +5,8 @@ project(Edifice VERSION 0.5.4 LANGUAGES C CXX)
 #   SDL2 (window, input, audio) + legacy OpenGL on macOS, Linux and Windows.
 # SDL2 is downloaded and linked statically, so the game has no runtime
 # dependency besides the OS (set EDIFICE_SYSTEM_SDL2=ON to use an installed SDL2).
-# The original Win32 code (WinMain, DirectSound, dialogs) is still in the sources
-# behind HK_WIN32_NATIVE for reference, but is no longer built.
+# main() is SDL's on every platform (src/platform/platform_sdl.cpp); the original
+# Win32 code (WinMain, DirectSound, dialogs) was removed in 0.5.4 (roadmap M12.3).
 # See BUILD.md, or simply run: python3 build.py
 
 # C++17 for std::filesystem (src/platform/fileio.cpp): macOS 10.15 or later
@@ -163,17 +163,16 @@ set(SOURCES
   src/audio/voice.cpp
   src/platform/platform_sdl.cpp
   src/platform/fileio.cpp
-  src/compat/win32compat.cpp
+  src/platform/system_sdl.cpp
 )
 
 # The sources include headers by bare name ("vector.h", "redrawing.h"...), so every
-# module directory is on the include path. Each file includes what it uses: the
-# Win32 names through "win32compat.h" (the real API on Windows, an emulation
-# elsewhere), OpenGL through "gl.h" (src/platform).
+# module directory is on the include path. Each file includes what it uses from
+# src/platform: "hktypes.h" (DWORD, WORD), "hktime.h", "hkkeys.h", "hksocket.h",
+# OpenGL through "gl.h", the window and the user folder through "platform.h".
 set(INCLUDE_DIRS
-  ${SRC}/game ${SRC}/render ${SRC}/net ${SRC}/ui ${SRC}/audio ${SRC}/platform ${SRC}/compat
-  ${SRC}/third_party   # "stb/stb_image.h" (public domain / MIT, see its LICENSE)
-  ${CMAKE_CURRENT_SOURCE_DIR}/win32)   # resource.h (dialog/icon IDs used by the code)
+  ${SRC}/game ${SRC}/render ${SRC}/net ${SRC}/ui ${SRC}/audio ${SRC}/platform
+  ${SRC}/third_party)   # "stb/stb_image.h" (public domain / MIT, see its LICENSE)
 
 # ---- Target ------------------------------------------------------------------
 if(APPLE)
@@ -202,7 +201,7 @@ if(APPLE)
   install(TARGETS Edifice BUNDLE DESTINATION .)
 else()
   if(WIN32)
-    add_executable(Edifice WIN32 ${SOURCES} win32/hugekilla.rc)
+    add_executable(Edifice WIN32 ${SOURCES} src/platform/windows/edifice.rc)   # the icon
     set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT Edifice)
     set_property(TARGET Edifice PROPERTY VS_DEBUGGER_WORKING_DIRECTORY $<TARGET_FILE_DIR:Edifice>)
   else()
@@ -296,7 +295,7 @@ add_test(NAME hmac COMMAND hmac_test)
 add_executable(fileio_test tests/fileio_test.cpp src/platform/fileio.cpp)
 target_include_directories(fileio_test PRIVATE ${SRC}/platform)
 add_test(NAME fileio COMMAND fileio_test)
-set(HK_TEST_INCLUDES ${SRC}/game ${SRC}/net ${SRC}/compat)   # "win32compat.h": DWORD...
+set(HK_TEST_INCLUDES ${SRC}/game ${SRC}/net ${SRC}/platform)   # "hktypes.h": DWORD...
 add_executable(map_test tests/map_test.cpp src/game/mapfile.cpp)
 target_include_directories(map_test PRIVATE ${HK_TEST_INCLUDES})
 add_test(NAME map COMMAND map_test)

@@ -5,7 +5,6 @@
 //sky, terrain, scenery and buildings), and whether the game is announced on the
 //Internet list (edifice-lobby, lobbygame.cpp). Choices are kept in sv.ini and net.ini.
 
-#ifndef HK_WIN32_NATIVE
 
 #include "gl.h"
 #include "platform.h"
@@ -17,6 +16,7 @@
 #include "multiplay.h"
 #include "ui.h"
 #include "lobbygame.h"
+#include "hkkeys.h"
 
 #define MAXSKIES 16
 #define MAXMAPS 64
@@ -333,21 +333,21 @@ int ServerSetupHandleKey(int vk)
 	if(editingname)
 	{
 		int len=strlen(servername);
-		if(vk==VK_BACK&&len) servername[len-1]=0;
-		if(vk==VK_RETURN||vk==VK_ESCAPE||vk==VK_TAB) editingname=0;
+		if(vk==KEY_BACK&&len) servername[len-1]=0;
+		if(vk==KEY_RETURN||vk==KEY_ESCAPE||vk==KEY_TAB) editingname=0;
 		return 1;
 	}
-	if(vk==VK_ESCAPE)
+	if(vk==KEY_ESCAPE)
 	{
 		showsetup=0;
 		SaveSetup();
 	}
-	if(vk==VK_RETURN) StartConfiguredServer();
+	if(vk==KEY_RETURN) StartConfiguredServer();
 	//keyboard: Up/Down (or Tab) pick a row, Left/Right change it
-	if(vk==VK_UP) keyrow=(keyrow+SETUPROWS-1)%SETUPROWS;
-	if(vk==VK_DOWN||vk==VK_TAB) keyrow=(keyrow+1)%SETUPROWS;
-	if(vk==VK_LEFT) ChangeRow(keyrow,-1);
-	if(vk==VK_RIGHT) ChangeRow(keyrow,1);
+	if(vk==KEY_UP) keyrow=(keyrow+SETUPROWS-1)%SETUPROWS;
+	if(vk==KEY_DOWN||vk==KEY_TAB) keyrow=(keyrow+1)%SETUPROWS;
+	if(vk==KEY_LEFT) ChangeRow(keyrow,-1);
+	if(vk==KEY_RIGHT) ChangeRow(keyrow,1);
 	return 1;
 }
 
@@ -413,4 +413,3 @@ void DrawServerSetup()
 	glColor3f(1,1,1);
 }
 
-#endif // !HK_WIN32_NATIVE

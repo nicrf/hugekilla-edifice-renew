@@ -17,7 +17,7 @@
 #ifndef NETLINKH
 #define NETLINKH
 
-#include "win32compat.h"   //WORD
+#include "hksocket.h"   //SOCKADDR_IN, WORD
 
 class DatagramLink;
 struct LobbySession;

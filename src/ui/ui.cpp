@@ -6,9 +6,6 @@
 #include "multiplay.h"
 #include "ui.h"
 #include "vector.h"
-#ifdef HK_WIN32_NATIVE
-#include "resource.h"   //IDD_MULTIPLAY of the original Win32 dialog
-#endif
 #include "redrawing.h"
 
 Button button[50];
@@ -395,11 +392,7 @@ void DrawMenu()
 	glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
 	//a full screen panel (join, server setup, options, credits) hides the menu, which
 	//would show through
-#ifndef HK_WIN32_NATIVE
 	int covered=IsJoinScreenOpen()||IsServerSetupOpen()||IsOptionsOpen()||showcredits;
-#else
-	int covered=showcredits;
-#endif
 	for(int i=0;i<numbuttons&&!covered;i++)
 	{
 		TexBind(TEX_MENU0+button[i].tex);
@@ -430,26 +423,21 @@ void DrawMenu()
 	}
 	//framed on their click areas (OverCreditsButton, OverOptionsButton)
 	if(!covered) UIButton(CREDITSX1,CREDITSY1,CREDITSX2,CREDITSY2,"Credits",1);
-#ifndef HK_WIN32_NATIVE
 	if(!covered) UIButton(OPTIONSX1,CREDITSY1,OPTIONSX2,CREDITSY2,"Options",1);
 	glColor3f(1,1,1);
 	DrawOptions();
 	DrawServerSetup();
-#endif
 	if(showcredits)
 		DrawCredits();
-#ifndef HK_WIN32_NATIVE
 	DrawJoinScreen();
-#endif
 
-	SwapBuffers(hdc);	
+	HKSwapWindow();	
 }
 
 
 void MenuMouseDown()
 {
 	if(CloseCredits()) return;
-#ifndef HK_WIN32_NATIVE
 	if(IsOptionsOpen())
 	{
 		OptionsClick();
@@ -465,15 +453,12 @@ void MenuMouseDown()
 		OpenOptions();
 		return;
 	}
-#endif
 	if(OverCreditsButton())
 	{
 		showcredits=1;
 		return;
 	}
-#ifndef HK_WIN32_NATIVE
 	if(IsJoinScreenOpen()) return;
-#endif
 	int over=ButtonOver();
 	if(over>=0)
 		HandleButton(button[over].handler);
@@ -486,19 +471,11 @@ void HandleButton(int handler)
 	case 0:  //error
 		break;
 	case 1:  //start server
-#ifndef HK_WIN32_NATIVE
 		OpenServerSetup();
-#else
-		StartServer();
-#endif
 		break;
 	case 2:  //play
 		if(GetLocalPlayer()->playstate==0)
-#ifdef HK_WIN32_NATIVE
-			DialogBox(hInst, (LPCTSTR)IDD_MULTIPLAY, hWnd, (DLGPROC)Multiplay);
-#else
 			OpenJoinScreen();
-#endif
 		break;
 	case 3:  //disconnect
 
@@ -507,7 +484,7 @@ void HandleButton(int handler)
 		LoadSplashTexture();
 		break;
 	case 4: //quit
-		DestroyWindow(hWnd);
+		HKQuit();
 		break;
 	}
 }

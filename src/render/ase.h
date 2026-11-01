@@ -2,7 +2,7 @@
 #ifndef ASE
 #define ASE
 
-#include "win32compat.h"
+#include "hktypes.h"
 #include "vector.h"
 
 struct spoint
@@ -52,10 +52,10 @@ class AseObj
 public:
 	AseObj()
 	{
-		ZeroMemory(&object,sizeof(aseobj));
+		memset(&object,0,sizeof(aseobj));
 		loaded=0;
 	}
-	int Load(LPCTSTR file);
+	int Load(const char *file);
 	int loaded;
 	void Unload();
 	void Draw(Vector pos,Vector top,Vector right);

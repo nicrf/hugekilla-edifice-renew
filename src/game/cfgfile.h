@@ -1,6 +1,6 @@
 #ifndef CFGFILEH
 #define CFGFILEH
-#include "win32compat.h"   //LPCTSTR
+#include "hktypes.h"
 #include "vector.h"
 class CfgFile
 {
@@ -8,16 +8,16 @@ class CfgFile
 public:
 	CfgFile();
 	~CfgFile();
-	int Load(LPCTSTR file);
+	int Load(const char *file);
 	
-	int GetValuei(LPCTSTR title);
-	float GetValuef(LPCTSTR title);
-	Vector GetValuev(LPCTSTR title);
-	char * GetValues(LPCTSTR title);
+	int GetValuei(const char *title);
+	float GetValuef(const char *title);
+	Vector GetValuev(const char *title);
+	char * GetValues(const char *title);
 
 private:
 	char *data;
 	int datalen;
-	int FindValue(LPCTSTR &title);
+	int FindValue(const char *&title);
 };
 #endif

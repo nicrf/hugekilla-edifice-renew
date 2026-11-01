@@ -15,6 +15,7 @@
 #include "ui.h"
 #include "lobbygame.h"
 #include "netlink.h"
+#include "hktime.h"
 #include <stdio.h>
 #include <string.h>
 #ifndef _WIN32
@@ -76,7 +77,7 @@ static void Describe(int status,const std::string &reply,char *out,int size)
 //a session lasts 12 hours: a new one after 11
 static int SessionValid()
 {
-	return havesession&&GetTickCount()-sessiontime<11*3600*1000u;
+	return havesession&&HKTicks()-sessiontime<11*3600*1000u;
 }
 
 int LobbySessionStart()
@@ -103,7 +104,7 @@ int LobbySessionResult(char *err,int errsize)
 	if(status==201&&LobbyParseSession(reply.data(),(int)reply.size(),&session))
 	{
 		havesession=1;
-		sessiontime=GetTickCount();
+		sessiontime=HKTicks();
 		return 1;
 	}
 	if(status==201) snprintf(err,errsize,"Lobby: unreadable session");
@@ -122,7 +123,7 @@ enum { HOST_OFF, HOST_SESSION, HOST_ANNOUNCE, HOST_LISTED };
 
 static int hoststate;
 static int hostrequest;
-static DWORD hostnext;          //GetTickCount() of the next request
+static DWORD hostnext;          //HKTicks() of the next request
 static DWORD hostlastsent;
 static int hostrefresh;         //seconds, from the lobby
 static int hostplayers;         //as last announced
@@ -159,7 +160,7 @@ static int LanAddresses(char addr[][16],int max)
 		to.sin_addr.s_addr=inet_addr("8.8.8.8");
 		SOCKADDR_IN self;
 		socklen_t len=sizeof(self);
-		if(connect(s,(SOCKADDR *)&to,sizeof(to))==0&&getsockname(s,(SOCKADDR *)&self,&len)==0)
+		if(connect(s,(struct sockaddr *)&to,sizeof(to))==0&&getsockname(s,(struct sockaddr *)&self,&len)==0)
 			AddLan(addr,&n,max,self.sin_addr);
 		closesocket(s);
 	}
@@ -225,7 +226,7 @@ void LobbyHostStart()
 	//P2P first needs a session (our identity); without P2P, nothing to ask
 	hostp2p=0;
 	hoststate=NetP2PMode()&&LobbySessionStart()>=0?HOST_SESSION:HOST_ANNOUNCE;
-	hostnext=GetTickCount();
+	hostnext=HKTicks();
 	hostplayers=-1;
 	hostnumlan=LanAddresses(hostlan,LOBBY_MAXLAN);
 	for(int i=0;i<hostnumlan;i++) fprintf(stderr,"lobby: LAN address %s\n",hostlan[i]);
@@ -259,14 +260,14 @@ static void HostSend(int players)
 		}
 		hostplayers=players;
 	}
-	hostlastsent=GetTickCount();
-	if(!hostrequest) hostnext=GetTickCount()+5000;
+	hostlastsent=HKTicks();
+	if(!hostrequest) hostnext=HKTicks()+5000;
 }
 
 void LobbyHostLoop(int players)
 {
 	if(hoststate==HOST_OFF) return;
-	DWORD now=GetTickCount();
+	DWORD now=HKTicks();
 	char text[200];
 	if(hoststate==HOST_SESSION)
 	{

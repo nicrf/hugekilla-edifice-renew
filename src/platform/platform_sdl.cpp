@@ -1,10 +1,12 @@
-// SDL2 replacement for the Win32 parts of hugekilla.cpp: window, OpenGL
-// context, input and main loop. Input is translated to Windows virtual-key
-// codes so the rest of the game sees the same events as before.
+// The game's main(), on SDL2 everywhere: window, OpenGL context, input and main
+// loop. Input is translated to the game's key codes (hkkeys.h, the Windows
+// virtual-key values of the original code).
 
-#ifndef HK_WIN32_NATIVE
 
 #include "gl.h"
+#include "platform.h"
+#include "hkkeys.h"
+#include "hktime.h"
 #include "fileio.h"
 #include "cfgfile.h"
 #include "hugekilla.h"
@@ -19,10 +21,6 @@
 #include <SDL.h>
 #include <time.h>   //time(), the seed of rand()
 
-HINSTANCE hInst;
-HWND hWnd;
-HDC hdc;
-HBRUSH backbrush;
 int lockedcursor;
 Vector mousepos;
 char status[10][200];
@@ -35,31 +33,47 @@ static int fullscreen;
 static int vsync = 1;
 static int mousedx, mousedy;
 
-HWND GetHWND()
-{
-	return hWnd;
-}
-
-HDC GetGlHDC()
-{
-	return hdc;
-}
-
-BOOL DestroyWindow(HWND)
+void HKQuit()
 {
 	quitrequested = 1;
-	return TRUE;
 }
 
-BOOL GetClientRect(HWND, RECT *rect)
+void HKWindowSize(int *w, int *h)
 {
-	int w = 0, h = 0;
-	if (window) SDL_GL_GetDrawableSize(window, &w, &h);
-	rect->left = 0;
-	rect->top = 0;
-	rect->right = w;
-	rect->bottom = h;
-	return TRUE;
+	*w = *h = 0;
+	if (window) SDL_GL_GetDrawableSize(window, w, h);
+}
+
+// Debug aid: HK_SHOT=file.ppm saves the HK_SHOT_FRAME-th frame (default 120).
+static void DebugScreenshot()
+{
+	static int frame;
+	static const char *shot = getenv("HK_SHOT");
+	if (!shot) return;
+	int target = getenv("HK_SHOT_FRAME") ? atoi(getenv("HK_SHOT_FRAME")) : 120;
+	if (++frame != target) return;
+	GLint vp[4];
+	glGetIntegerv(GL_VIEWPORT, vp);
+	int w = vp[2], h = vp[3];
+	unsigned char *px = new unsigned char[(size_t)w * h * 3];
+	glPixelStorei(GL_PACK_ALIGNMENT, 1);
+	glReadBuffer(GL_BACK);
+	glReadPixels(vp[0], vp[1], w, h, GL_RGB, GL_UNSIGNED_BYTE, px);
+	FILE *f = fopen(shot, "wb");
+	if (f)
+	{
+		fprintf(f, "P6\n%d %d\n255\n", w, h);
+		for (int y = h - 1; y >= 0; y--) fwrite(px + (size_t)y * w * 3, 1, (size_t)w * 3, f);
+		fclose(f);
+		fprintf(stderr, "saved %s (%dx%d)\n", shot, w, h);
+	}
+	delete[] px;
+}
+
+void HKSwapWindow()
+{
+	DebugScreenshot();
+	if (window) SDL_GL_SwapWindow(window);
 }
 
 // The window is created high-DPI aware: its size (and the mouse) is in points, the
@@ -146,46 +160,46 @@ void LockCursor(int lock)
 	}
 }
 
-// Windows virtual-key code for an SDL key. Letters follow the active layout
+// The game's key code (hkkeys.h) for an SDL key. Letters follow the active layout
 // (as VK codes do on Windows); everything else follows the physical key, so
 // the digit row still gives '1'..'9' on AZERTY keyboards, as on Windows.
-static int KeyToVK(const SDL_Keysym &ks)
+static int SDLKeyToKey(const SDL_Keysym &ks)
 {
 	if (ks.sym >= SDLK_a && ks.sym <= SDLK_z) return 'A' + (ks.sym - SDLK_a);
 	SDL_Scancode sc = ks.scancode;
 	if (sc >= SDL_SCANCODE_A && sc <= SDL_SCANCODE_Z) return 'A' + (sc - SDL_SCANCODE_A);
 	if (sc >= SDL_SCANCODE_1 && sc <= SDL_SCANCODE_9) return '1' + (sc - SDL_SCANCODE_1);
-	if (sc >= SDL_SCANCODE_F1 && sc <= SDL_SCANCODE_F12) return VK_F1 + (sc - SDL_SCANCODE_F1);
-	if (sc >= SDL_SCANCODE_KP_1 && sc <= SDL_SCANCODE_KP_9) return VK_NUMPAD0 + 1 + (sc - SDL_SCANCODE_KP_1);
+	if (sc >= SDL_SCANCODE_F1 && sc <= SDL_SCANCODE_F12) return KEY_F1 + (sc - SDL_SCANCODE_F1);
+	if (sc >= SDL_SCANCODE_KP_1 && sc <= SDL_SCANCODE_KP_9) return KEY_NUMPAD0 + 1 + (sc - SDL_SCANCODE_KP_1);
 	switch (sc)
 	{
 	case SDL_SCANCODE_0: return '0';
-	case SDL_SCANCODE_KP_0: return VK_NUMPAD0;
+	case SDL_SCANCODE_KP_0: return KEY_NUMPAD0;
 	case SDL_SCANCODE_RETURN:
-	case SDL_SCANCODE_KP_ENTER: return VK_RETURN;
-	case SDL_SCANCODE_ESCAPE: return VK_ESCAPE;
-	case SDL_SCANCODE_BACKSPACE: return VK_BACK;
-	case SDL_SCANCODE_TAB: return VK_TAB;
-	case SDL_SCANCODE_SPACE: return VK_SPACE;
+	case SDL_SCANCODE_KP_ENTER: return KEY_RETURN;
+	case SDL_SCANCODE_ESCAPE: return KEY_ESCAPE;
+	case SDL_SCANCODE_BACKSPACE: return KEY_BACK;
+	case SDL_SCANCODE_TAB: return KEY_TAB;
+	case SDL_SCANCODE_SPACE: return KEY_SPACE;
 	case SDL_SCANCODE_LSHIFT:
-	case SDL_SCANCODE_RSHIFT: return VK_SHIFT;
+	case SDL_SCANCODE_RSHIFT: return KEY_SHIFT;
 	case SDL_SCANCODE_LCTRL:
 	case SDL_SCANCODE_RCTRL:
 	case SDL_SCANCODE_LGUI:
-	case SDL_SCANCODE_RGUI: return VK_CONTROL;
+	case SDL_SCANCODE_RGUI: return KEY_CONTROL;
 	case SDL_SCANCODE_LALT:
-	case SDL_SCANCODE_RALT: return VK_MENU;
-	case SDL_SCANCODE_UP: return VK_UP;
-	case SDL_SCANCODE_DOWN: return VK_DOWN;
-	case SDL_SCANCODE_LEFT: return VK_LEFT;
-	case SDL_SCANCODE_RIGHT: return VK_RIGHT;
-	case SDL_SCANCODE_INSERT: return VK_INSERT;
-	case SDL_SCANCODE_DELETE: return VK_DELETE;
-	case SDL_SCANCODE_HOME: return VK_HOME;
-	case SDL_SCANCODE_END: return VK_END;
-	case SDL_SCANCODE_PAGEUP: return VK_PRIOR;
-	case SDL_SCANCODE_PAGEDOWN: return VK_NEXT;
-	case SDL_SCANCODE_CAPSLOCK: return VK_CAPITAL;
+	case SDL_SCANCODE_RALT: return KEY_MENU;
+	case SDL_SCANCODE_UP: return KEY_UP;
+	case SDL_SCANCODE_DOWN: return KEY_DOWN;
+	case SDL_SCANCODE_LEFT: return KEY_LEFT;
+	case SDL_SCANCODE_RIGHT: return KEY_RIGHT;
+	case SDL_SCANCODE_INSERT: return KEY_INSERT;
+	case SDL_SCANCODE_DELETE: return KEY_DELETE;
+	case SDL_SCANCODE_HOME: return KEY_HOME;
+	case SDL_SCANCODE_END: return KEY_END;
+	case SDL_SCANCODE_PAGEUP: return KEY_PRIOR;
+	case SDL_SCANCODE_PAGEDOWN: return KEY_NEXT;
+	case SDL_SCANCODE_CAPSLOCK: return KEY_CAPITAL;
 	// OEM keys (US layout positions)
 	case SDL_SCANCODE_SEMICOLON: return 186;
 	case SDL_SCANCODE_EQUALS: return 187;
@@ -211,9 +225,9 @@ static void KeyDown(int vk, int repeat)
 		fprintf(stderr, "key down: vk %d ('%c')\n", vk, vk >= 32 && vk < 127 ? vk : '?');
 	if (OptionsHandleKey(vk) || ServerSetupHandleKey(vk) || BuildMenuHandleKey(vk) || SpawnScreenHandleKey(vk))
 		return;
-	if (vk == VK_ESCAPE && CloseCredits())
+	if (vk == KEY_ESCAPE && CloseCredits())
 		return;
-	if (vk == VK_ESCAPE && !GetLocalPlayer()->talking)
+	if (vk == KEY_ESCAPE && !GetLocalPlayer()->talking)
 	{
 		if (lockedcursor == 1)
 			LockCursor(0);
@@ -223,7 +237,7 @@ static void KeyDown(int vk, int repeat)
 	}
 	if (SpawnScreenBlocksKey(vk))
 		return;
-	if (vk == VK_F6 && !repeat)
+	if (vk == KEY_F6 && !repeat)
 	{
 		fullscreen = 1 - fullscreen;
 		SetScreenMode();
@@ -250,7 +264,7 @@ static void HandleEvent(const SDL_Event &ev)
 	case SDL_KEYDOWN:
 	{
 		if (HandleJoinScreenKey(ev.key.keysym.sym)) break;
-		int vk = KeyToVK(ev.key.keysym);
+		int vk = SDLKeyToKey(ev.key.keysym);
 		if (!vk) break;
 		HKSetKeyDown(vk, 1);
 		KeyDown(vk, ev.key.repeat);
@@ -258,7 +272,7 @@ static void HandleEvent(const SDL_Event &ev)
 	}
 	case SDL_KEYUP:
 	{
-		int vk = KeyToVK(ev.key.keysym);
+		int vk = SDLKeyToKey(ev.key.keysym);
 		if (!vk) break;
 		HKSetKeyDown(vk, 0);
 		HandleKeyUp(vk, (1u << 30) | (1u << 31));
@@ -287,7 +301,7 @@ static void HandleEvent(const SDL_Event &ev)
 	case SDL_MOUSEBUTTONDOWN:
 		if (ev.button.button == SDL_BUTTON_LEFT)
 		{
-			HKSetKeyDown(VK_LBUTTON, 1);
+			HKSetKeyDown(KEY_LBUTTON, 1);
 			if (IsJoinScreenOpen())
 			{
 				JoinScreenClick(ev.button.clicks);
@@ -303,25 +317,25 @@ static void HandleEvent(const SDL_Event &ev)
 				MenuMouseDown();
 				break;
 			}
-			HandleKey(VK_LBUTTON, 0);
+			HandleKey(KEY_LBUTTON, 0);
 		}
 		else if (ev.button.button == SDL_BUTTON_RIGHT)
 		{
-			HKSetKeyDown(VK_RBUTTON, 1);
-			if (OptionsHandleKey(VK_RBUTTON) || BuildMenuHandleKey(VK_RBUTTON) || SpawnScreenBlocksKey(VK_RBUTTON)) break;
-			HandleKey(VK_RBUTTON, 0);
+			HKSetKeyDown(KEY_RBUTTON, 1);
+			if (OptionsHandleKey(KEY_RBUTTON) || BuildMenuHandleKey(KEY_RBUTTON) || SpawnScreenBlocksKey(KEY_RBUTTON)) break;
+			HandleKey(KEY_RBUTTON, 0);
 		}
 		break;
 	case SDL_MOUSEBUTTONUP:
 		if (ev.button.button == SDL_BUTTON_LEFT)
 		{
-			HKSetKeyDown(VK_LBUTTON, 0);
-			HandleKeyUp(VK_LBUTTON, 0);
+			HKSetKeyDown(KEY_LBUTTON, 0);
+			HandleKeyUp(KEY_LBUTTON, 0);
 		}
 		else if (ev.button.button == SDL_BUTTON_RIGHT)
 		{
-			HKSetKeyDown(VK_RBUTTON, 0);
-			HandleKeyUp(VK_RBUTTON, 0);
+			HKSetKeyDown(KEY_RBUTTON, 0);
+			HandleKeyUp(KEY_RBUTTON, 0);
 		}
 		break;
 	case SDL_MOUSEWHEEL:
@@ -431,9 +445,9 @@ static void EnterDataDir(int argc, char **argv)
 	{
 		char probe[2100];
 		snprintf(probe, sizeof(probe), "%s/control.ini", candidates[i]);
-		if (access(probe, R_OK) == 0 && chdir(candidates[i]) == 0) return;
+		if (HKFileExists(probe) && HKChangeDir(candidates[i])) return;
 	}
-	if (access("control.ini", R_OK) != 0)
+	if (!HKFileExists("control.ini"))
 		fprintf(stderr, "Edifice data folder not found; pass its path as the first argument.\n");
 }
 
@@ -490,8 +504,6 @@ int main(int argc, char **argv)
 	// HK_SHOT captures: no vsync, whose swap waits forever while the display sleeps (macOS)
 	if (getenv("HK_SHOT")) vsync = 0;
 	SDL_GL_SetSwapInterval(vsync);
-	hWnd = (HWND)window;
-	hdc = (HDC)window;
 	UpdateViewport();
 	SDL_StartTextInput();
 
@@ -505,7 +517,7 @@ int main(int argc, char **argv)
 	LoadStartupTextures();
 
 	consolevisible = 1;
-	InitSound(hWnd);
+	InitSound();
 	VoiceInit();
 	LoadSounds();
 	LoadHighTextures();
@@ -602,7 +614,7 @@ int main(int argc, char **argv)
 			GetLocalPlayer()->talking = 2;
 			ChatHandleText("Ca marche, j'arrive \xc3\xa0 la tour");
 		}
-		if (!strcmp(m, "serverstart")) { OpenServerSetup(); ServerSetupHandleKey(VK_RETURN); }
+		if (!strcmp(m, "serverstart")) { OpenServerSetup(); ServerSetupHandleKey(KEY_RETURN); }
 		if (!strcmp(m, "player")) { OpenOptions(); mousepos = Vector(.24f, .83f, 0); OptionsClick(); }
 	}
 
@@ -647,11 +659,7 @@ int main(int argc, char **argv)
 				fprintf(stderr, "HK_JOIN: %s\n", reason);
 		}
 
-		LARGE_INTEGER time;
-		LARGE_INTEGER freq;
-		QueryPerformanceFrequency(&freq);
-		QueryPerformanceCounter(&time);
-		curtime = ((double)time.QuadPart) / (double)freq.QuadPart * 1000;
+		curtime = ((double)HKPerfCounter()) / (double)HKPerfFrequency() * 1000;
 
 		// Was a 200ms WM_TIMER: scrolls the status lines.
 		if (curtime >= nexttimertick)
@@ -671,7 +679,7 @@ int main(int argc, char **argv)
 		if (((flags & SDL_WINDOW_INPUT_FOCUS) || getenv("HK_SHOT")) && !(flags & SDL_WINDOW_MINIMIZED))
 			redraw = 1;
 		else
-			Sleep(4);
+			HKSleep(4);
 		// The build menu frees the mouse but keeps drawing the game behind it.
 		if (GetLocalPlayer()->playstate == 0 || (lockedcursor == 0 && !IsBuildMenuOpen()))
 		{
@@ -709,4 +717,3 @@ int main(int argc, char **argv)
 	return 0;
 }
 
-#endif // !HK_WIN32_NATIVE

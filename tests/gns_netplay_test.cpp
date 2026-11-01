@@ -9,7 +9,8 @@
 // with another info port (the connection goes to gnsport all the same).
 // Run by tests/run_gns_netplay_test.sh.
 
-#include "win32compat.h"
+#include "hksocket.h"
+#include "hktime.h"
 #include <chrono>
 #include <thread>
 #include <steam/steamnetworkingsockets.h>
@@ -19,17 +20,11 @@
 #include "netmsg.h"
 #include "gnslink.h"
 
-#ifndef _WIN32
-DWORD GetTickCount()   //win32compat.cpp isn't linked
+uint32_t HKTicks()   //system_sdl.cpp isn't linked: no SDL here
 {
 	using namespace std::chrono;
-	return (DWORD)duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+	return (uint32_t)duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
 }
-SOCKET WSASocket(int af,int type,int protocol,void *,int,DWORD)   //UdpLink: unused here
-{
-	return socket(af,type,protocol);
-}
-#endif
 
 static const int INFOPORT=27020;
 static int gnsport=27021;
@@ -108,12 +103,12 @@ static int Enter(Client &c)
 	SOCKADDR_IN source;
 	char trailer[300];
 	int trailerlen=-1;
-	DWORD start=GetTickCount(),last=0;
-	while(GetTickCount()-start<20000&&c.slot<0)
+	DWORD start=HKTicks(),last=0;
+	while(HKTicks()-start<20000&&c.slot<0)
 	{
-		if(GetTickCount()-last>500)
+		if(HKTicks()-last>500)
 		{
-			last=GetTickCount();
+			last=HKTicks();
 			if(trailerlen<0)
 				SendSimpleTo(c.infosock,REQUESTINFO,0,0,0);
 			else
@@ -221,8 +216,8 @@ static int Join(Client &c)
 	c.datasock->filterip=1;
 	SendSimpleTo(c.datasock,PORTACK,c.port,0,1);
 	c.infosock->Close();   //as the game does: the connection goes on with the data link
-	DWORD start=GetTickCount();
-	while(GetTickCount()-start<20000&&!c.joined)
+	DWORD start=HKTicks();
+	while(HKTicks()-start<20000&&!c.joined)
 	{
 		Pump(c);
 		Wait(5);
@@ -274,7 +269,7 @@ int main(int argc,char **argv)
 	if(failures) return 1;
 
 	//play: next to the host, both send their position, Alice talks
-	for(DWORD start=GetTickCount();GetTickCount()-start<5000&&!a.hostknown;)
+	for(DWORD start=HKTicks();HKTicks()-start<5000&&!a.hostknown;)
 	{
 		Pump(a);
 		Pump(b);

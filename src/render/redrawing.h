@@ -1,7 +1,7 @@
 #ifndef REDRAWINGH
 #define REDRAWINGH
 
-#include "win32compat.h"
+#include "hktypes.h"
 #include "vector.h"
 
 #define MAXSCENERY 100
@@ -12,8 +12,8 @@
 
 void LoadTextures();
 void Redraw();
-int GetTexID(LPCTSTR name);
-void LoadRandom(LPCTSTR dir,int texnum);
+int GetTexID(const char *name);
+void LoadRandom(const char *dir,int texnum);
 void LoadGuns();
 void RedrawSplash(int texnum,char *text);
 void LoadSpriteTextures();
@@ -21,7 +21,7 @@ void LoadBlockTextures();
 void LoadHighTextures();
 void LoadLogoTextures();
 void RedrawSplash(int texnum,char *text,int drawlogo);
-void GetRandom(LPCTSTR dir,char name[255]);
+void GetRandom(const char *dir,char name[255]);
 int GetNumScenery();
 void DrawBlock(int x,int y,int z,char ds,char type,int &px,int &py,int &pz,char red);
 void DrawConsole();

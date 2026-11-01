@@ -1,6 +1,6 @@
 //GnsLink: DatagramLink over GameNetworkingSockets connections (see gnslink.h)
 
-#include "win32compat.h"
+#include "hksocket.h"
 #include <deque>
 #include <string>
 #include <vector>
@@ -95,7 +95,7 @@ static void Forget(GnsConn *c)
 static SOCKADDR_IN PseudoAddress(const SteamNetworkingIPAddr &remote,int p2p)
 {
 	SOCKADDR_IN addr;
-	ZeroMemory(&addr,sizeof(addr));
+	memset(&addr,0,sizeof(addr));
 	addr.sin_family=AF_INET;
 	if(remote.IsIPv4()&&!p2p)
 	{

@@ -17,6 +17,7 @@ std::string HKResolvePath(const char *path);          //host path (UTF-8), case 
 FILE *HKFileOpen(const char *path, const char *mode);  //fopen, UTF-8 path also on Windows
 char *HKReadFile(const char *path, long *size);        //whole file plus a NUL (delete[]), 0 if unreadable
 int HKFileExists(const char *path);                    //1 if a file or folder is there
+int HKChangeDir(const char *path);                     //1 if it is now the working directory
 int HKMakeDir(const char *path);                       //1 if the folder exists or was created
 int HKRenameFile(const char *from, const char *to);    //1 if moved; replaces the destination
 

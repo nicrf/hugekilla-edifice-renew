@@ -1,6 +1,6 @@
 //Signaling client of GnsLink's P2P connections (see gnssignal.h)
 
-#include "win32compat.h"
+#include "hksocket.h"
 #include <atomic>
 #include <chrono>
 #include <deque>

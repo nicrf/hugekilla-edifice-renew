@@ -5,7 +5,6 @@
 #include "platform.h"
 #include "models.h"
 #include "cfgfile.h"
-#include "resource.h"
 #include "multiplay.h"
 #include "land.h"
 #include "hugekilla.h"
@@ -27,16 +26,15 @@
 #include "lobbygame.h"
 #include "anticheat.h"
 #include "hmac.h"
+#include "hktime.h"
 #include <stdarg.h>
 #define MAXLOCALLIST 128
 #define PEERTIMEOUT 70000     //ms without a message before a peer is dropped
 #define SERVERSILENCE 10000   //ms: the server is gone, once in the game (ClientLoop)
-#ifndef HK_WIN32_NATIVE
 #ifndef _WIN32
 #include <netdb.h>
 #endif
 #include <SDL.h>
-#endif
 
 
 RemoteGameData rgd;
@@ -54,6 +52,12 @@ int numplayers;
 //slot behind (PLAYERLEFT_KEEPSLOTS), the others keep their numbers. The host is 0.
 static char slotused[MAXPLAYERS];
 
+//two 16-bit values in a message's DWORD (PINGINFO: ping, packet loss)
+static DWORD PackWords(int lo,int hi)
+{
+	return (DWORD)(WORD)lo|(DWORD)(WORD)hi<<16;
+}
+
 static int SlotUsed(int i)
 {
 	return i>=0&&i<numplayers&&slotused[i];
@@ -70,7 +74,6 @@ static int UsedSlots()
 	return n;
 }
 
-HWND dlghwnd;
 
 int numlocallistaddr;
 SOCKADDR_IN locallistaddr[MAXLOCALLIST];
@@ -102,7 +105,7 @@ SimpleBuf MakeSimple(char type,DWORD msg,DWORD msg2)
 SOCKADDR_IN MakeSockAddr(char a1,char a2,char a3,char a4,WORD port)
 {
 	SOCKADDR_IN addr;
-	//ZeroMemory(&addr,sizeof(addr));
+	//memset(&addr,0,sizeof(addr));
 	addr.sin_family=AF_INET;
 	addr.sin_port=port;
 	unsigned char *b=(unsigned char *)&addr.sin_addr;
@@ -399,7 +402,7 @@ static void AcNewLife(int i)
 static void AcJoin(int i)
 {
 	int caps=acplayer[i].caps;   //set at REQUESTENTER, before the second AcJoin
-	ZeroMemory(&acplayer[i],sizeof(AcPlayer));
+	memset(&acplayer[i],0,sizeof(AcPlayer));
 	AcNewLife(i);
 	acplayer[i].deathcounted=1;
 	acplayer[i].caps=caps;
@@ -892,9 +895,7 @@ static int JoinAddressProven(SOCKADDR_IN source,const HelloCaps *caps,int msglen
 void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pnum);
 void ReceivePosition(const char *msg,int msglen,int sender);
 static void RelayVoice(VoiceMessage *voice);
-#ifndef HK_WIN32_NATIVE
 static void JoinNetAddGame(const char *msg,int msglen,SOCKADDR_IN source);
-#endif
 void ReceiveChatMessage(char *msg,int msglen);
 
 
@@ -912,20 +913,15 @@ void LoadNetSettings()
 	char *playername;
 	playername=netsetfile.GetValues("name");
 	if(playername) strcpy(netsettings.playername,playername);
-#ifdef HKDS
-	strcpy(netsettings.playername,netsettings.servername);
-#endif
 }
 
 
-//initializes windows sockets
+//initializes the sockets
 
 void InitSocks()
 {
 	LoadNetSettings();
-	WORD version=MAKEWORD(2,2);
-	WSADATA vdata;
-	WSAStartup(version,&vdata);
+	HKSocketsInit();
 	static int acvars=0;
 	if(!acvars) AcInitVars();   //anti-cheat server vars (M11), after InitConsole
 	acvars=1;
@@ -939,10 +935,10 @@ void StartServer()
 	Disconnect();
 	server=1;
 	joinsecretset=0;   //a new join cookie secret for each game hosted (M11 phase 2)
-	ZeroMemory(acplayer,sizeof(acplayer));   //the host's position history of a previous game
+	memset(acplayer,0,sizeof(acplayer));   //the host's position history of a previous game
 	LoadNetSettings();
 	numplayers=1;
-	ZeroMemory(slotused,sizeof(slotused));
+	memset(slotused,0,sizeof(slotused));
 	slotused[0]=1;
 	
 	//an Internet game also listens for P2P connections, once the lobby gave it an
@@ -951,9 +947,6 @@ void StartServer()
 
 	SetLocalNum(0);
 	GetLocalPlayer()->playstate=10;
-#ifdef HKDS
-	GetLocalPlayer()->playstate=1;
-#endif
 
 	ConsoleDisplayText("Started server");
 	RedrawSplash(800,"Loading Textures");
@@ -971,9 +964,7 @@ void StartServer()
 	strcpy(GetLocalPlayer()->name,netsettings.playername);
 	curport=netsettings.datasendport;
 	LockCursor(1);
-#ifndef HKDS
 	GPlayerEnterGame(GetLocalNum());
-#endif
 	LobbyHostStart();   //announced on the Internet list if net.ini says so
 }
 
@@ -1011,7 +1002,7 @@ void Disconnect()
 	connected=0;
 	clientserverhits=0;
 	numplayers=0;
-	ZeroMemory(slotused,sizeof(slotused));
+	memset(slotused,0,sizeof(slotused));
 	VoiceReset();
 }
 
@@ -1020,7 +1011,7 @@ void CloseSocks()
 	Disconnect();
 	LobbyQuit();
 	NetLinkShutdown();
-	WSACleanup();
+	HKSocketsQuit();
 }
 
 //sent to show a change in a player's state (like playing, dead, etc.)
@@ -1103,7 +1094,7 @@ void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pn
 				static ServerObjectSnapshot snapshot;
 				static char sobjectbuf[SNAPSHOTSIZE];
 				snapshot.type=SERVEROBJECTSNAPSHOT;
-				CopyMemory(snapshot.obj,sobject,sizeof(snapshot.obj));
+				memcpy(snapshot.obj,sobject,sizeof(snapshot.obj));
 				int snapsize=WriteSnapshot(sobjectbuf,sizeof(sobjectbuf),&snapshot);
 				clientsock[pnum].SendReliable(sobjectbuf,snapsize,0);
 				SendServerVars(pnum); 
@@ -1146,9 +1137,9 @@ void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pn
 					GetPlayer(pnum)->packetloss=(1-(float)msg2/clientsock[pnum].packetssent)*30000;
 					for(int i=1;i<numplayers;i++)
 					{
-						SendSimple(i,PINGINFO,pnum,MAKEWPARAM(GetPlayer(pnum)->ping,GetPlayer(pnum)->packetloss));
+						SendSimple(i,PINGINFO,pnum,PackWords(GetPlayer(pnum)->ping,GetPlayer(pnum)->packetloss));
 					}
-					SendSimple(pnum,PINGINFO,0,MAKEWPARAM(GetPlayer(0)->ping,GetPlayer(0)->packetloss));
+					SendSimple(pnum,PINGINFO,0,PackWords(GetPlayer(0)->ping,GetPlayer(0)->packetloss));
 				}
 				break;
 			}
@@ -1495,9 +1486,7 @@ static void ServerGone(const char *why)
 	ConsoleDisplayText(text);
 	Disconnect();
 	GetLocalPlayer()->playstate=0;
-#ifndef HK_WIN32_NATIVE
 	JoinScreenShowError(why);
-#endif
 }
 
 //client calls this when it receives a simplemessage
@@ -1519,9 +1508,7 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 				ConsoleDisplayText(text);
 				Disconnect();
 				GetLocalPlayer()->playstate=0;
-#ifndef HK_WIN32_NATIVE
 				JoinScreenShowError(text);
-#endif
 				break;
 			}
 		case ENTERCOOKIE:
@@ -1555,7 +1542,7 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 					GetLocalPlayer()->timeout=curtime+PEERTIMEOUT;
 					numplayers=msg2+1;
 					//the others come with PLAYERNAMES; below us may be free slots (phase 3b)
-					ZeroMemory(slotused,sizeof(slotused));
+					memset(slotused,0,sizeof(slotused));
 					slotused[msg2]=1;
 					datasock.Open(NetOpenDataLink(msg,&source));
 					datasock.dest=source;
@@ -1603,8 +1590,8 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 		case PINGINFO:
 			{
 				if(!ValidPlayer(msg)) break;
-				GetPlayer(msg)->ping=LOWORD(msg2);
-				GetPlayer(msg)->packetloss=HIWORD(msg2);
+				GetPlayer(msg)->ping=(WORD)(msg2&0xffff);
+				GetPlayer(msg)->packetloss=(WORD)(msg2>>16);
 				break;
 			}
 		case PAIN:
@@ -1663,7 +1650,7 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 				int number=msg2;
 				if(credit>=0&&credit<(int)sizeof(GetLocalPlayer()->credits)) GetLocalPlayer()->credits[credit]=number;
 				else if(credit<0)
-					ZeroMemory(&GetLocalPlayer()->credits,sizeof(GetLocalPlayer()->credits));
+					memset(&GetLocalPlayer()->credits,0,sizeof(GetLocalPlayer()->credits));
 				break;
 			}
 	}
@@ -1701,32 +1688,8 @@ void ClientLoop()
 		{
 			case INFO:
 				{
-#ifdef HK_WIN32_NATIVE
-					if(numlocallistaddr==MAXLOCALLIST) break;
-					int i;
-					for(i=0;i<numlocallistaddr;i++)
-					{
-						if(locallistaddr[i].sin_addr.s_addr==source.sin_addr.s_addr&&
-							locallistaddr[i].sin_port==source.sin_port) break;
-					}
-					if(i!=numlocallistaddr) break;
-					char infoname[100];
-					int trailer=ReadHelloName((char *)&msg,msglen,infoname,sizeof(infoname));
-					PeerVersion peer;
-					ReadVersionTrailer((char *)&msg+trailer,msglen-trailer,&peer);
-					locallistaddr[numlocallistaddr]=source;
-					numlocallistaddr++;
-#ifdef HK_WIN32_NATIVE
-					SendDlgItemMessage(dlghwnd,IDC_LOCALGAMES,LB_ADDSTRING,0,(long)infoname);
-#else
-					JoinScreenAddGame(infoname,&peer);
-#endif
-					ConsoleDisplayText("received info");
-					break;
-#else
 					JoinNetAddGame((char *)&msg,msglen,source);
 					break;
-#endif
 				}
 			case LANDINFO:
 				{
@@ -1827,9 +1790,9 @@ void ClientLoop()
 			case SERVEROBJECTSNAPSHOT:
 				{
 					static ServerObjectSnapshot snapshot;
-					CopyMemory(snapshot.obj,sobject,sizeof(snapshot.obj));   //keeps the (unsent) timeouts
+					memcpy(snapshot.obj,sobject,sizeof(snapshot.obj));   //keeps the (unsent) timeouts
 					if(ReadSnapshot(&msg,msglen,&snapshot))
-						CopyMemory(sobject,snapshot.obj,sizeof(snapshot.obj));
+						memcpy(sobject,snapshot.obj,sizeof(snapshot.obj));
 					break;
 				}
 			case UPDATESERVEROBJECT:
@@ -1892,9 +1855,7 @@ void ClientLoop()
 
 void SockLoop()
 {
-#ifndef HK_WIN32_NATIVE
 	VoiceUpdate();   //before the loops, which flush what it sends
-#endif
 	if(server) 
 		ServerLoop();
 	else
@@ -1904,96 +1865,11 @@ void SockLoop()
 
 //window message handler for the connect dialog
 
-#ifdef HK_WIN32_NATIVE
-LRESULT CALLBACK Multiplay(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
-{
-	
-	switch (message)
-	{
-		case WM_INITDIALOG:
-			dlghwnd=hDlg;
-			LoadNetSettings();
-				return TRUE;
-		case WM_DESTROY:
-			dlghwnd=0;
-			
-				return TRUE;
-		case WM_SHOWWINDOW:
-			if(wParam)
-			{
-				infosock.Open(UdpLink::Open(netsettings.infosendport,1));
-			}
-
-				return 1;
-		case WM_COMMAND:
-			if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCANCEL) 
-			{
-				GetLocalPlayer()->playstate=0;
-				EndDialog(hDlg, 0);
-				return TRUE;
-			}
-			if(LOWORD(wParam)==IDC_PASTE)
-			{
-				OpenClipboard(hDlg);
-				HANDLE clipboard=GetClipboardData(CF_OEMTEXT);
-				CloseClipboard();
-				SetDlgItemText(hDlg,IDC_IP,(char *)clipboard);
-
-				return 1;
-			}
-			if(LOWORD(wParam)==IDC_REFRESH)
-			{
-				SOCKADDR_IN dest;
-				infosock.dest=MakeSockAddr(255,255,255,255,netsettings.infosendport);
-				SimpleBuf simple=MakeSimple(REQUESTINFO,0,0);
-				infosock.Send(simple.b,sizeof(simple.b));
-				infosock.Flush();
-				SendDlgItemMessage(dlghwnd,IDC_LOCALGAMES,LB_RESETCONTENT,0,0);
-				numlocallistaddr=0;
-				ConsoleDisplayText("Sent info request");
-				return 1;			
-			}
-			if(LOWORD(wParam)==IDC_JOININTERNET)
-			{
-				datasock.ResetReliable();
-				SOCKADDR_IN dest;
-				infosock.dest=MakeSockAddr(255,255,255,255,netsettings.infosendport);
-				char iptext[40];
-				GetWindowText(GetDlgItem(hDlg,IDC_IP),iptext,40);
-				
-				infosock.dest.sin_addr.s_addr=inet_addr(iptext);
-				SimpleBuf simple=MakeSimple(REQUESTINFO,0,0);
-				infosock.Send(simple.b,sizeof(simple.b));
-				infosock.Flush();
-				SendDlgItemMessage(dlghwnd,IDC_LOCALGAMES,LB_RESETCONTENT,0,0);
-				numlocallistaddr=0;
-				ConsoleDisplayText("Sent info request");
-				return 1;			
-			}
-			if(LOWORD(wParam)==IDC_JOINLOCAL)
-			{
-				datasock.ResetReliable();
-				HWND listhwnd=GetDlgItem(dlghwnd,IDC_LOCALGAMES);
-				int lbsel=SendMessage(listhwnd,LB_GETCURSEL,0,0);
-				if(lbsel==LB_ERR) return 1;
-				infosock.dest=locallistaddr[lbsel];
-				SendRequestEnter();
-				connected=0;
-				GetLocalPlayer()->playstate=1;
-				GetLocalPlayer()->timeout=curtime+2000;
-				EndDialog(hDlg,1);
-				ConsoleDisplayText("Sent connection request");
-			}
-			break;
-	}
-    return FALSE;
-}
-#else
 
 //---- server list for the join screen (src/ui/joinscreen.cpp draws it) ----
 
 JoinGame joingames[MAXLOCALLIST];
-static DWORD lastinfoquery;   //GetTickCount() of the last info request, for the ping
+static DWORD lastinfoquery;   //HKTicks() of the last info request, for the ping
 
 void JoinNetOpen()
 {
@@ -2030,7 +1906,7 @@ static void SendInfoRequest(SOCKADDR_IN dest)
 	SimpleBuf simple=MakeSimple(REQUESTINFO,0,0);
 	infosock.Send(simple.b,sizeof(simple.b));
 	infosock.Flush();
-	lastinfoquery=GetTickCount();
+	lastinfoquery=HKTicks();
 }
 
 void JoinNetSearchLAN()
@@ -2171,7 +2047,7 @@ static void JoinNetAddGame(const char *msg,int msglen,SOCKADDR_IN source)
 	strcpy(game.version,peer.version);
 	strncpy(game.address,inet_ntoa(source.sin_addr),sizeof(game.address)-1);
 	game.compatible=VersionCompatible(&peer,game.reason,sizeof(game.reason));
-	game.ping=GetTickCount()-lastinfoquery;
+	game.ping=HKTicks()-lastinfoquery;
 	game.players=game.maxplayers=-1;
 	if(peer.present)
 	{
@@ -2186,7 +2062,6 @@ static void JoinNetAddGame(const char *msg,int msglen,SOCKADDR_IN source)
 	}
 }
 
-#endif // HK_WIN32_NATIVE
 
 int GetNumPlayers()
 {
@@ -2275,12 +2150,12 @@ void DeletePlayer(int num,int reason)
 	if(keep)
 	{
 		//phase 3b: the slot is free, nobody else moves
-		ZeroMemory(GetPlayer(num),sizeof(Player));
+		memset(GetPlayer(num),0,sizeof(Player));
 		if(server)
 		{
-			ZeroMemory(&clientsock[num],sizeof(Sock));
+			memset(&clientsock[num],0,sizeof(Sock));
 			AcPlayerLeft(num,0);
-			ZeroMemory(&acplayer[num],sizeof(AcPlayer));
+			memset(&acplayer[num],0,sizeof(AcPlayer));
 		}
 		slotused[num]=0;
 		VoiceForget(num);
@@ -2296,14 +2171,14 @@ void DeletePlayer(int num,int reason)
 	numplayers--;
 	for(int i=num;i<numplayers;i++)
 	{
-		CopyMemory(GetPlayer(i),GetPlayer(i+1),sizeof(Player));
-		if(server) CopyMemory(&clientsock[i],&clientsock[i+1],sizeof(Sock));
+		memcpy(GetPlayer(i),GetPlayer(i+1),sizeof(Player));
+		if(server) memcpy(&clientsock[i],&clientsock[i+1],sizeof(Sock));
 		acplayer[i]=acplayer[i+1];
 		slotused[i]=slotused[i+1];
 	}
-	ZeroMemory(GetPlayer(numplayers),sizeof(Player));
-	ZeroMemory(&clientsock[numplayers],sizeof(Sock));
-	ZeroMemory(&acplayer[numplayers],sizeof(AcPlayer));
+	memset(GetPlayer(numplayers),0,sizeof(Player));
+	memset(&clientsock[numplayers],0,sizeof(Sock));
+	memset(&acplayer[numplayers],0,sizeof(AcPlayer));
 	slotused[numplayers]=0;
 	//what names players by number moves down with them: projectiles in flight here,
 	//objects carried (the server sends their new carrier: older clients don't move them)
@@ -2321,11 +2196,11 @@ void DeletePlayer(int num,int reason)
 
 void ApplyLand(const LandDefs *defs,const SkySettings *sky)
 {
-	CopyMemory(GetDefs(),defs,sizeof(LandDefs));
+	memcpy(GetDefs(),defs,sizeof(LandDefs));
 	RedrawSplash(800,"Loading Textures");
 	LoadTextures();
 	RedrawSplash(800,"Loading Sky");
-	CopyMemory(GetSkySettings(),sky,sizeof(SkySettings));
+	memcpy(GetSkySettings(),sky,sizeof(SkySettings));
 	//the sky's ambient sound, as LoadSky does on the server
 	if(strlen(GetSkySettings()->sound))
 	{
@@ -2356,8 +2231,8 @@ void SendLandInfo(int num)
 	static LandInfo landinfo;
 	static char buf[LANDINFOSIZE];
 	landinfo.type=LANDINFO;
-	CopyMemory(&landinfo.ldfs,GetDefs(),sizeof(landinfo.ldfs));
-	CopyMemory(&landinfo.skysets,GetSkySettings(),sizeof(SkySettings));
+	memcpy(&landinfo.ldfs,GetDefs(),sizeof(landinfo.ldfs));
+	memcpy(&landinfo.skysets,GetSkySettings(),sizeof(SkySettings));
 	int size=WriteLandInfo(buf,sizeof(buf),&landinfo);
 	if(num>0)
 	{
@@ -2663,19 +2538,11 @@ void ReceiveChatMessage(char *msg,int msglen)
 
 
 	char *chatmessage=chat.text;
-#ifdef HK_WIN32_NATIVE
-	char message[1000];
-#endif
 
 	if(dest==CMSG_BROADCAST||dest==CMSG_TEAM)
 	{
-#ifdef HK_WIN32_NATIVE
-		snprintf(message,sizeof(message),"%.31s: %s",ValidPlayer(sender)?GetPlayer(sender)->name:"?",chatmessage);
-		ConsoleDisplayText(message);
-#else
 		ChatAddLine(ValidPlayer(sender)?GetPlayer(sender)->name:"?",ValidPlayer(sender)?GetPlayer(sender)->team:0,
 			dest==CMSG_TEAM,chatmessage);
-#endif
 	}
 	if(dest==CMSG_SCORE)
 	{
@@ -3118,7 +2985,7 @@ void GiveCredit(int player, int credit, int number)
 			}
 			else
 			{
-				ZeroMemory(&GetPlayer(i)->credits,sizeof(GetPlayer(i)->credits));
+				memset(&GetPlayer(i)->credits,0,sizeof(GetPlayer(i)->credits));
 			}
 			SimpleBuf crd;
 			if(credit>=0)

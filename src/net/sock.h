@@ -1,7 +1,7 @@
 #ifndef SOCKH
 #define SOCKH
 
-#include "win32compat.h"   //DWORD, WORD, SOCKADDR_IN
+#include "hksocket.h"   //DWORD, WORD, SOCKADDR_IN
 
 #define MAXPACKETSIZE 1000
 #define BIGBUFSIZE 50000
@@ -63,7 +63,7 @@ private:
 		buf data;
 		int size;
 		WORD id,num;
-		DWORD resendat;   //GetTickCount() time of the next resend
+		DWORD resendat;   //HKTicks() time of the next resend
 		int resends;
 	};
 		
@@ -96,7 +96,7 @@ private:
 public:
 	Sock();
 	//what the datagrams go through (datagramlink.h), owned by the Sock; 0 when closed.
-	//A Sock is copied and zeroed with CopyMemory/ZeroMemory (multiplay.cpp), so it only
+	//A Sock is copied and zeroed with memcpy/memset (multiplay.cpp), so it only
 	//holds a pointer: the copy takes the link over.
 	DatagramLink *link;
 	void Open(DatagramLink *l);   //closes the current link first

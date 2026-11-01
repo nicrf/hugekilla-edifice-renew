@@ -4,7 +4,6 @@
 //a Play button. The player can't move or look around meanwhile. The mouse stays captured (freed, the game shows its pause menu):
 //a click anywhere fires, which spawns, as the button says; Enter or Space too.
 
-#ifndef HK_WIN32_NATIVE
 
 #include "gl.h"
 #include "platform.h"
@@ -13,6 +12,7 @@
 #include "gameplay.h"
 #include "multiplay.h"
 #include "ui.h"
+#include "hkkeys.h"
 
 #define PANELX1 -.9f
 #define PANELX2 .9f
@@ -42,7 +42,7 @@ static void Play()
 int SpawnScreenHandleKey(int vk)
 {
 	if(!IsSpawnScreenOpen()) return 0;
-	if(vk==VK_RETURN||vk==VK_SPACE)
+	if(vk==KEY_RETURN||vk==KEY_SPACE)
 	{
 		Play();
 		return 1;
@@ -56,7 +56,7 @@ int SpawnScreenBlocksKey(int vk)
 {
 	if(!IsSpawnScreenOpen()||GetLocalPlayer()->talking) return 0;
 	if(vk==controls.fire||vk==controls.talk||vk==controls.talkteam||vk==controls.pushtotalk||
-		vk==controls.showscores||vk==192||(vk>=VK_F1&&vk<=VK_F12))
+		vk==controls.showscores||vk==192||(vk>=KEY_F1&&vk<=KEY_F12))
 		return 0;
 	return 1;
 }
@@ -69,13 +69,13 @@ static const char *KeyLabel(int vk)
 	char *s=buf[n++&7];
 	switch(vk)
 	{
-	case VK_LBUTTON: return "Left click";
-	case VK_RBUTTON: return "Right click";
-	case VK_SPACE: return "Space";
-	case VK_TAB: return "Tab";
-	case VK_SHIFT: return "Shift";
-	case VK_CONTROL: return "Ctrl";
-	case VK_MENU: return "Alt";
+	case KEY_LBUTTON: return "Left click";
+	case KEY_RBUTTON: return "Right click";
+	case KEY_SPACE: return "Space";
+	case KEY_TAB: return "Tab";
+	case KEY_SHIFT: return "Shift";
+	case KEY_CONTROL: return "Ctrl";
+	case KEY_MENU: return "Alt";
 	}
 	if((vk>='A'&&vk<='Z')||(vk>='0'&&vk<='9')) snprintf(s,16,"%c",vk);
 	else snprintf(s,16,"key %d",vk);
@@ -167,4 +167,3 @@ void DrawSpawnScreen()
 	mousepos=mouse;
 }
 
-#endif

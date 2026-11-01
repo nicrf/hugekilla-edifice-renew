@@ -10,7 +10,7 @@
 #ifndef DATAGRAMLINKH
 #define DATAGRAMLINKH
 
-#include "win32compat.h"   //SOCKADDR_IN
+#include "hksocket.h"   //SOCKADDR_IN
 
 class DatagramLink
 {

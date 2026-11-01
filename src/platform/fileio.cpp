@@ -108,6 +108,13 @@ int HKFileExists(const char *path)
 	return fs::exists(HostPath(HKResolvePath(path)), ec);
 }
 
+int HKChangeDir(const char *path)
+{
+	std::error_code ec;
+	fs::current_path(HostPath(HKResolvePath(path)), ec);
+	return !ec;
+}
+
 int HKMakeDir(const char *path)
 {
 	std::error_code ec;

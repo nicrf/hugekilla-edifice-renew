@@ -1,7 +1,6 @@
 //options screen opened from the main menu: key bindings, video and audio settings.
 //everything is applied immediately and written back to control.ini when closed.
 
-#ifndef HK_WIN32_NATIVE
 
 #include "gl.h"
 #include "platform.h"
@@ -12,6 +11,7 @@
 #include "sound.h"
 #include "ui.h"
 #include "voice.h"
+#include "hkkeys.h"
 
 int showoptions;
 static int optionstab;     //0 controls, 1 video/audio, 2 player
@@ -107,17 +107,17 @@ static const char *KeyName(int vk)
 	}
 	switch(vk)
 	{
-	case VK_MENU: return "alt";
-	case VK_CONTROL: return "ctrl";
-	case VK_SHIFT: return "shift";
-	case VK_TAB: return "tab";
-	case VK_SPACE: return "space";
-	case VK_LBUTTON: return "lbutton";
-	case VK_RBUTTON: return "rbutton";
-	case VK_UP: return "up";
-	case VK_DOWN: return "down";
-	case VK_LEFT: return "left";
-	case VK_RIGHT: return "right";
+	case KEY_MENU: return "alt";
+	case KEY_CONTROL: return "ctrl";
+	case KEY_SHIFT: return "shift";
+	case KEY_TAB: return "tab";
+	case KEY_SPACE: return "space";
+	case KEY_LBUTTON: return "lbutton";
+	case KEY_RBUTTON: return "rbutton";
+	case KEY_UP: return "up";
+	case KEY_DOWN: return "down";
+	case KEY_LEFT: return "left";
+	case KEY_RIGHT: return "right";
 	}
 	return 0;
 }
@@ -345,7 +345,7 @@ int OptionsHandleKey(int vk)
 	if(!showoptions) return 0;
 	if(capturing>=0)
 	{
-		if(vk==VK_ESCAPE)
+		if(vk==KEY_ESCAPE)
 		{
 			capturing=-1;
 			return 1;
@@ -360,11 +360,11 @@ int OptionsHandleKey(int vk)
 	if(editingname)
 	{
 		int len=strlen(playername);
-		if(vk==VK_BACK&&len) playername[len-1]=0;
-		if(vk==VK_RETURN||vk==VK_ESCAPE||vk==VK_TAB) editingname=0;
+		if(vk==KEY_BACK&&len) playername[len-1]=0;
+		if(vk==KEY_RETURN||vk==KEY_ESCAPE||vk==KEY_TAB) editingname=0;
 		return 1;
 	}
-	if(vk==VK_ESCAPE) CloseOptions();
+	if(vk==KEY_ESCAPE) CloseOptions();
 	return 1;
 }
 
@@ -372,7 +372,7 @@ void OptionsClick()
 {
 	if(capturing>=0)
 	{
-		OptionsHandleKey(VK_LBUTTON);
+		OptionsHandleKey(KEY_LBUTTON);
 		return;
 	}
 	editingname=0;
@@ -490,4 +490,3 @@ void DrawOptions()
 	glColor3f(1,1,1);
 }
 
-#endif // !HK_WIN32_NATIVE

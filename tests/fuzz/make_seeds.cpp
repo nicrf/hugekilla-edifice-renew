@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-DWORD GetTickCount() { return 0; }   //win32compat.cpp isn't linked
+uint32_t HKTicks() { return 0; }   //system_sdl.cpp isn't linked: a fixed clock
 
 static std::string root;
 
