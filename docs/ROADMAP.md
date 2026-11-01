@@ -181,14 +181,20 @@ Le rendu (`src/render/`, environ 3 300 lignes) est du pipeline fixe OpenGL 2 : 4
 ### M14 - Portage web (L puis M)
 Le rendu ne pose pas de difficulté après M13 : SDL2 et sokol_gfx sont supportés par Emscripten. Les vrais obstacles sont le réseau et l'environnement du navigateur.
 - **Tâches :**
-  1. Build Emscripten **en solo et hors ligne** (preset CMake `web`) :
+  1. Build Emscripten **en solo et hors ligne** (preset CMake `web`), **sans threads** : GitHub Pages ne permet pas de définir les en-têtes COOP/COEP, donc pas de `SharedArrayBuffer` ni de pthreads Emscripten.
      - Boucle principale via `emscripten_set_main_loop`, ou Asyncify en solution de transition.
      - `data/` préchargé (`--preload-file`), `.sav` et `net.ini` dans IndexedDB (IDBFS).
      - Audio par SDL2. Le micro du chat vocal (`voice.cpp`, opus) demande la permission du navigateur.
-  2. Lobby : remplacer curl (`lobby.cpp`) par `emscripten_fetch` derrière la même interface, avec CORS activé sur `edifice-lobby`.
-  3. Réseau : le navigateur n'ouvre pas de socket UDP, et `UdpLink` comme `GnsLink` y sont donc indisponibles. Ajouter un `DatagramLink` WebRTC DataChannel (non fiable, non ordonné) qui réutilise la signalisation et le TURN de M7d. Il faut aussi un pont côté natif pour que joueurs web et natifs se rejoignent. Les threads de `gnssignal.cpp` et `lobby.cpp` sont à remplacer par de l'asynchrone ou des pthreads Emscripten, qui imposent les en-têtes COOP/COEP.
-  4. Publication : une page statique (par exemple `play.rousseaufournier.com` derrière Caddy, en-têtes COOP/COEP) et un job CI qui produit l'archive web à chaque tag `v*`.
-- **Fait quand :** une partie solo tourne dans Chrome, Firefox et Safari, puis un joueur web rejoint une partie hébergée par un client natif via le lobby public.
+     - Rendu **WebGL2 par défaut** (sokol_gfx, GLSL ES 3.00), qui tourne sur pratiquement tous les navigateurs.
+  2. Lobby : remplacer curl (`lobby.cpp`) par `emscripten_fetch` derrière la même interface. `edifice-lobby` répond avec `Access-Control-Allow-Origin` pour l'origine de la page (`https://nicrf.github.io`, plus le domaine personnalisé s'il y en a un).
+  3. Réseau : le navigateur n'ouvre pas de socket UDP, et `UdpLink` comme `GnsLink` y sont donc indisponibles. Ajouter un `DatagramLink` WebRTC DataChannel (non fiable, non ordonné) qui réutilise la signalisation et le TURN de M7d. Il faut aussi un pont côté natif pour que joueurs web et natifs se rejoignent. Les threads de `gnssignal.cpp` et `lobby.cpp` sont remplacés par de l'asynchrone dans la build web.
+  4. Publication sur **GitHub Pages** (`https://nicrf.github.io/hugekilla-edifice-renew/`, domaine personnalisé possible, par exemple `play.rousseaufournier.com`) :
+     - Un job `web` dans `.github/workflows/release.yml` installe emsdk (`mymindstorm/setup-emsdk`) et compile le preset `web` à chaque tag `v*`. Il publie le site avec `actions/upload-pages-artifact` et `actions/deploy-pages` (`permissions: pages: write, id-token: write`), et joint aussi une archive `.zip` à la release.
+     - Une PR ne compile que la build web, sans la déployer, pour garder la CI comme garde-fou.
+     - Activer Pages dans les réglages du dépôt, avec GitHub Actions comme source.
+     - Limites à respecter : 1 Go par site, 100 Mo par fichier (découper `data/` si besoin), environ 100 Go de bande passante par mois.
+  5. Build **WebGPU optionnelle** : même code, shaders WGSL générés par `sokol-shdc`. La page charge la build WebGPU si `navigator.gpu` est disponible, sinon la build WebGL2. Le job CI produit les deux. À ne faire que si un effet le justifie (compute, nombreux draw calls).
+- **Fait quand :** une partie solo tourne depuis GitHub Pages dans Chrome, Firefox et Safari, puis un joueur web rejoint une partie hébergée par un client natif via le lobby public.
 
 ## 4. Sécurité : vulnérabilités classées
 
@@ -323,7 +329,7 @@ uint32 magic 'EDV1' | uint16 protocol | uint32 layoutHash | uint8 verLen | char 
 - **Licence :** le code est sous LGPL-3.0 et Steamworks est propriétaire. Garder le SDK hors du dépôt, en dépendance optionnelle et liée dynamiquement, avec un build sans Steam complet. Une exception peut être demandée à l'auteur (license.txt:3). À faire valider par un juriste.
 - **macOS :** le hardened runtime entre en conflit avec l'overlay Steam (entitlements nécessaires). `steam_appid.txt` dépend du `chdir` d'EnterDataDir.
 - **Rendu (M13) :** la physique est couplée au rendu (playing.cpp:495-503) : le nouveau backend ne doit pas changer le pas de temps. Les GPU intégrés anciens peuvent manquer de GL 3.3, d'où le maintien du backend fixe jusqu'à la bascule.
-- **Web (M14) :** sans pont WebRTC côté natif, les joueurs web ne jouent qu'entre eux. Safari et Firefox ont un support WebGPU récent : rester sur WebGL2 par défaut.
+- **Web (M14) :** sans pont WebRTC côté natif, les joueurs web ne jouent qu'entre eux. Safari et Firefox ont un support WebGPU récent : rester sur WebGL2 par défaut. GitHub Pages n'envoie pas COOP/COEP : si des threads devenaient indispensables, il faudrait coi-serviceworker (rechargement à la première visite) ou un hébergement qui pose ces en-têtes.
 - **Gameplay :** M11 phase 3 touche à la physique couplée au rendu (playing.cpp:495-503). À faire derrière un flag.
 
 ## 7. Décisions ouvertes pour l'utilisateur
