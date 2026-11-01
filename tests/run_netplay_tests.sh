@@ -20,12 +20,15 @@ fi
 export SDL_AUDIODRIVER=dummy
 export ASAN_OPTIONS=detect_leaks=0
 export HK_AUTOSTART=1 HK_SHOT=/dev/null HK_SHOT_FRAME=999999
+# anti-cheat events on stderr (roadmap M11): net_anticheat reads them, and the
+# other tests (normal play) must not trigger any check that refuses something
+export HK_ANTICHEAT_LOG=1
 
 status=0
 # name@N: the same test in the world of HK_SEED=N, on top of the random one
 # (10, 26, 40: worlds where players 2 units apart stood ~100 units apart in height)
 for run in net_handshake net_identity net_join net_fuzz net_voice net_voice@1 net_voice@2 \
-		net_voice@3 net_voice@10 net_voice@26 net_voice@40 net_map; do
+		net_voice@3 net_voice@10 net_voice@26 net_voice@40 net_map net_anticheat; do
 	t="${run%@*}"
 	log="$LOGDIR/$run.log"
 	args=()
@@ -39,6 +42,7 @@ for run in net_handshake net_identity net_join net_fuzz net_voice net_voice@1 ne
 		args=("$map")
 		HK_MAPFILE="$map" "$BIN" >"$log" 2>&1 &
 	else
+		[ "$t" = net_anticheat ] && args=("$log")   # checks the server's log lines
 		"$BIN" >"$log" 2>&1 &
 	fi
 	pid=$!
@@ -53,6 +57,11 @@ for run in net_handshake net_identity net_join net_fuzz net_voice net_voice@1 ne
 	fi
 	kill "$pid" 2>/dev/null
 	wait "$pid" 2>/dev/null
+	if [ "$t" != net_anticheat ] && [ "$t" != net_fuzz ] &&
+			grep -E "anticheat: (kill|death|fire|ammo|build|state|ip):" "$log"; then
+		echo "anti-cheat false positive during $run"
+		status=1
+	fi
 	if grep -q "ERROR: AddressSanitizer" "$log"; then
 		echo "AddressSanitizer report during $run:"
 		cat "$log"
