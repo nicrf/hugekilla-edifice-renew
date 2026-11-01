@@ -128,9 +128,9 @@ jobs:
     # The sokol_gfx renderer (HK_RENDER_SOKOL, roadmap M13), not in the releases yet:
     # a Debug build (sokol_gfx validates every call, and every GL call on Linux)
     # without GameNetworkingSockets, its unit tests, then tests/render_smoke.py draws
-    # the menus, the console and a game: Metal on the macOS runner's virtual GPU, D3D11
-    # on Windows (the runner's basic render driver), GL 4.1 core on Linux (Mesa's
-    # llvmpipe under Xvfb). The frames are kept as artifacts.
+    # the menus and a game: Metal on the macOS runner's virtual GPU, D3D11 on Windows
+    # (the runner's basic render driver), GL 4.1 core on Linux (Mesa's llvmpipe under
+    # Xvfb). The frames are kept as artifacts.
     if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
     strategy:
       fail-fast: false
