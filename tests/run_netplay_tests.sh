@@ -29,6 +29,7 @@ for run in net_handshake net_identity net_join net_fuzz net_voice net_voice@1 ne
 	log="$LOGDIR/$run.log"
 	args=()
 	if [ "$run" != "$t" ]; then export HK_SEED="${run#*@}"; else unset HK_SEED; fi
+	if [ "$t" = net_voice ]; then export HK_VOICE_LOG=1; else unset HK_VOICE_LOG; fi
 	if [ "$t" = net_map ]; then
 		# a server started with a saved map (HK_MAPFILE), written by the test itself;
 		# absolute path: the game runs from its data folder
@@ -41,7 +42,10 @@ for run in net_handshake net_identity net_join net_fuzz net_voice net_voice@1 ne
 	fi
 	pid=$!
 	echo "== $run"
-	python3 "tests/$t.py" "${args[@]+"${args[@]}"}" || status=1
+	if ! python3 "tests/$t.py" "${args[@]+"${args[@]}"}"; then
+		status=1
+		echo "-- server log (tail):"; tail -n 60 "$log"
+	fi
 	if ! kill -0 "$pid" 2>/dev/null; then
 		echo "server died during $run"
 		status=1
