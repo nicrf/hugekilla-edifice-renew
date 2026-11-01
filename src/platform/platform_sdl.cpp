@@ -67,11 +67,24 @@ BOOL GetClientRect(HWND, RECT *rect)
 	return TRUE;
 }
 
+// The window is created high-DPI aware: its size (and the mouse) is in points, the
+// GL drawable in pixels (2x on Retina). Everything draws in the viewport, so the
+// layout stays the same and only gets sharper.
+static float pixelscale = 1;
+
 static void UpdateViewport()
 {
-	int w, h;
+	int w, h, ww, wh;
 	SDL_GL_GetDrawableSize(window, &w, &h);
+	SDL_GetWindowSize(window, &ww, &wh);
+	pixelscale = ww > 0 && w > ww ? (float)w / ww : 1;
 	glViewport(0, 0, w, h);
+}
+
+// pixels per point of the window: line widths and point sizes are in pixels
+float HKPixelScale()
+{
+	return pixelscale;
 }
 
 void SetScreenMode()
@@ -229,7 +242,8 @@ static void HandleEvent(const SDL_Event &ev)
 		quitrequested = 1;
 		break;
 	case SDL_WINDOWEVENT:
-		if (ev.window.event == SDL_WINDOWEVENT_SIZE_CHANGED)
+		// moved to a screen of another scale: same size in points, not in pixels
+		if (ev.window.event == SDL_WINDOWEVENT_SIZE_CHANGED || ev.window.event == SDL_WINDOWEVENT_DISPLAY_CHANGED)
 			UpdateViewport();
 		if (ev.window.event == SDL_WINDOWEVENT_FOCUS_LOST)
 			VoicePushToTalk(0);   // its key-up would go to another window
@@ -474,6 +488,10 @@ int main(int argc, char **argv)
 {
 	EnterDataDir(argc, argv);
 
+	// Windows: per-monitor DPI aware, with window sizes in scaled points like on macOS,
+	// instead of a blurry bitmap stretched by the system (before SDL_Init)
+	SDL_SetHint(SDL_HINT_WINDOWS_DPI_AWARENESS, "permonitorv2");
+	SDL_SetHint(SDL_HINT_WINDOWS_DPI_SCALING, "1");
 	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER) != 0)
 	{
 		fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
@@ -502,7 +520,7 @@ int main(int argc, char **argv)
 	SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
 	SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
 	window = SDL_CreateWindow("Edifice", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-		width, height, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE |
+		width, height, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI |
 		(fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0));
 	if (!window)
 	{

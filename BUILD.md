@@ -114,8 +114,9 @@ Les données viennent de Windows (insensible à la casse) : hors Windows, `HKPat
 
 ## Écrans ajoutés
 
-- **Server Setup** (bouton Server) : nom du serveur, mode (capture du drapeau / bac à sable), captures pour gagner, limite de temps, ciel, relief, décor, carte ; « Random » pour ciel/relief/décor et bouton « Randomize all ». « Map » : « New random » (un nouveau terrain, par défaut) ou une des cartes sauvegardées (voir plus bas), qui apporte alors son ciel, son relief, son décor et ses bâtiments. Sauvegardé dans `sv.ini` / `net.ini` (`servermap`).
-- **Multiplayer Game** (bouton Play) : IP ou nom d'hôte, recherche LAN (F5).
+- **Server Setup** (bouton Server) : nom du serveur, mode (capture du drapeau / bac à sable), captures pour gagner, limite de temps, ciel, relief, décor, carte ; « Random » pour ciel/relief/décor et bouton « Randomize all ». « Map » : « New random » (un nouveau terrain, par défaut) ou une des cartes sauvegardées (voir plus bas), qui apporte alors son ciel, son relief, son décor et ses bâtiments. Sauvegardé dans `sv.ini` / `net.ini` (`servermap`). Clavier : Haut/Bas (ou Tab) choisit une ligne, Gauche/Droite la change, Entrée démarre, Échap revient.
+- **Join a game** (bouton Play) : onglets LAN / IP (IP ou nom d'hôte, recherche LAN) et Internet (parties publiques du lobby, code de partie). Clavier : Tab passe d'un champ à l'autre, Entrée ajoute l'adresse / cherche le code ou rejoint le serveur choisi, Haut/Bas choisit, F5 rafraîchit, Échap revient.
+- Les menus (Join, Server Setup) écrivent avec la police du jeu en espacement proportionnel (`UIText` dans `src/ui/ui.cpp`, chasse mesurée sur la texture de la police). La fenêtre est « high-DPI » (`SDL_WINDOW_ALLOW_HIGHDPI`, `NSHighResolutionCapable` ; sous Windows `permonitorv2` + `SDL_HINT_WINDOWS_DPI_SCALING`) : le rendu se fait à la taille réelle en pixels (2x sur Retina, captures `HK_SHOT` comprises), la mise en page reste en points.
 - **Options** : touches, vidéo/audio (plein écran, VSync, distance d'affichage, souris, volume, volume des voix, micro), nom du joueur.
 - **Credits** : auteurs originaux.
 
