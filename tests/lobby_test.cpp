@@ -142,6 +142,26 @@ static void Parsers()
 	CHECK(LobbyAnnouncementJSON(&withid,withbody,sizeof(withbody))&&
 		strstr(withbody,"\"identity\":\"str:edifice-1\",\"session\":\"ab01\""));
 	CHECK(!strstr(withbody,"lan"));   // no LAN address: no field (what older games send)
+	CHECK(!strstr(withbody,"webrtc"));
+
+	// "webrtc" (API 4, M14 task 3): written only with an identity, read as an extra
+	LobbyAnnouncement withrtc=withid;
+	withrtc.webrtc=1;
+	CHECK(LobbyAnnouncementJSON(&withrtc,withbody,sizeof(withbody))&&
+		strstr(withbody,"\"session\":\"ab01\",\"webrtc\":true,\"port\""));
+	withrtc.identity="";
+	CHECK(LobbyAnnouncementJSON(&withrtc,withbody,sizeof(withbody))&&!strstr(withbody,"webrtc"));
+	const char *rtc="{\"id\":\"W1\",\"name\":\"n\",\"address\":\"203.0.113.7\",\"port\":27020,\"protocol\":5,"
+		"\"identity\":\"str:edifice-1\",\"webrtc\":true}";
+	CHECK(LobbyParseGame(rtc,(int)strlen(rtc),&g)==1&&g.webrtc==1);
+	const char *rtcnoid="{\"id\":\"W2\",\"name\":\"n\",\"address\":\"203.0.113.7\",\"port\":27020,\"protocol\":5,\"webrtc\":true}";
+	CHECK(LobbyParseGame(rtcnoid,(int)strlen(rtcnoid),&g)==1&&g.webrtc==0);
+	const char *rtcodd="{\"id\":\"W3\",\"name\":\"n\",\"address\":\"203.0.113.7\",\"port\":27020,\"protocol\":5,"
+		"\"identity\":\"str:edifice-1\",\"webrtc\":\"yes\"}";
+	CHECK(LobbyParseGame(rtcodd,(int)strlen(rtcodd),&g)==1&&g.webrtc==0);
+	const char *rtcfalse="{\"id\":\"W4\",\"name\":\"n\",\"address\":\"203.0.113.7\",\"port\":27020,\"protocol\":5,"
+		"\"identity\":\"str:edifice-1\",\"webrtc\":false}";
+	CHECK(LobbyParseGame(rtcfalse,(int)strlen(rtcfalse),&g)==1&&g.webrtc==0);
 
 	// LAN addresses (same network): only private IPv4 written and read, never a reason
 	// to drop the game
