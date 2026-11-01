@@ -26,7 +26,8 @@ enum TexSlot
 	TEX_GROUND0=800,        //ground textures of the land, TEX_GROUND0+i
 	TEX_SPLASH=TEX_GROUND0, //startup.bmp; the first ground texture replaces it once a land loads
 	TEX_MENU0=1300,         //main menu buttons, TEX_MENU0+button texture
-	TEX_NUMSLOTS=1400
+	TEX_FX0=1400,           //effects' procedural sprites (effects.cpp)
+	TEX_NUMSLOTS=1416
 };
 
 enum TexFilter

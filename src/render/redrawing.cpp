@@ -18,6 +18,7 @@
 #include "math.h"
 #include "multiplay.h"
 #include "sound.h"
+#include "effects.h"
 #include "ui.h"
 #include "hktime.h"
 //a vertex at a computed point: the temporary binds to the reference, where
@@ -50,7 +51,7 @@ AseObj projectile[10];
 AseObj servercobs[50][3];
 AseObj hangglider;
 GraphicsPrefs graphicsprefs;
-FxPrefs fxprefs={1};
+FxPrefs fxprefs={1,1};
 GunDrawInfo gun[10];
 
 int landfaces;
@@ -1945,6 +1946,7 @@ void Draw(float offset)
 	RPopAttrib();
 	RCullFace(RFACE_FRONT);
 	DrawWater(50,drawpos.x,drawpos.z);
+	DrawEffects();
 	
 	
 	RDisable(RCAP_TEXTURE);

@@ -7,6 +7,7 @@
 #include "playing.h"
 #include "redrawing.h"
 #include "textures.h"
+#include "effects.h"
 #include "stdio.h"
 #include <vector>
 
@@ -397,5 +398,6 @@ void LoadTextures()
 	LoadTexture("textures/water/seamlesswater.bmp",TEX_WATER);
 	LoadTexture("textures/lillypad.pxr",TEX_LILLYPAD);
 	LoadTexture("textures/gunnames.pxr",TEX_GUNNAMES);
+	FxLoadTextures();
 }
 #endif
