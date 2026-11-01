@@ -1,7 +1,12 @@
 //WebRtcLink: the DatagramLink of the web build (roadmap M14 task 3, docs/M7.md),
 //built only with Emscripten. The browser has no UDP: it joins a native host's
 //Internet game over a WebRTC DataChannel, which the host's bridge takes
-//(src/net/rtchost.h). The browser's objects are in src/platform/web/webrtc.js;
+//(src/net/rtchost.h). A browser also hosts: its info link then takes the offers
+//of browsers and desktop clients (rtchost.cpp offers too), each one a connection
+//named by a pseudo-address 0.1.x.y:0, as the native bridge names them, that
+//multiplay.cpp's server handles like any client (NetOpenPeerLink,
+//NetSourceIsConnection: DTLS proves the address, no join cookie).
+//The browser's objects are in src/platform/web/webrtc.js;
 //this side signals (rtc1: lines, signaling.h, over the lobby's WebSocket relay)
 //and makes datagrams of what comes and goes, as GnsLink does for its connections:
 //  - one DataChannel per host, carrying [uint8 channel][Sock datagram], the info
@@ -23,8 +28,9 @@ struct WebConn;
 class WebRtcLink : public DatagramLink
 {
 public:
-	//info link: what goes to an address with no connection is dropped (no UDP)
-	static WebRtcLink *OpenInfo();
+	//info link: what goes to an address with no connection is dropped (no UDP).
+	//host: a server's, which takes the offers of clients (Start first)
+	static WebRtcLink *OpenInfo(int host);
 	//data link of the connection named peer (the server), 0 if there is none
 	static WebRtcLink *OpenData(const SOCKADDR_IN *peer);
 	//the info link opened last, 0 if none is open
@@ -34,10 +40,15 @@ public:
 	static int Start(const LobbySession *session,int relayonly);
 	//closes every connection and the relay (links must be closed first)
 	static void Shutdown();
+	//host: 1 if peer names a client whose DataChannel is open (DTLS proved who it is)
+	static int IsPeer(const SOCKADDR_IN *peer);
+	//hosting an Internet game in this tab: the page asks to keep it open and visible
+	static void HostBanner(int on);
 
 	//info link: opens a connection to the host identity (Start first), named addr. 1
 	//if it is opening, or one is already open for addr.
 	int ConnectP2P(const SOCKADDR_IN *addr,const char *identity);
+	int IsHost() const { return host; }
 
 	~WebRtcLink();
 	int SendTo(const void *data,int size,const SOCKADDR_IN *to);
@@ -45,6 +56,7 @@ public:
 private:
 	WebRtcLink();
 	int channel;
+	int host;          //info link of a server: takes offers
 	WebConn *conn;     //data link: its connection
 	int nextconn;      //info link: where the next ReceiveFrom starts looking
 };

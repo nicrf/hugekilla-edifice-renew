@@ -17,8 +17,9 @@ import (
 // APIVersion goes up with each addition to the API a game may rely on: 1 the game
 // list, sessions and signaling; 2 the "lan" addresses of a game (same network);
 // 3 CORS for the web version (cors.go); 4 "webrtc" in announcements and games (a
-// host browsers can join, its identity taking WebRTC offers over the signaling relay)
-const APIVersion = 4
+// host browsers can join, its identity taking WebRTC offers over the signaling relay);
+// 5 "host": "web" for a game hosted in a browser (reached over WebRTC only)
+const APIVersion = 5
 
 // API is the HTTP JSON interface of the lobby:
 //
@@ -237,6 +238,7 @@ func (a *API) vouch(ann *Announcement) {
 	if ann.Identity != "" && !a.sessions.Check(ann.Identity, ann.Session) {
 		ann.Identity = ""
 		ann.WebRTC = false
+		ann.Host = ""
 	}
 	ann.Session = ""
 }

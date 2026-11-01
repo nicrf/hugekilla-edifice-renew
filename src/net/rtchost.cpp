@@ -6,6 +6,7 @@
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <random>
 #include <string>
 #include <vector>
 #include <rtc/rtc.hpp>
@@ -20,6 +21,7 @@
 #define RTCMAXSIGNALS 256     //signals waiting for the game thread
 #define RTCOPENTIME 30000     //ms a browser has to open its DataChannel
 #define RTCOFFERGAP 1000      //ms between two offers of one identity
+#define RTCMAXPENDING 64      //client: messages sent before the DataChannel is open
 
 class RtcInfo;
 
@@ -34,6 +36,8 @@ struct RtcPeer
 	int refs;                            //data links using it
 	unsigned int created;
 	int told;                            //its route was logged
+	int outgoing;                        //our offer to a browser host (we are its client)
+	std::vector<std::string> pending;    //outgoing: sent before the DataChannel opened
 	//locked:
 	std::shared_ptr<rtc::DataChannel> dc;
 	int up;                              //DataChannel open
@@ -50,7 +54,7 @@ struct PendingSignal
 static std::mutex lock;                  //what is marked locked, and the two below
 static std::deque<PendingSignal> signals;
 static rtc::Configuration config;
-static std::atomic<int> hostlinks(0);    //info links open: offers are taken
+static std::atomic<int> hostlinks(0);    //info links open: signals are taken
 static std::vector<std::shared_ptr<RtcPeer>> peers;   //game thread only
 static std::vector<RtcInfo *> infolinks;
 static unsigned int nextpseudo;
@@ -79,10 +83,10 @@ static RtcPeer *FindAddr(const SOCKADDR_IN *addr)
 	return 0;
 }
 
-static std::shared_ptr<RtcPeer> FindIdentity(const std::string &identity)
+static std::shared_ptr<RtcPeer> FindIdentity(const std::string &identity,int outgoing)
 {
 	for(size_t i=0;i<peers.size();i++)
-		if(peers[i]->identity==identity) return peers[i];
+		if(peers[i]->identity==identity&&peers[i]->outgoing==outgoing) return peers[i];
 	return 0;
 }
 
@@ -140,15 +144,24 @@ static int SendOn(RtcPeer *p,int channel,const void *data,int size)
 {
 	if(size<0||size+1>RTCMAXMESSAGE) return -1;
 	std::shared_ptr<rtc::DataChannel> dc;
+	int up;
 	{
 		std::lock_guard<std::mutex> l(lock);
-		if(!p->up||p->closed) return -1;
+		if(p->closed) return -1;
+		up=p->up;
 		dc=p->dc;
 	}
-	if(!dc) return -1;
 	rtc::byte buf[RTCMAXMESSAGE];
 	buf[0]=(rtc::byte)channel;
 	memcpy(&buf[1],data,size);
+	if(!up&&p->outgoing)
+	{
+		//a client's first REQUESTINFO goes out once the DataChannel opens (Pump)
+		if(p->pending.size()>=RTCMAXPENDING) return -1;
+		p->pending.push_back(std::string((const char *)buf,size+1));
+		return size;
+	}
+	if(!up||!dc) return -1;
 	try
 	{
 		dc->send(buf,size+1);   //false only means buffered
@@ -158,6 +171,22 @@ static int SendOn(RtcPeer *p,int channel,const void *data,int size)
 		return -1;   //closed meanwhile
 	}
 	return size;
+}
+
+//a message SendOn kept until the DataChannel opened
+static void SendRaw(RtcPeer *p,const std::string &m)
+{
+	std::shared_ptr<rtc::DataChannel> dc;
+	{
+		std::lock_guard<std::mutex> l(lock);
+		if(!p->up||p->closed) return;
+		dc=p->dc;
+	}
+	try
+	{
+		if(dc) dc->send((const rtc::byte *)m.data(),m.size());
+	}
+	catch(const std::exception &) {}
 }
 
 static int Pop(RtcPeer *p,int channel,void *data,int maxsize,SOCKADDR_IN *from)
@@ -242,59 +271,21 @@ static int OfferAllowed(const std::string &identity,unsigned int now)
 	return 1;
 }
 
-static void Offer(const std::string &sender,const SignalRtc &s,unsigned int now)
+//the server's info link, 0 if we don't host
+static RtcInfo *HostLink();
+
+//the callbacks of a new connection with p, both ways (game thread)
+static void Watch(const std::shared_ptr<RtcPeer> &p,char descriptionkind)
 {
-	std::shared_ptr<RtcPeer> old=FindIdentity(sender);
-	if(old&&old->cid==s.cid) return;   //sent twice
-	if(!OfferAllowed(sender,now)) return;
-	if(old)
-	{
-		//a new try from the same browser: its last one goes, unless a player uses it
-		if(old->refs) return;
-		Forget(old.get());
-	}
-	if(peers.size()>=RTCMAXPEERS||infolinks.empty())
-	{
-		fprintf(stderr,"webrtc: offer from %s ignored (%s)\n",sender.c_str(),infolinks.empty()?"not hosting":"too many browsers");
-		return;
-	}
-	std::shared_ptr<RtcPeer> p=std::make_shared<RtcPeer>();
-	p->identity=sender;
-	p->cid=s.cid;
-	p->addr=PseudoAddress();
-	p->owner=infolinks.back();
-	p->refs=0;
-	p->created=now;
-	p->told=0;
-	p->up=0;
-	p->closed=0;
-	try
-	{
-		rtc::Configuration c;
-		{
-			std::lock_guard<std::mutex> l(lock);
-			c=config;
-		}
-		p->pc=std::make_shared<rtc::PeerConnection>(c);
-	}
-	catch(const std::exception &e)
-	{
-		fprintf(stderr,"webrtc: can't create a connection: %s\n",e.what());
-		return;
-	}
 	std::weak_ptr<RtcPeer> weak=p;
-	std::string identity=sender,cid=s.cid;   //copies: the callbacks may outlive p
-	p->pc->onLocalDescription([identity,cid](rtc::Description d)
+	std::string identity=p->identity,cid=p->cid;   //copies: the callbacks may outlive p
+	p->pc->onLocalDescription([identity,cid,descriptionkind](rtc::Description d)
 	{
-		Signal(identity,'a',cid,std::string(d),"");
+		Signal(identity,descriptionkind,cid,std::string(d),"");
 	});
 	p->pc->onLocalCandidate([identity,cid](rtc::Candidate c)
 	{
 		Signal(identity,'c',cid,c.candidate(),c.mid());
-	});
-	p->pc->onDataChannel([weak](std::shared_ptr<rtc::DataChannel> dc)
-	{
-		TakeChannel(weak,dc);
 	});
 	p->pc->onStateChange([weak](rtc::PeerConnection::State state)
 	{
@@ -303,6 +294,61 @@ static void Offer(const std::string &sender,const SignalRtc &s,unsigned int now)
 		if(!p) return;
 		std::lock_guard<std::mutex> l(lock);
 		p->closed=1;
+	});
+}
+
+static std::shared_ptr<rtc::PeerConnection> NewConnection()
+{
+	rtc::Configuration c;
+	{
+		std::lock_guard<std::mutex> l(lock);
+		c=config;
+	}
+	return std::make_shared<rtc::PeerConnection>(c);
+}
+
+static void Offer(const std::string &sender,const SignalRtc &s,unsigned int now)
+{
+	std::shared_ptr<RtcPeer> old=FindIdentity(sender,0);
+	if(old&&old->cid==s.cid) return;   //sent twice
+	if(!OfferAllowed(sender,now)) return;
+	if(old)
+	{
+		//a new try from the same browser: its last one goes, unless a player uses it
+		if(old->refs) return;
+		Forget(old.get());
+	}
+	RtcInfo *host=HostLink();
+	if(peers.size()>=RTCMAXPEERS||!host)
+	{
+		fprintf(stderr,"webrtc: offer from %s ignored (%s)\n",sender.c_str(),!host?"not hosting":"too many browsers");
+		return;
+	}
+	std::shared_ptr<RtcPeer> p=std::make_shared<RtcPeer>();
+	p->identity=sender;
+	p->cid=s.cid;
+	p->addr=PseudoAddress();
+	p->owner=host;
+	p->refs=0;
+	p->created=now;
+	p->told=0;
+	p->outgoing=0;
+	p->up=0;
+	p->closed=0;
+	try
+	{
+		p->pc=NewConnection();
+	}
+	catch(const std::exception &e)
+	{
+		fprintf(stderr,"webrtc: can't create a connection: %s\n",e.what());
+		return;
+	}
+	Watch(p,'a');
+	std::weak_ptr<RtcPeer> weak=p;
+	p->pc->onDataChannel([weak](std::shared_ptr<rtc::DataChannel> dc)
+	{
+		TakeChannel(weak,dc);
 	});
 	peers.push_back(p);
 	fprintf(stderr,"webrtc: offer from %s (as %s)\n",sender.c_str(),AddrText(&p->addr));
@@ -317,17 +363,23 @@ static void Offer(const std::string &sender,const SignalRtc &s,unsigned int now)
 	}
 }
 
-static void Candidate(const std::string &sender,const SignalRtc &s)
+//a candidate of either side, or the answer of a browser host to our offer
+static void Remote(const std::string &sender,const SignalRtc &s)
 {
-	std::shared_ptr<RtcPeer> p=FindIdentity(sender);
-	if(!p||p->cid!=s.cid) return;
-	try
+	for(size_t i=0;i<peers.size();i++)
 	{
-		p->pc->addRemoteCandidate(rtc::Candidate(s.a,s.b));
-	}
-	catch(const std::exception &e)
-	{
-		fprintf(stderr,"webrtc: bad candidate from %s: %s\n",sender.c_str(),e.what());
+		std::shared_ptr<RtcPeer> p=peers[i];
+		if(p->identity!=sender||p->cid!=s.cid) continue;
+		if(s.kind=='a'&&!p->outgoing) continue;   //we answer those
+		try
+		{
+			if(s.kind=='a') p->pc->setRemoteDescription(rtc::Description(s.a,rtc::Description::Type::Answer));
+			else p->pc->addRemoteCandidate(rtc::Candidate(s.a,s.b));
+		}
+		catch(const std::exception &e)
+		{
+			fprintf(stderr,"webrtc: bad %s from %s: %s\n",s.kind=='a'?"answer":"candidate",sender.c_str(),e.what());
+		}
 	}
 }
 
@@ -343,7 +395,7 @@ static void Pump()
 	for(size_t i=0;i<in.size();i++)
 	{
 		if(in[i].s.kind=='o') Offer(in[i].sender,in[i].s,now);
-		else if(in[i].s.kind=='c') Candidate(in[i].sender,in[i].s);
+		else Remote(in[i].sender,in[i].s);
 	}
 	for(size_t i=peers.size();i-->0;)
 	{
@@ -359,13 +411,24 @@ static void Pump()
 			{
 				//the route ICE took, as GnsLink tells it (tests check it)
 				p->told=1;
+				if(p->outgoing)
+				{
+					fprintf(stderr,"webrtc: DataChannel open with %s\n",p->identity.c_str());
+					for(size_t k=0;k<p->pending.size();k++)
+						SendRaw(p,p->pending[k]);
+					p->pending.clear();
+				}
 				rtc::Candidate local,remote;
 				const char *route="";
 				try
 				{
 					if(p->pc->getSelectedCandidatePair(&local,&remote))
+					{
 						route=local.type()==rtc::Candidate::Type::Relayed||remote.type()==rtc::Candidate::Type::Relayed?
 							", relayed (TURN)":", direct";
+						if(getenv("HK_RTC_DEBUG"))
+							fprintf(stderr,"webrtc: route %s <-> %s\n",std::string(local).c_str(),std::string(remote).c_str());
+					}
 				}
 				catch(const std::exception &) {}
 				fprintf(stderr,"webrtc: connected with %s, encrypted (DTLS)%s\n",p->identity.c_str(),route);
@@ -450,7 +513,8 @@ void RtcHostSignal(const char *sender,const SignalRtc &signal)
 class RtcInfo : public DatagramLink
 {
 public:
-	RtcInfo(DatagramLink *in) : inner(in), next(0) {}
+	RtcInfo(DatagramLink *in,int h) : host(h), inner(in), next(0) {}
+	int host;   //a server's: takes offers
 	~RtcInfo()
 	{
 		for(size_t i=peers.size();i-->0;)
@@ -520,12 +584,69 @@ private:
 	std::shared_ptr<RtcPeer> p;
 };
 
-DatagramLink *RtcHostInfoLink(DatagramLink *inner)
+static RtcInfo *HostLink()
 {
-	RtcInfo *link=new RtcInfo(inner);
+	for(size_t i=infolinks.size();i-->0;)
+		if(infolinks[i]->host) return infolinks[i];
+	return 0;
+}
+
+DatagramLink *RtcHostInfoLink(DatagramLink *inner,int host)
+{
+	RtcInfo *link=new RtcInfo(inner,host);
 	infolinks.push_back(link);
 	hostlinks++;
 	return link;
+}
+
+int RtcHostIsInfoLink(DatagramLink *link)
+{
+	return link&&dynamic_cast<RtcInfo *>(link)!=0;
+}
+
+int RtcHostConnect(const SOCKADDR_IN *addr,const char *identity)
+{
+	if(infolinks.empty()) return 0;
+	RtcInfo *link=infolinks.back();
+	RtcPeer *had=FindAddr(addr);
+	if(had&&had->owner==link) return 1;
+	if(had&&!had->refs) Forget(had);
+	else if(had) return 0;
+	if(!SignalValidIdentity(identity)) return 0;
+	std::shared_ptr<RtcPeer> p=std::make_shared<RtcPeer>();
+	p->identity=identity;
+	//a new id for each try: the host drops what it had of an older one
+	static std::mt19937 rng(std::random_device{}());
+	static const char digits[]="0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+	for(int i=0;i<12;i++) p->cid+=digits[rng()%62];
+	p->addr=*addr;
+	p->owner=link;
+	p->refs=0;
+	p->created=Now();
+	p->told=0;
+	p->outgoing=1;
+	p->up=0;
+	p->closed=0;
+	try
+	{
+		p->pc=NewConnection();
+		Watch(p,'o');
+		//as a browser's: unordered, never retransmitted (Sock has its own reliable
+		//channel); creating it makes the offer
+		rtc::DataChannelInit init;
+		init.reliability.unordered=true;
+		init.reliability.maxRetransmits=0;
+		peers.push_back(p);
+		TakeChannel(p,p->pc->createDataChannel("edifice",init));
+	}
+	catch(const std::exception &e)
+	{
+		fprintf(stderr,"webrtc: can't connect to %s: %s\n",identity,e.what());
+		Forget(p.get());
+		return 0;
+	}
+	fprintf(stderr,"webrtc: connecting to %s\n",identity);
+	return 1;
 }
 
 DatagramLink *RtcHostOpenData(const SOCKADDR_IN *peer)
@@ -539,7 +660,7 @@ DatagramLink *RtcHostOpenData(const SOCKADDR_IN *peer)
 int RtcHostIsPeer(const SOCKADDR_IN *peer)
 {
 	RtcPeer *p=FindAddr(peer);
-	if(!p) return 0;
+	if(!p||p->outgoing) return 0;
 	std::lock_guard<std::mutex> l(lock);
 	return p->up&&!p->closed;
 }

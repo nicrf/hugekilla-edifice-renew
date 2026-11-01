@@ -29,6 +29,10 @@ type Server struct {
 	// WebRTC: the host also takes WebRTC DataChannels under Identity (a browser
 	// joins it, roadmap M14 task 3); only ever true with an Identity
 	WebRTC bool `json:"webrtc,omitempty"`
+	// Host: "web" when the game is hosted in a browser (API 5): it takes WebRTC
+	// only, no GameNetworkingSockets nor UDP, so a desktop client joins it over
+	// WebRTC too. Only ever set with WebRTC.
+	Host string `json:"host,omitempty"`
 	// LAN: the host's private IPv4 addresses, shown only to a player who comes
 	// from the same public address (same network, see List and Get): most routers
 	// don't let a machine reach another one of their LAN through the public address.
@@ -51,6 +55,7 @@ type Announcement struct {
 	Visibility string `json:"visibility"` // public, friends, private
 	Identity   string `json:"identity"`
 	WebRTC     bool   `json:"webrtc"` // see Server.WebRTC
+	Host       string `json:"host"`   // see Server.Host
 	// LAN: the host's private IPv4 addresses (10/8, 172.16/12, 192.168/16), for
 	// players on its network; anything else is dropped (see cleanLAN)
 	LAN []string `json:"lan"`
@@ -184,6 +189,9 @@ func (a *Announcement) validate() error {
 	if a.Identity == "" {
 		a.WebRTC = false // browsers reach a host through its identity only
 	}
+	if a.Host != "web" || !a.WebRTC {
+		a.Host = "" // a browser host is reached over WebRTC or not at all
+	}
 	switch a.Visibility {
 	case "":
 		a.Visibility = "public"
@@ -201,7 +209,7 @@ func (a *Announcement) validate() error {
 func (s *Server) apply(a Announcement) {
 	s.Name, s.Port, s.Version, s.Protocol = a.Name, a.Port, a.Version, a.Protocol
 	s.Players, s.MaxPlayers, s.Mode, s.Visibility, s.Identity = a.Players, a.MaxPlayers, a.Mode, a.Visibility, a.Identity
-	s.WebRTC = a.WebRTC
+	s.WebRTC, s.Host = a.WebRTC, a.Host
 	s.lan = a.LAN
 }
 

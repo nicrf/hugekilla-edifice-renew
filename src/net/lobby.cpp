@@ -298,6 +298,14 @@ static int GameObject(JsonIn &j,LobbyGame *g,int depth)
 			if(Peek(j)=='t') { Literal(j,"true"); g->webrtc=j.ok; }
 			else Skip(j,depth+1);
 		}
+		else if(!strcmp(key,"host"))
+		{
+			//"web" (API 5): hosted in a browser, reached over WebRTC only. An extra:
+			//anything else is a native host, the game stays valid
+			char host[8];
+			if(Peek(j)=='"') g->webhost=!String(j,host,sizeof(host))&&!strcmp(host,"web");
+			else Skip(j,depth+1);
+		}
 		else if(!strcmp(key,"port"))
 		{
 			v=IntValue(j,&valid);
@@ -338,6 +346,7 @@ static int GameObject(JsonIn &j,LobbyGame *g,int depth)
 		valid=0;
 	if(strchr(g->identity,' ')) g->identity[0]=0;
 	if(!g->identity[0]) g->webrtc=0;   //browsers reach the host through its identity
+	if(!g->webrtc) g->webhost=0;       //a browser host takes WebRTC or nothing
 	return valid&&have==31&&Alnum(g->id,LOBBY_CODELEN)&&g->name[0]&&IPv4(g->address);
 }
 
@@ -575,6 +584,8 @@ int LobbyAnnouncementJSON(const LobbyAnnouncement *a,char *out,int size)
 		Put(out,size,pos,",\"session\":")&&PutString(out,size,pos,a->session);
 	//only with an identity, like the lobby keeps it; older lobbies ignore it
 	if(ok&&a->webrtc&&a->identity&&a->identity[0]) ok=Put(out,size,pos,",\"webrtc\":true");
+	//a browser host (API 5): only with webrtc, as the lobby keeps it
+	if(ok&&a->webhost&&a->webrtc&&a->identity&&a->identity[0]) ok=Put(out,size,pos,",\"host\":\"web\"");
 	if(ok&&a->numlan>0)
 	{
 		//only private IPv4 (the lobby drops anything else too); old lobbies ignore it

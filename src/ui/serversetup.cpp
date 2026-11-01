@@ -66,8 +66,8 @@ static const char *rowlabels[SETUPROWS]=
 
 static int keyrow;             //row picked with the keyboard
 
-//1 in the web build: a game hosted in a browser is never announced (lobbygame.cpp,
-//ReadVisibility), so the Internet row says so instead of offering a listing
+//1 in the web build: a game hosted in a browser is listed (over WebRTC), but only
+//while its tab stays open and visible, and for fewer players: the help says so
 static int BrowserHost()
 {
 #ifdef __EMSCRIPTEN__
@@ -161,7 +161,6 @@ void OpenServerSetup()
 		}
 	}
 	if(!servername[0]) strcpy(servername,"Edifice Server");
-	if(BrowserHost()) visibility=0;   //saved as lan: what the game will do
 	if(skychoice<-1||skychoice>=numskies) skychoice=-1;
 	if(terrainchoice<-1||terrainchoice>=NUMTERRAINS) terrainchoice=-1;
 	if(scenerychoice<-1||scenerychoice>=NUMSCENERIES) scenerychoice=-1;
@@ -259,7 +258,7 @@ static void ChangeRow(int row,int dir)
 	case 6: Cycle(scenerychoice,NUMSCENERIES,dir); break;
 	case MAPROW: Cycle(mapchoice,nummaps,dir); setuperror[0]=0; break;
 	case INTERNETROW:
-		if(lobbyok&&!BrowserHost()) visibility=(visibility+dir+NUMVISIBILITIES)%NUMVISIBILITIES;
+		if(lobbyok) visibility=(visibility+dir+NUMVISIBILITIES)%NUMVISIBILITIES;
 		break;
 	}
 }
@@ -278,11 +277,6 @@ static int RowText(int row,char *text)
 	case 6: strcpy(text,scenerychoice>=0?scenerynames[scenerychoice]:"Random"); break;
 	case MAPROW: strcpy(text,mapchoice>=0?mapnames[mapchoice]:"New random land"); break;
 	case INTERNETROW:
-		if(BrowserHost())
-		{
-			strcpy(text,"Solo / LAN only (browser)");
-			return 0;
-		}
 		if(lobbyok) strcpy(text,visibilitynames[visibility]);
 		else
 		{
@@ -314,9 +308,9 @@ static const char *RowHelp(int row)
 	case MAPROW:
 		return mapchoice>=0?"A map saved with savemap, buildings included":"A new land from the settings above";
 	case INTERNETROW:
-		if(BrowserHost()) return "A browser can't host Internet games yet: host from the desktop version to be listed";
 		if(!lobbyok) return "Set lobby= in net.ini to announce games on the Internet";
-		if(visibility==0) return "Only players on your network see the game";
+		if(visibility==0) return BrowserHost()?"Not listed: a solo game in this browser":"Only players on your network see the game";
+		if(BrowserHost()) return "Keep this tab open and visible while you host (8 players at most)";
 		if(visibility==1) return "Listed on the Internet tab of the join screen";
 		return "Not listed: players join with the game code (console, scores)";
 	}

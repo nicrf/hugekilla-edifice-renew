@@ -192,6 +192,12 @@ static void FromLobby(JoinGame *game,const LobbyGame *g)
 		snprintf(game->reason,sizeof(game->reason),"its host doesn't take browsers (older game, or no WebRTC)");
 	}
 #endif
+	//a game hosted in a browser takes WebRTC only (lobby API 5)
+	if(game->compatible&&g->webhost&&!NetCanJoinBrowserHost())
+	{
+		game->compatible=0;
+		snprintf(game->reason,sizeof(game->reason),"it is hosted in a browser (needs WebRTC and p2p on)");
+	}
 	game->players=g->players;
 	game->maxplayers=g->maxplayers;
 	game->gamemode=g->mode;
@@ -240,6 +246,12 @@ static void JoinInternet(const LobbyGame *g)
 		joiningactive=JOINING_SESSION;
 		snprintf(status,sizeof(status),"Connecting to %s (P2P)...",g->name);
 	}
+	else if(g->webhost)
+	{
+		//a browser has no UDP port to ask directly
+		joiningactive=0;
+		snprintf(status,sizeof(status),"Can't join %s: it is hosted in a browser, and the lobby gives no P2P",g->name);
+	}
 	if(joining.numlan)
 		snprintf(status,sizeof(status),"Contacting %s on your network (%s)...",g->name,g->lan[0]);
 }
@@ -279,7 +291,13 @@ static void JoinInternetQuery(int sessionok)
 	joiningsince=HKTicks();
 	joininglastquery=joiningsince;
 	joiningp2p=sessionok&&s&&NetP2PStart(s,LobbyGetURL())&&
-		JoinNetQueryP2P(joining.address,joining.port,joining.identity);
+		JoinNetQueryP2P(joining.address,joining.port,joining.identity,joining.webhost);
+	if(!joiningp2p&&joining.webhost)
+	{
+		joiningactive=0;
+		snprintf(status,sizeof(status),"Can't join %s: it is hosted in a browser, and P2P isn't available",joining.name);
+		return;
+	}
 	if(!joiningp2p)
 	{
 		joininglastquery=joiningsince-1000;
