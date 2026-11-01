@@ -1969,13 +1969,13 @@ void ApplyLand(const LandDefs *defs,const SkySettings *sky)
 	{
 		strcpy(fullfilename,"textures\\clouds\\");
 		strcat(fullfilename,GetSkySettings()->cloudtex);
-		LoadTexture(fullfilename,2);
+		LoadTexture(fullfilename,TEX_CLOUDS);
 	}
 	if(strlen(GetSkySettings()->misttex))
 	{
 		strcpy(fullfilename,"textures\\clouds\\");
 		strcat(fullfilename,GetSkySettings()->misttex);
-		LoadTexture(fullfilename,6);
+		LoadTexture(fullfilename,TEX_CLOUDMIST);
 	}
 	RedrawSplash(800,"Creating Land");
 	CreateLand(*GetDefs());

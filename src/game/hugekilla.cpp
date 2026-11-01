@@ -120,8 +120,7 @@ int APIENTRY WinMain(HINSTANCE hInstance,
 	InitGL(hWnd);
 #endif
 	
-	LoadTexture("textures\\fonts\\courier.pxr",300);
-	LoadTexture("textures\\startup.bmp",800);
+	LoadStartupTextures();
 	
 	consolevisible=1;
 #ifndef HKDS
@@ -144,7 +143,7 @@ int APIENTRY WinMain(HINSTANCE hInstance,
 		GetPlayer(i)->fzoom=0;
 	}
 	LoadControls();
-	RedrawSplash(1,0,1);
+	RedrawSplash(TEX_SPLASH,0,1);
 	PlaySound(0,1);
 #ifdef HKDS
 	StartServer();
@@ -172,6 +171,7 @@ int APIENTRY WinMain(HINSTANCE hInstance,
 				curscreenmode=0;
 				SetScreenMode();
 #ifndef HKDS
+				TexShutdown();
 				wglMakeCurrent(0,0);
 				wglDeleteContext(hg);
 #endif
@@ -223,6 +223,7 @@ int APIENTRY WinMain(HINSTANCE hInstance,
 		}
 	}
 #ifndef HKDS
+	TexShutdown();
 	wglMakeCurrent(0,0);
 	wglDeleteContext(hg);
 #endif
@@ -597,7 +598,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 						EnableMenuItem(menu,ID_MULTIPLAY_JOINGAME,MF_ENABLED);
 						EnableMenuItem(menu,ID_MULTIPLAY_STARTSERVER,MF_ENABLED);
 						EnableMenuItem(menu,ID_MULTIPLAY_DISCONNECT,MF_GRAYED);
-						LoadTexture("textures\\startup.bmp",1);
+						LoadTexture("textures\\startup.bmp",TEX_LAND);   //legacy Win32 menu: the land slot, not TEX_SPLASH (see CreateLand)
 					}
 					break;
 				case ID_MULTIPLAY_JOINGAME:

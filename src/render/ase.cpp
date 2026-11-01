@@ -525,9 +525,9 @@ void AseObj::Draw(Vector pos,Vector x,Vector y)
 
 				glEnd();
 				if(curface->texture<5)
-					glBindTexture(GL_TEXTURE_2D,800);
+					TexBind(TEX_GROUND0);
 				else
-					glBindTexture(GL_TEXTURE_2D,curface->texture);
+					TexBind(curface->texture);
 				
 				curtex=curface->texture;
 				glBegin(GL_TRIANGLES);

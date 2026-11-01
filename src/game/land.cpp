@@ -322,7 +322,7 @@ void LoadSky()
 	strcpy(fullfilename,"textures\\clouds\\");
 	strcat(fullfilename,skysets.GetValues(title));
 	strcpy(skysettings.cloudtex,skysets.GetValues(title));
-	LoadTexture(fullfilename,2);
+	LoadTexture(fullfilename,TEX_CLOUDS);
 	strcpy(subtitle,"cloudmist");
 	char *tmp=skysets.GetValues(title);
 	if(tmp)
@@ -330,7 +330,7 @@ void LoadSky()
 		strcpy(skysettings.misttex,tmp);
 		strcpy(fullfilename,"textures\\clouds\\");
 		strcat(fullfilename,tmp);
-		LoadRaw(fullfilename,6);
+		LoadRaw(fullfilename,TEX_CLOUDMIST);
 		skysettings.usemist=1;
 	}else skysettings.usemist=0;
 	strcpy(subtitle,"sound");
@@ -524,9 +524,9 @@ void CreateLand(LandDefs &ldfs)
 	LoadLandSettings(&ls);
 	FlattenLand(0);
 	
-	//splash while the land builds (texture 800, replaced by the first ground texture below).
-	//It went to texture 1, which the land is drawn with: joined clients saw a darker world.
-	if(GetLocalPlayer()->playstate==1)LoadTexture("textures\\startup.bmp",800);
+	//splash while the land builds (TEX_SPLASH, replaced by the first ground texture below).
+	//It went to TEX_LAND, which the land is drawn with: joined clients saw a darker world.
+	if(GetLocalPlayer()->playstate==1)LoadSplashTexture();
 	int x;
 	for(x=0;x<BLOCKGRIDSIZE;x++)
 	for(int y=0;y<BLOCKGRIDHEIGHT;y++)
@@ -543,7 +543,7 @@ void CreateLand(LandDefs &ldfs)
 		strcpy(tmptext,"Creating land: ");
 		itoa((float)i/ldfs.numdefs*100,&tmptext[strlen(tmptext)],10);
 		strcat(tmptext,"% completed");
-		RedrawSplash(800,tmptext);
+		RedrawSplash(TEX_SPLASH,tmptext);
 		////Redraw(hdc);
 	}
 	for(i=0;i<20;i++)
@@ -552,11 +552,11 @@ void CreateLand(LandDefs &ldfs)
 		strcpy(tmptext,"Smoothing land (pass 1): ");
 		itoa((float)(i+1)/20*100,&tmptext[strlen(tmptext)],10);
 		strcat(tmptext,"% completed");
-		RedrawSplash(800,tmptext);
+		RedrawSplash(TEX_SPLASH,tmptext);
 		
 		////Redraw(hdc);
 	}
-	RedrawSplash(800,"Lighting land");
+	RedrawSplash(TEX_SPLASH,"Lighting land");
 	
 	float lowest=land[0][0];
 	for(x=0;x<LANDGRIDSIZE;x++)
@@ -601,7 +601,7 @@ void CreateLand(LandDefs &ldfs)
 		strcpy(tmptext,"Smoothing land (pass 2): ");
 		itoa((float)(i+1)/1*100,&tmptext[strlen(tmptext)],10);
 		strcat(tmptext,"% completed");
-		RedrawSplash(800,tmptext);
+		RedrawSplash(TEX_SPLASH,tmptext);
 		
 		////Redraw(hdc);
 	}
@@ -625,13 +625,13 @@ void CreateLand(LandDefs &ldfs)
 	}
 
 	LightLand(skysettings.sunheight);
-	RedrawSplash(800,"Loading ground texture");
+	RedrawSplash(TEX_SPLASH,"Loading ground texture");
 	char fullfilename[400];
 	for(i=0;i<ldfs.numgroundtex;i++)
 	{
 		strcpy(fullfilename,"textures\\ground\\");
 		strcat(fullfilename,ldfs.groundtex[i]);
-		LoadTexture(fullfilename,800+i);
+		LoadTexture(fullfilename,TEX_GROUND0+i);
 	}
 	CalculateWater();
 	

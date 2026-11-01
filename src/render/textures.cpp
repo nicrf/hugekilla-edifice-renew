@@ -2,6 +2,7 @@
 
 #include "StdAfx.h"
 #include "redrawing.h"
+#include "textures.h"
 #include "stdio.h"
 
 #define MAXSPRITETEX 100
@@ -25,7 +26,7 @@ int numtex;
 
 int numpost;
 
-int LoadTexture(char *filename,UINT num)
+int LoadTexture(char *filename,unsigned num)
 {
 #ifdef HKDS 
 	return 0;
@@ -41,7 +42,6 @@ int LoadTexture(char *filename,UINT num)
 	{
 		return 0;
 	}
-	glBindTexture(GL_TEXTURE_2D,num);
 	char *bits=(char *)bm.bmBits;
 
 	char *newbits=new char[bm.bmHeight*bm.bmWidth*3];
@@ -55,9 +55,7 @@ int LoadTexture(char *filename,UINT num)
 		newbits[y*bm.bmWidth*3+x*3+2]=bits[(bm.bmHeight-y-1)*bm.bmWidth*3+x*3];
 
 	}
-	int success=gluBuild2DMipmaps(GL_TEXTURE_2D,3,bm.bmWidth,bm.bmHeight,GL_RGB,GL_UNSIGNED_BYTE,newbits);
-	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_NEAREST);
+	TexUpload(num,bm.bmWidth,bm.bmHeight,3,newbits,TEXF_MIPNEAREST);
 	DeleteObject(himage);
 	delete []newbits;
 #ifndef PLMODEL
@@ -69,7 +67,7 @@ int LoadTexture(char *filename,UINT num)
 	return 1;
 }
 
-int LoadRaw(char *filename,UINT num)
+int LoadRaw(char *filename,unsigned num)
 {
 
 	HANDLE file=CreateFile(filename,GENERIC_READ,0,0,OPEN_EXISTING,0,0);
@@ -90,15 +88,7 @@ int LoadRaw(char *filename,UINT num)
 		channels/=4;
 		size*=2;
 	}while(channels>4);
-	UINT type;
-	if(channels==1) type=GL_LUMINANCE;
-	if(channels==2) type=GL_LUMINANCE_ALPHA;
-	if(channels==3) type=GL_RGB;
-	if(channels==4) type=GL_RGBA;
-	glBindTexture(GL_TEXTURE_2D,num);
-	int success=gluBuild2DMipmaps(GL_TEXTURE_2D,channels,size,size,type,GL_UNSIGNED_BYTE,bits);
-	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+	TexUpload(num,size,size,channels,bits,TEXF_MIPLINEAR);
 	delete []bits;		
 #ifndef PLMODEL
 	char consolemessage[5000];
@@ -121,7 +111,7 @@ void LoadBlockTextures()
 		strcat(tname,"wall");
 		itoa(fnum,&tname[strlen(tname)],10);
 		strcat(tname,".bmp");
-		filevalid=LoadTexture(tname,400+tnum);
+		filevalid=LoadTexture(tname,TEX_BLOCK0+tnum);
 		tnum++;
 		fnum++;
 	}
@@ -131,7 +121,7 @@ void LoadSpriteTextures()
 {
 	WIN32_FIND_DATA fd;
 	HANDLE findhand=FindFirstFile("textures\\sprite\\*.bmp",&fd);
-	int curtex=30;
+	int curtex=TEX_SPRITE0;
 	if(findhand==INVALID_HANDLE_VALUE) return;
 	int found;
 	reflecttexnum=-1;
@@ -141,7 +131,7 @@ void LoadSpriteTextures()
 		{
 			
 			char fullfilename[300]="textures\\sprite\\";
-			strcpy(texname[curtex-30],fd.cFileName);
+			strcpy(texname[curtex-TEX_SPRITE0],fd.cFileName);
 			strcat(fullfilename,fd.cFileName);
 			char rawfullfilename[300];
 			strcpy(rawfullfilename,fullfilename);
@@ -156,25 +146,25 @@ void LoadSpriteTextures()
 			if(!LoadRaw(rawfullfilename,curtex))
 				LoadTexture(fullfilename,curtex);
 			int len=strlen(fd.cFileName);
-			texused[curtex-30]=0;
+			texused[curtex-TEX_SPRITE0]=0;
 			curtex++;
 		}
 		found=FindNextFile(findhand,&fd);
 	}
 	while (found);
-	numtex=curtex-30;
+	numtex=curtex-TEX_SPRITE0;
 	
 }
 int GetTexID(LPCTSTR name)
 {
 	if(stricmp("reflect.bmp",name)==0)
-		return 1;
+		return TEX_LAND;
 	for(int i=0;i<numtex;i++)
 	{
 		if(stricmp(name,texname[i])==0)
 		{
 			texused[i]=1;
-			return i+30;
+			return i+TEX_SPRITE0;
 				
 		}
 	}
@@ -276,7 +266,7 @@ void LoadGuns()
 		if(sr)
 		{
 			strcat(fullfilename,sr);
-			LoadRaw(fullfilename,100+i*2);
+			LoadRaw(fullfilename,TEX_EXPLOSION0+i*2);
 		}
 		strcpy(wp,"explosionside0");
 		strcpy(fullfilename,"textures\\explosions\\");
@@ -284,7 +274,7 @@ void LoadGuns()
 		if(sr)
 		{
 			strcat(fullfilename,sr);
-			LoadRaw(fullfilename,101+i*2);
+			LoadRaw(fullfilename,TEX_EXPLOSION0+i*2+1);
 		}
 		
 		strcpy(wp,"offset");
@@ -407,7 +397,7 @@ void LoadHighTextures()
 	LoadBlockTextures();
 	LoadGuns();
 	
-	LoadTexture("textures\\mainmenu.pxr",1300);
+	LoadTexture("textures\\mainmenu.pxr",TEX_MENU0);
 	int numtexused=0;
 	for(int i=0;i<numtex;i++)
 	{
@@ -420,21 +410,31 @@ void LoadHighTextures()
 
 	
 }
+//font and splash, which the console and loading screens need before anything else
+void LoadStartupTextures()
+{
+	LoadTexture("textures\\fonts\\courier.pxr",TEX_FONT);
+	LoadSplashTexture();
+}
+void LoadSplashTexture()
+{
+	LoadTexture("textures\\startup.bmp",TEX_SPLASH);
+}
 void LoadTextures()
 {
 	glEnable(GL_TEXTURE_2D);
-	LoadTexture("textures\\ammoicon.bmp",10);
-	LoadTexture("textures\\healthicon.bmp",11);
+	LoadTexture("textures\\ammoicon.bmp",TEX_AMMOICON);
+	LoadTexture("textures\\healthicon.bmp",TEX_HEALTHICON);
 	
-	LoadTexture("textures\\buildicon.bmp",20);
-	LoadTexture("textures\\stationmoveicon.bmp",21);
+	LoadTexture("textures\\buildicon.bmp",TEX_CREDIT0);
+	LoadTexture("textures\\stationmoveicon.bmp",TEX_CREDIT0+1);
 
 
-	LoadTexture("textures\\sun.bmp",3);
-	LoadTexture("textures\\sunback.bmp",4);
-	LoadTexture("textures\\crosshair.bmp",5);
-	LoadTexture("textures\\water\\seamlesswater.bmp",7);
-	LoadTexture("textures\\lillypad.pxr",600);
-	LoadTexture("textures\\gunnames.pxr",15);
+	LoadTexture("textures\\sun.bmp",TEX_SUN);
+	LoadTexture("textures\\sunback.bmp",TEX_SUNBACK);
+	LoadTexture("textures\\crosshair.bmp",TEX_CROSSHAIR);
+	LoadTexture("textures\\water\\seamlesswater.bmp",TEX_WATER);
+	LoadTexture("textures\\lillypad.pxr",TEX_LILLYPAD);
+	LoadTexture("textures\\gunnames.pxr",TEX_GUNNAMES);
 }
 #endif

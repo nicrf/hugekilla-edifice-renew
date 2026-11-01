@@ -130,6 +130,7 @@ set(SOURCES
   src/render/ase.cpp
   src/render/redrawing.cpp
   src/render/textures.cpp
+  src/render/texture_gl.cpp
   src/game/cfgfile.cpp
   src/game/GamePlay.cpp
   src/game/hugekilla.cpp
