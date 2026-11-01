@@ -28,7 +28,7 @@ float waterlight[WATERGRIDSIZE][WATERGRIDSIZE];
 int numsceneries;
 static Scenery scenery[5000];  // distinct from redrawing.cpp's AseObj scenery (MSVC kept them apart by type)
 
-UINT cloudsize;
+unsigned int cloudsize;
 
 
 static int cloudposx,cloudposy;
@@ -286,7 +286,7 @@ void LoadSky()
 	if(hkforcedsky>=0&&hkforcedsky<numskies) sky=hkforcedsky;
 	char title[300];
 	strcpy(title,"sky");
-	itoa(sky,&title[strlen(title)],10);
+	sprintf(&title[strlen(title)],"%d",(int)sky);
 	char *subtitle=&title[strlen(title)];
 #define LoadSkyVal(val,fval) \
 	strcpy(subtitle,fval);\
@@ -340,7 +340,7 @@ void LoadSky()
 	do
 	{
 		strcpy(subtitle,"groundtex");
-		itoa(GetDefs()->numgroundtex,&subtitle[9],10);
+		sprintf(&subtitle[9],"%d",(int)(GetDefs()->numgroundtex));
 		char *groundtex;
 		if(groundtex=skysets.GetValues(title))
 		{
@@ -409,7 +409,7 @@ void SmoothLight()
 				((*GetLandLight(x-1,y)+*GetLandLight(x+1,y)+*GetLandLight(x,y-1)+*GetLandLight(x,y+1))/4)*.6+*GetLandLight(x,y)*.1;
 		}
 	}
-	CopyMemory(lighting,nl,LANDGRIDSIZE*LANDGRIDSIZE*4);
+	memcpy(lighting,nl,LANDGRIDSIZE*LANDGRIDSIZE*4);
 }
 
 //does the same for water
@@ -425,7 +425,7 @@ void SmoothWaterLight()
 				((*GetWaterLight(x-1,y)+*GetWaterLight(x+1,y)+*GetWaterLight(x,y-1)+*GetWaterLight(x,y+1))/4)*.6+*GetWaterLight(x,y)*.1;
 		}
 	}
-	CopyMemory(waterlight,nl,WATERGRIDSIZE*WATERGRIDSIZE*4);
+	memcpy(waterlight,nl,WATERGRIDSIZE*WATERGRIDSIZE*4);
 }
 
 //GR(x,y) is used instead of GetRepeat(x,y) for about a 200% or 300% speed improvement
@@ -446,7 +446,7 @@ void SmoothLand()
 				((GR(x-1,y)+GR(x+1,y)+GR(x,y-1)+GR(x,y+1))/4)*.2;//+GR(x,y)*0;
 		}
 	}
-	CopyMemory(land,nl,LANDGRIDSIZE*LANDGRIDSIZE*4);
+	memcpy(land,nl,LANDGRIDSIZE*LANDGRIDSIZE*4);
 }
 
 //figures out where the water will need to be drawn from the height of the land
@@ -534,20 +534,18 @@ void CreateLand(LandDefs &ldfs)
 	{
 		AddRidge(&ldfs.df[i],&ls);
 		strcpy(tmptext,"Creating land: ");
-		itoa((float)i/ldfs.numdefs*100,&tmptext[strlen(tmptext)],10);
+		sprintf(&tmptext[strlen(tmptext)],"%d",(int)((float)i/ldfs.numdefs*100));
 		strcat(tmptext,"% completed");
 		RedrawSplash(TEX_SPLASH,tmptext);
-		////Redraw(hdc);
 	}
 	for(i=0;i<20;i++)
 	{
 		SmoothLand();
 		strcpy(tmptext,"Smoothing land (pass 1): ");
-		itoa((float)(i+1)/20*100,&tmptext[strlen(tmptext)],10);
+		sprintf(&tmptext[strlen(tmptext)],"%d",(int)((float)(i+1)/20*100));
 		strcat(tmptext,"% completed");
 		RedrawSplash(TEX_SPLASH,tmptext);
 		
-		////Redraw(hdc);
 	}
 	RedrawSplash(TEX_SPLASH,"Lighting land");
 	
@@ -592,11 +590,10 @@ void CreateLand(LandDefs &ldfs)
 	{
 		SmoothLand();
 		strcpy(tmptext,"Smoothing land (pass 2): ");
-		itoa((float)(i+1)/1*100,&tmptext[strlen(tmptext)],10);
+		sprintf(&tmptext[strlen(tmptext)],"%d",(int)((float)(i+1)/1*100));
 		strcat(tmptext,"% completed");
 		RedrawSplash(TEX_SPLASH,tmptext);
 		
-		////Redraw(hdc);
 	}
 	for(i=0;i<6;i++)
 	{
@@ -634,18 +631,18 @@ void CreateLand(LandDefs &ldfs)
 	unsigned char *cloudpixels=LoadImagePixels("textures/clouds/landcloud.bmp",&cloudw,&cloudh,1);
 	if(!cloudpixels)
 	{
-		MessageBox(GetHWND(),"textures/clouds/landcloud.bmp","Texture not found",MB_OK);
+		HKMessageBox("Texture not found","textures/clouds/landcloud.bmp",0);
 		return;
 	}
 	if(cloudw!=cloudh||(size_t)cloudw*cloudh>sizeof(clouds))
 	{
 		FreeImagePixels(cloudpixels);
-		MessageBox(GetHWND(),"Ground clouds must be square, 1024x1024 at most","Texture error",MB_OK);
+		HKMessageBox("Texture error","Ground clouds must be square, 1024x1024 at most",0);
 		return;
 	}
 	cloudsize=cloudw;
 	for(int row=0;row<cloudh;row++)   //bottom row first, as the DIB section was
-		CopyMemory(&clouds[row*cloudw],&cloudpixels[(cloudh-1-row)*cloudw],cloudw);
+		memcpy(&clouds[row*cloudw],&cloudpixels[(cloudh-1-row)*cloudw],cloudw);
 	FreeImagePixels(cloudpixels);
 	numsceneries=ldfs.numscenery;
 	int numscenery=GetNumScenery();

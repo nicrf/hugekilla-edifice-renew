@@ -24,10 +24,7 @@ int numpost;
 
 int LoadTexture(char *filename,unsigned num)
 {
-#ifdef HKDS 
-	return 0;
-#endif
-	if(stricmp(&filename[strlen(filename)-4],".pxr")==0)
+	if(strcasecmp(&filename[strlen(filename)-4],".pxr")==0)
 	{
 		return LoadRaw(filename,num);;
 	}
@@ -91,7 +88,7 @@ void LoadBlockTextures()
 	{
 		strcpy(tname,"textures/block/");
 		strcat(tname,"wall");
-		itoa(fnum,&tname[strlen(tname)],10);
+		sprintf(&tname[strlen(tname)],"%d",(int)fnum);
 		strcat(tname,".bmp");
 		filevalid=LoadTexture(tname,TEX_BLOCK0+tnum);
 		tnum++;
@@ -121,13 +118,13 @@ void LoadSpriteTextures()
 	}
 	numtex=curtex-TEX_SPRITE0;
 }
-int GetTexID(LPCTSTR name)
+int GetTexID(const char *name)
 {
-	if(stricmp("reflect.bmp",name)==0)
+	if(strcasecmp("reflect.bmp",name)==0)
 		return TEX_LAND;
 	for(int i=0;i<numtex;i++)
 	{
-		if(stricmp(name,texname[i])==0)
+		if(strcasecmp(name,texname[i])==0)
 		{
 			texused[i]=1;
 			return i+TEX_SPRITE0;
@@ -140,7 +137,7 @@ int GetTexID(LPCTSTR name)
 #ifndef PLMODEL
 
 //selects a random texture from a directory
-void GetRandom(LPCTSTR dir,char name[255])
+void GetRandom(const char *dir,char name[255])
 {
 	std::vector<HKDirEntry> all=HKListDir(dir),bmps;
 	for(size_t i=0;i<all.size();i++)
@@ -150,7 +147,7 @@ void GetRandom(LPCTSTR dir,char name[255])
 	if(pick>=(int)bmps.size()) pick=bmps.size()-1;
 	strcpy(name,bmps[pick].name.c_str());
 }
-void LoadRandom(LPCTSTR dir,int texnum)
+void LoadRandom(const char *dir,int texnum)
 {
 	char fullfilename[400];
 	char filename[255];
@@ -170,7 +167,7 @@ void LoadGuns()
 	for(int i=0;i<numguns;i++)
 	{
 		strcpy(val,"gun");
-		itoa(i,&val[3],10);
+		sprintf(&val[3],"%d",(int)i);
 		wp=&val[strlen(val)];
 		strcpy(wp,"main");
 		strcpy(fullfilename,"objects/");
@@ -281,7 +278,7 @@ void LoadScenery()
 	do
 	{
 		strcpy(prop,"scenery");
-		itoa(numscenery,&prop[strlen(prop)],10);
+		sprintf(&prop[strlen(prop)],"%d",(int)numscenery);
 		filename=objcfg.GetValues(prop);
 		if(filename)
 		{

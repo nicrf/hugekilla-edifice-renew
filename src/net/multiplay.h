@@ -3,11 +3,9 @@
 #include "land.h"
 #include "vector.h"
 #include "playing.h"
-#include "win32compat.h"   //SOCKADDR_IN, LRESULT, WORD
+#include "hksocket.h"   //SOCKADDR_IN, WORD
 #include "version.h"
 
-LRESULT CALLBACK Multiplay(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
-#ifndef HK_WIN32_NATIVE
 //a server found by the join screen (LAN search, address, recent servers)
 struct JoinGame
 {
@@ -43,7 +41,6 @@ int HandleJoinScreenKey(int sdlkey);
 void HandleJoinScreenText(const char *text);
 void JoinScreenClick(int clicks);
 void DrawJoinScreen();
-#endif
 #define MAXPLAYERS 32
 void SockLoop();
 void CloseSocks();

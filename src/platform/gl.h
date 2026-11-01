@@ -5,7 +5,10 @@
 #define HK_GL_H
 
 #ifdef _WIN32
-#include "win32compat.h"   //<GL/gl.h> needs windows.h's WINGDIAPI and APIENTRY first
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>   //<GL/gl.h> needs its WINGDIAPI and APIENTRY first
 #include <GL/gl.h>
 #include <GL/glu.h>
 #elif defined(__APPLE__)

@@ -18,6 +18,7 @@
 #include "ui.h"
 #include "lobbygame.h"
 #include "netlink.h"
+#include "hktime.h"
 #include <SDL.h>
 
 #define MAXRECENT 5
@@ -214,7 +215,7 @@ static void JoinInternet(const LobbyGame *g)
 	joining=*g;
 	joiningactive=JOINING_QUERY;
 	joiningp2p=0;
-	joiningsince=GetTickCount();
+	joiningsince=HKTicks();
 	joininglastquery=joiningsince-1000;
 	joininglanquery=joiningsince-1000;
 	snprintf(status,sizeof(status),"Contacting %s at %s:%d...",g->name,g->address,g->port);
@@ -260,7 +261,7 @@ static void JoinInternetQuery(int sessionok)
 {
 	const LobbySession *s=LobbySessionGet();
 	joiningactive=JOINING_QUERY;
-	joiningsince=GetTickCount();
+	joiningsince=HKTicks();
 	joininglastquery=joiningsince;
 	joiningp2p=sessionok&&s&&NetP2PStart(s,LobbyGetURL())&&
 		JoinNetQueryP2P(joining.address,joining.port,joining.identity);
@@ -316,7 +317,7 @@ static void Update()
 		if(r>0) JoinInternet(&g);
 		else if(r<0) snprintf(status,sizeof(status),"%s",err);
 	}
-	int lan=joiningactive?JoinInternetLAN(GetTickCount()):-1;
+	int lan=joiningactive?JoinInternetLAN(HKTicks()):-1;
 	if(lan>=0)
 	{
 		fprintf(stderr,"join: %s answered on the LAN at %s\n",joining.name,JoinGameAt(lan)->address);
@@ -327,11 +328,11 @@ static void Update()
 		int r=LobbySessionResult(err,sizeof(err));
 		if(r<0) fprintf(stderr,"%s\n",err);
 		if(r) JoinInternetQuery(r>0);
-		else if(GetTickCount()-joiningsince>10000) JoinInternetQuery(0);
+		else if(HKTicks()-joiningsince>10000) JoinInternetQuery(0);
 	}
 	else if(joiningactive)
 	{
-		DWORD now=GetTickCount();
+		DWORD now=HKTicks();
 		int i=JoinNetFind(joining.address,joining.port);
 		if(i>=0) JoinInternetConnect(i);
 		else if(now-joiningsince>(joiningp2p?20000u:6000u))
@@ -409,7 +410,7 @@ static int Order(int *order)
 		{
 			JoinGame *x=GameAt(order[b-1]),*y=GameAt(order[b]);
 			int swap=0;
-			if(sortmode==SORT_NAME) swap=stricmp(x->name,y->name)>0;
+			if(sortmode==SORT_NAME) swap=strcasecmp(x->name,y->name)>0;
 			if(sortmode==SORT_PLAYERS) swap=x->players<y->players;
 			if(sortmode==SORT_PING) swap=x->ping>y->ping;
 			if(!swap) break;

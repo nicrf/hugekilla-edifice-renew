@@ -43,22 +43,22 @@ chunkhdr ReadChunkHeader(char *buf,int bufpos,int buflen)
 {
 	chunkhdr a;
 	if(bufpos<buflen-4)
-		CopyMemory(&a.type,&buf[bufpos],4);
+		memcpy(&a.type,&buf[bufpos],4);
 	bufpos+=4;
 	if(bufpos<buflen-2)
-		CopyMemory(&a.majver,&buf[bufpos],2);
+		memcpy(&a.majver,&buf[bufpos],2);
 	bufpos+=2;
 	if(bufpos<buflen-2)
-		CopyMemory(&a.minver,&buf[bufpos],2);
+		memcpy(&a.minver,&buf[bufpos],2);
 	bufpos+=2;
 	if(bufpos<buflen-4)
-		CopyMemory(&a.id,&buf[bufpos],4);
+		memcpy(&a.id,&buf[bufpos],4);
 	bufpos+=4;
 	if(bufpos<buflen-4)
-		CopyMemory(&a.parent,&buf[bufpos],4);
+		memcpy(&a.parent,&buf[bufpos],4);
 	bufpos+=4;
 	if(bufpos<buflen-4)
-		CopyMemory(&a.len,&buf[bufpos],4);
+		memcpy(&a.len,&buf[bufpos],4);
 	bufpos+=4;
 	
 	return a;
@@ -66,16 +66,16 @@ chunkhdr ReadChunkHeader(char *buf,int bufpos,int buflen)
 int ReadName(char *buf,char *&name)
 {
 	short len;
-	CopyMemory(&len,buf,2);
+	memcpy(&len,buf,2);
 	buf+=2;
 	name=new char[len];
-	CopyMemory(name,buf,len);
+	memcpy(name,buf,len);
 	return 2+len;
 }
 
 int ReadDupName(char *buf,short &dupecount,char *&name)
 {
-	CopyMemory(&dupecount,buf,2);
+	memcpy(&dupecount,buf,2);
 	buf+=2;
 	int len=ReadName(buf,name);
 	buf+=len;
@@ -84,17 +84,17 @@ int ReadDupName(char *buf,short &dupecount,char *&name)
 int ReadVertices(char *buf,asemesh *obj)
 {
 	int numpoints;
-	CopyMemory(&numpoints,buf,4);
+	memcpy(&numpoints,buf,4);
 	buf+=4;
 	obj->numpoints=numpoints;
 	obj->pnt=new spoint[numpoints];
 	for(int i=0;i<numpoints;i++)
 	{
-		CopyMemory(&obj->pnt[i].vctr.x,buf,4);
+		memcpy(&obj->pnt[i].vctr.x,buf,4);
 		buf+=4;
-		CopyMemory(&obj->pnt[i].vctr.y,buf,4);
+		memcpy(&obj->pnt[i].vctr.y,buf,4);
 		buf+=4;
-		CopyMemory(&obj->pnt[i].vctr.z,buf,4);
+		memcpy(&obj->pnt[i].vctr.z,buf,4);
 		buf+=4;
 		
 	}
@@ -140,13 +140,13 @@ void TranslateVertices(asemesh *obj,float mx[][4])
 int ReadUVVertices(char *buf,asemesh *obj)
 {
 	int numtex;
-	CopyMemory(&numtex,buf,4);
+	memcpy(&numtex,buf,4);
 	buf+=4;
 	obj->numtex=numtex;
 	obj->tex=new uv[numtex];
 	for(int i=0;i<numtex;i++)
 	{
-		CopyMemory(&obj->tex[i],buf,8);
+		memcpy(&obj->tex[i],buf,8);
 		buf+=8;
 		obj->tex[i].u*=-1;
 		obj->tex[i].v*=-1;
@@ -158,7 +158,7 @@ int ReadFaces(char *buf,asemesh *obj)
 {
 	char *obuf=buf;
 	int numface;
-	CopyMemory(&numface,buf,4);
+	memcpy(&numface,buf,4);
 	buf+=4;
 	obj->faces=new face[numface];
 	obj->numfaces=numface;
@@ -167,22 +167,22 @@ int ReadFaces(char *buf,asemesh *obj)
 	for(int i=0;i<numface;i++)
 	{
 		face *cur=&obj->faces[i];
-		CopyMemory(&flag,buf,1);
+		memcpy(&flag,buf,1);
 		buf+=1;
-		CopyMemory(&numvertex,buf,2);
+		memcpy(&numvertex,buf,2);
 		buf+=2;
 		if(flag&&F_HOLE)
 		{
 			short mat;
-			CopyMemory(&mat,buf,2);
+			memcpy(&mat,buf,2);
 			buf+=2;
 			cur->otexture=mat;
 			for(int i2=0;i2<numvertex;i2++)
 			{
 				int pref,tref;
-				CopyMemory(&pref,buf,4);
+				memcpy(&pref,buf,4);
 				buf+=4;
-				CopyMemory(&tref,buf,4);
+				memcpy(&tref,buf,4);
 				buf+=4;
 				if(i2<3)
 				{
@@ -196,7 +196,7 @@ int ReadFaces(char *buf,asemesh *obj)
 		else
 		{
 			short mat;
-			CopyMemory(&mat,buf,2);
+			memcpy(&mat,buf,2);
 			buf+=2; //for mat
 			cur->otexture=mat;
 			for(int i3=0;i3<numvertex;i3++)
@@ -204,9 +204,9 @@ int ReadFaces(char *buf,asemesh *obj)
 				int i2=i3;
 				//if(i2<2)i2=1-i2;
 				int pref,tref;
-				CopyMemory(&pref,buf,4);
+				memcpy(&pref,buf,4);
 				buf+=4;
-				CopyMemory(&tref,buf,4);
+				memcpy(&tref,buf,4);
 				buf+=4;
 				if(i2<3)
 				{
@@ -259,16 +259,16 @@ void ReadObject(char *buf,int buflen,asemesh *obj)
 	
 	buf+=ReadDupName(buf,dupecount,name);
 	Vector center,x,y,z;
-	CopyMemory(&center,buf,12);
+	memcpy(&center,buf,12);
 	buf+=12;
-	CopyMemory(&x,buf,12);
+	memcpy(&x,buf,12);
 	buf+=12;
-	CopyMemory(&z,buf,12);
+	memcpy(&z,buf,12);
 	buf+=12;
-	CopyMemory(&y,buf,12);
+	memcpy(&y,buf,12);
 	buf+=12;
 	float mx[4][4];
-	CopyMemory(mx,buf,4*4*3);
+	memcpy(mx,buf,4*4*3);
 	buf+=16*3;
 	mx[3][0]=0;
 	mx[3][1]=0;
@@ -298,33 +298,33 @@ void ReadObject(char *buf,int buflen,asemesh *obj)
 void ReadMat(char *buf,int buflen,texinfo *tx)
 {
 	short id;
-	CopyMemory(&id,buf,2);
+	memcpy(&id,buf,2);
 	tx->id=id;
 	buf+=2;
 	buf+=3; //shader,facet,facet angle
 	float red;
-	CopyMemory(&red,buf,4);
+	memcpy(&red,buf,4);
 	buf+=4;
 	float green;
-	CopyMemory(&green,buf,4);
+	memcpy(&green,buf,4);
 	buf+=4;
 	float blue;
-	CopyMemory(&blue,buf,4);
+	memcpy(&blue,buf,4);
 	buf+=4;
 	float alpha;
-	CopyMemory(&alpha,buf,4);
+	memcpy(&alpha,buf,4);
 	buf+=4;
 	float ambient;
-	CopyMemory(&ambient,buf,4);
+	memcpy(&ambient,buf,4);
 	buf+=4;
 	float specular;
-	CopyMemory(&specular,buf,4);
+	memcpy(&specular,buf,4);
 	buf+=4;
 	float highlight;
-	CopyMemory(&highlight,buf,4);
+	memcpy(&highlight,buf,4);
 	buf+=4;
 	float idxofrefract;
-	CopyMemory(&idxofrefract,buf,4);
+	memcpy(&idxofrefract,buf,4);
 	buf+=4;
 	if(buf[0]=='e'&&buf[1]==':')
 	{
@@ -345,19 +345,19 @@ void ReadMat(char *buf,int buflen,texinfo *tx)
 		for(int i=len-1;i>=0;i--)
 		{
 			if(name[i]=='\\') break;
-			MoveMemory(&filename[1],filename,299);
+			memmove(&filename[1],filename,299);
 			filename[0]=name[i];
 			filenamelen++;
 		}
 		filename[filenamelen]='\0';
 		float uoffset,voffset,urepeat,vrepeat;
-		CopyMemory(&uoffset,buf,4);
+		memcpy(&uoffset,buf,4);
 		buf+=4;
-		CopyMemory(&voffset,buf,4);
+		memcpy(&voffset,buf,4);
 		buf+=4;
-		CopyMemory(&urepeat,buf,4);
+		memcpy(&urepeat,buf,4);
 		buf+=4;
-		CopyMemory(&vrepeat,buf,4);
+		memcpy(&vrepeat,buf,4);
 		buf+=4;
 		tx->offset.u=-uoffset;
 		tx->offset.v=-voffset;
@@ -444,11 +444,8 @@ int AseObj::LoadCob(char *buf,int buflen)
 
 }
 
-int AseObj::Load(LPCTSTR fil)
+int AseObj::Load(const char *fil)
 {
-#ifdef HKDS
-	return 0;
-#endif
 	Release();
 	if(object.numobjs) return 0;
 	long filelen;

@@ -1,6 +1,6 @@
 #ifndef LANDH
 #define LANDH
-#include "win32compat.h"
+#include "hktypes.h"
 #include "vector.h"
 #define BLOCKSIZE 2
 #define WATERBLOCKSIZE 4

@@ -2,7 +2,7 @@
 #ifndef GAMEPLAY_
 #define GAMEPLAY_
 
-#include "win32compat.h"   //DWORD
+#include "hktypes.h"   //DWORD
 
 #define DOME 1
 #define WATERPUMP 2

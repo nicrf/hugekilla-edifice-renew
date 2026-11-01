@@ -11,7 +11,8 @@
 //       without
 // Run by tests/net_p2p.py, after the games themselves.
 
-#include "win32compat.h"
+#include "hksocket.h"
+#include "hktime.h"
 #include <chrono>
 #include <string>
 #include <thread>
@@ -20,17 +21,11 @@
 #include "lobby.h"
 #include "signaling.h"
 
-#ifndef _WIN32
-DWORD GetTickCount()   //win32compat.cpp isn't linked
+uint32_t HKTicks()   //system_sdl.cpp isn't linked: no SDL here
 {
 	using namespace std::chrono;
-	return (DWORD)duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+	return (uint32_t)duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
 }
-SOCKET WSASocket(int af,int type,int protocol,void *,int,DWORD)   //UdpLink: unused here
-{
-	return socket(af,type,protocol);
-}
-#endif
 
 static int failures;
 
@@ -102,8 +97,8 @@ static int Host(const char *file)
 	memset(&client,0,sizeof(client));
 	char buf[2000];
 	int done=0,pings=0;
-	DWORD start=GetTickCount();
-	while(!done&&GetTickCount()-start<60000)
+	DWORD start=HKTicks();
+	while(!done&&HKTicks()-start<60000)
 	{
 		int n;
 		while((n=info->ReceiveFrom(buf,sizeof(buf)-1,&from))>0)
@@ -153,13 +148,13 @@ static int Join(const char *hostidentity,int relay)
 	char buf[2000];
 	SOCKADDR_IN from;
 	int pong=0;
-	DWORD start=GetTickCount(),last=0;
-	while(!pong&&GetTickCount()-start<30000)
+	DWORD start=HKTicks(),last=0;
+	while(!pong&&HKTicks()-start<30000)
 	{
-		if(GetTickCount()-last>500)
+		if(HKTicks()-last>500)
 		{
 			info->SendTo("ping",4,&host);   //queued until connected
-			last=GetTickCount();
+			last=HKTicks();
 		}
 		int n;
 		while((n=info->ReceiveFrom(buf,sizeof(buf)-1,&from))>0)
@@ -170,7 +165,7 @@ static int Join(const char *hostidentity,int relay)
 		Wait(5);
 	}
 	char text[200];
-	snprintf(text,sizeof(text),"join: the host answers on the info channel (%u ms)",(unsigned)(GetTickCount()-start));
+	snprintf(text,sizeof(text),"join: the host answers on the info channel (%u ms)",(unsigned)(HKTicks()-start));
 	Check(pong,text);
 	if(!pong) return 1;
 	GnsLink *data=GnsLink::OpenData(&host);

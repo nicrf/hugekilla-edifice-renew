@@ -3,7 +3,7 @@
 #include "fuzz.h"
 #include "sock.h"
 
-DWORD GetTickCount() { return 0; }   //win32compat.cpp isn't linked
+uint32_t HKTicks() { return 0; }   //system_sdl.cpp isn't linked: a fixed clock
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data,size_t size)
 {

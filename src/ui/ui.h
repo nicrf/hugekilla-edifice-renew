@@ -1,7 +1,7 @@
 #ifndef UIH
 #define UIH
 
-#include "win32compat.h"
+#include "hktypes.h"
 
 void DrawMenu();
 void MenuMouseDown();
@@ -25,7 +25,6 @@ void BuildMenuClick();
 void BuildMenuWheel(int dir);
 int BuildMenuHandleKey(int vk);
 void DrawBuildMenu();
-#ifndef HK_WIN32_NATIVE
 void OpenOptions();
 int IsOptionsOpen();
 int OptionsHandleKey(int vk);
@@ -46,7 +45,6 @@ int IsSpawnScreenOpen();
 int SpawnScreenHandleKey(int vk);
 int SpawnScreenBlocksKey(int vk);
 void DrawSpawnScreen();
-#endif
 
 //menu screen text and widgets (ui.cpp): the HUD font (texture 300) packed by the measured
 //width of each glyph instead of DrawText's wide fixed cells; h is the height of a glyph

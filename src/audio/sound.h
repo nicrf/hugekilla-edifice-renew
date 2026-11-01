@@ -1,7 +1,7 @@
 #ifndef SOUNDH
 #define SOUNDH
 
-#include "win32compat.h"
+#include "hktypes.h"
 #include "vector.h"
 
 #ifdef PlaySound
@@ -15,7 +15,7 @@ void SetSoundPosition(int num,Vector pos);
 int LoadSound(char *filename,int num,int is3d);
 void SetSoundVolume(int num,int volume);
 int UnInitSound();
-int InitSound(HWND hwnd);
+int InitSound();
 void SetRolloff(float rolloff);
 void SetMasterVolume(float volume);
 //voice chat streams (voice.cpp), one per player: mono samples at VOICE_RATE

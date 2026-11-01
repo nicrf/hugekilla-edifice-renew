@@ -12,7 +12,7 @@ CfgFile::~CfgFile()
 {
 	if(data) delete []data;
 }
-int CfgFile::Load(LPCTSTR filename)
+int CfgFile::Load(const char *filename)
 {
 	long size;
 	char *file=HKReadFile(filename,&size);
@@ -29,7 +29,7 @@ int CfgFile::Load(LPCTSTR filename)
 	data[datalen-1]=0;
 	return 1;
 }
-int CfgFile::FindValue(LPCTSTR &title)
+int CfgFile::FindValue(const char *&title)
 {
 	if(!data) return -1;
 	char firstchar=title[0];
@@ -61,21 +61,21 @@ int CfgFile::FindValue(LPCTSTR &title)
 	}
 	return -1;
 }
-int CfgFile::GetValuei(LPCTSTR title)
+int CfgFile::GetValuei(const char *title)
 {
 	int i=FindValue(title);
 	if(i==-1) return 0;
 	return atoi(&data[i]);
 }
 
-float CfgFile::GetValuef(LPCTSTR title)
+float CfgFile::GetValuef(const char *title)
 {
 	int i=FindValue(title);
 	if(i==-1) return 0.0f;
 	return (float)atof(&data[i]);
 }
 
-Vector CfgFile::GetValuev(LPCTSTR title)
+Vector CfgFile::GetValuev(const char *title)
 {
 	int i=FindValue(title);
 	if(i==-1) return Vector();
@@ -97,7 +97,7 @@ Vector CfgFile::GetValuev(LPCTSTR title)
 	ret.z=atof(&data[i]);
 	return ret;
 }
-char * CfgFile::GetValues(LPCTSTR title)
+char * CfgFile::GetValues(const char *title)
 {
 	char * ret;
 	int i=FindValue(title);

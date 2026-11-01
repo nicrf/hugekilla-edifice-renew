@@ -1,7 +1,7 @@
 
 #ifndef PLAYINGH
 #define PLAYINGH
-#include "win32compat.h"
+#include "hktypes.h"
 #include "vector.h"
 #include "ase.h"
 
@@ -163,7 +163,6 @@ char GetRealKey(DWORD key,DWORD flags);
 void AddConsoleVar(float *var,char *name,char servervar);
 void AddConsoleVar(int *var,char *name,char servervar);
 void AddConsoleVar(char *var,char *name,char servervar);
-void DrawConsoleNonGL();
 void ConsoleDisplayText(char *text);
 void SwitchGun(int gun);
 float GetSOSpeedPenalty(char pnum);

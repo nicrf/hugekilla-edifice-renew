@@ -10,6 +10,7 @@
 #include "stdio.h"
 #include "multiplay.h"
 #include "ui.h"
+#include "hkkeys.h"
 #include <ctype.h>
 
 char consoletext[100][500];
@@ -99,9 +100,6 @@ void ConsoleDisplayText(char *text)
 	nextconsolekind=-1;
 			
 	if(consolevisible&&!consoleoverlay) DrawConsole();
-#ifdef HKDS
-	DrawConsoleNonGL();
-#endif
 
 }
 
@@ -363,8 +361,8 @@ char GetRealKey(DWORD key,DWORD flags)
 		if(key==';')key='=';
 		if(key=='?')key='/';
 		if(key==':')key=';';
-		if((!(GetKeyState(VK_SHIFT)&1<<8))&&(key>='A'&&key<='Z')) key+=32;
-		if(GetKeyState(VK_SHIFT)&1<<8) 
+		if(!HKKeyDown(KEY_SHIFT)&&(key>='A'&&key<='Z')) key+=32;
+		if(HKKeyDown(KEY_SHIFT)) 
 		{
 			switch (key)
 			{
@@ -505,17 +503,17 @@ int HandleConsoleKey(DWORD key,DWORD flags)
 {
 	int len=strlen(consolecommand);
 	if(consolecursor>len) consolecursor=len;
-	if(key==VK_TAB)
+	if(key==KEY_TAB)
 	{
 		CompleteCommand();
 	}
-	if(key==VK_UP&&curprevconsolecommand<39&&prevconsolecommand[curprevconsolecommand+1][0])
+	if(key==KEY_UP&&curprevconsolecommand<39&&prevconsolecommand[curprevconsolecommand+1][0])
 	{
 		curprevconsolecommand++;
 		strcpy(consolecommand,prevconsolecommand[curprevconsolecommand]);
 		consolecursor=strlen(consolecommand);
 	}
-	if(key==VK_DOWN)
+	if(key==KEY_DOWN)
 	if(curprevconsolecommand>=0)
 	{
 		curprevconsolecommand--;
@@ -526,32 +524,25 @@ int HandleConsoleKey(DWORD key,DWORD flags)
 		consolecursor=strlen(consolecommand);
 	}
 
-	if(key==VK_BACK&&consolecursor>0)
+	if(key==KEY_BACK&&consolecursor>0)
 	{
 		memmove(&consolecommand[consolecursor-1],&consolecommand[consolecursor],len-consolecursor+1);
 		consolecursor--;
 	}
-	if(key==VK_DELETE&&consolecursor<len)
+	if(key==KEY_DELETE&&consolecursor<len)
 		memmove(&consolecommand[consolecursor],&consolecommand[consolecursor+1],len-consolecursor);
-	if(key==VK_LEFT&&consolecursor>0) consolecursor--;
-	if(key==VK_RIGHT&&consolecursor<len) consolecursor++;
-	if(key==VK_HOME) consolecursor=0;
-	if(key==VK_END) consolecursor=len;
-	if(key==VK_PRIOR) ConsoleScroll(10);
-	if(key==VK_NEXT) ConsoleScroll(-10);
-	if(key==VK_RETURN)
+	if(key==KEY_LEFT&&consolecursor>0) consolecursor--;
+	if(key==KEY_RIGHT&&consolecursor<len) consolecursor++;
+	if(key==KEY_HOME) consolecursor=0;
+	if(key==KEY_END) consolecursor=len;
+	if(key==KEY_PRIOR) ConsoleScroll(10);
+	if(key==KEY_NEXT) ConsoleScroll(-10);
+	if(key==KEY_RETURN)
 	{
 		curprevconsolecommand=-1;
 		ConsoleCommand();
 		consolecursor=0;
 	}
-#ifdef HK_WIN32_NATIVE   //SDL builds get characters from ConsoleHandleText
-	char realkey=GetRealKey(key,flags);
-	if(realkey) InsertConsoleChar(realkey);
-#endif
-#ifdef HKDS
-	DrawConsoleNonGL();
-#endif
 	return 1;
 
 }
@@ -670,29 +661,6 @@ void InitConsole()
 
 	AddConsoleVar(&graphicsprefs.stereoseparation,"stereoseperation",0);
 
-}
-
-void DrawConsoleNonGL()
-{
-#ifndef HKDS
-	return;
-#endif
-	RECT backrect;
-	GetClientRect(hWnd,&backrect);
-	
-	FillRect(hdc,&backrect,backbrush);
-	SetTextColor(hdc,0xeeeeee);
-	SetBkMode(hdc,TRANSPARENT);
-	int ypos;
-	int lineheight=16;
-	ypos=backrect.bottom-3;
-	ypos-=lineheight+3;
-	TextOut(hdc,3,ypos,consolecommand,strlen(consolecommand));
-	for(int i=0;i<50;i++)
-	{
-		ypos-=lineheight;
-		TextOut(hdc,3,ypos,consoletext[i],strlen(consoletext[i]));
-	}
 }
 
 //console panel: a translucent band over the top of the game (or the whole black screen

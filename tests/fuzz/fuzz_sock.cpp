@@ -10,7 +10,7 @@
 #include "sock.h"
 #include <new>
 
-DWORD GetTickCount() { return 0; }   //win32compat.cpp isn't linked
+uint32_t HKTicks() { return 0; }   //system_sdl.cpp isn't linked: a fixed clock
 
 static const int maxsizes[8]={SIMPLESIZE,16,100,450,1000,4096,BIGBUFSIZE,(int)sizeof(Message)};
 

@@ -14,6 +14,8 @@
 #include "multiplay.h"
 #include "sound.h"
 #include "voice.h"
+#include "hkkeys.h"
+#include "hktime.h"
 
 
 char menutext[5000];
@@ -497,14 +499,10 @@ static float zoomtarget=-1; //-1: no eased zoom running
 void Playloop()
 {
 	int numsteps;
-	LARGE_INTEGER time;
-	LARGE_INTEGER freq;
 	DWORD targtime;
 	static DWORD targlasttime=0;
-	QueryPerformanceFrequency(&freq);
-	QueryPerformanceCounter(&time);
-	
-	targtime=((double)time.QuadPart)/(double)freq.QuadPart*1000;
+
+	targtime=((double)HKPerfCounter())/(double)HKPerfFrequency()*1000;
 	//first call (leaving the menu to join a game) or a long pause: start from now.
 	//Interpolating from 0 set curtime to 0 for a frame, and a join request answered
 	//within that frame got a timeout based on it, then "server timed out" at once.
@@ -577,9 +575,7 @@ void Play()
 				zoomtarget=-1;
 			}
 		}
-#ifndef HK_WIN32_NATIVE
 		if(IsSpawnScreenOpen()) mxchange=mychange=0;   //no looking around before playing
-#endif
 		mspeed*=controls.mousesensitivity;
 		mspeed/=powf(1.05,cur->fzoom);
 		cur->fwd-=CrossProduct(Vector(0,1,0),cur->fwd)*mxchange*mspeed;
@@ -1076,12 +1072,7 @@ int HandleMenuKey(DWORD key)
 				ConsoleDisplayText("Too far from station to build");
 				return 1;
 			}
-#ifdef HK_WIN32_NATIVE
-		DisplayBuildingType("structures");
-		menu=BUILD;
-#else
 		OpenBuildMenu();   //src/ui/buildmenu.cpp
-#endif
 		return 1;
 	}
 	if(key=='0')
@@ -1255,7 +1246,7 @@ int HandleTalkKey(DWORD key,DWORD flags)
 		talktext[0]=0;
 		return 1;
 	}
-	if(key==VK_BACK)
+	if(key==KEY_BACK)
 	{
 		int len=strlen(talktext);
 		if(len>0)
@@ -1267,7 +1258,7 @@ int HandleTalkKey(DWORD key,DWORD flags)
 			talktext[len-1]=0;
 		}
 	}
-	if(key==VK_RETURN)
+	if(key==KEY_RETURN)
 	{
 		char text[2000];
 		strcpy(text,l33tify(talktext));
@@ -1278,8 +1269,7 @@ int HandleTalkKey(DWORD key,DWORD flags)
 		GetLocalPlayer()->talking=0;
 		return 1;
 	}
-#ifndef HK_WIN32_NATIVE
-	if(key==VK_TAB)   //switch between everyone and team
+	if(key==KEY_TAB)   //switch between everyone and team
 	{
 		GetLocalPlayer()->talking=GetLocalPlayer()->talking==1?2:1;
 		return 1;
@@ -1287,34 +1277,10 @@ int HandleTalkKey(DWORD key,DWORD flags)
 	//characters arrive as text input (ChatHandleText, keyboard layout aware);
 	//the keys are still swallowed so typing doesn't move the player
 	if(GetRealKey(key,flags)) return 1;
-	return key==VK_BACK;
-#endif
-	char realkey=GetRealKey(key,flags);
-	if(realkey)
-	{
-		int len=strlen(talktext);
-		int timesinceline=0;
-		for(int i=0;i<len;i++)
-		{
-			if(talktext[i]=='\r')
-			{
-				timesinceline=0;
-			}
-			timesinceline++;
-		}
-
-		if(timesinceline>20&&realkey==' ')
-		{
-			realkey='\r';
-		}
-		talktext[len]=realkey;
-		talktext[len+1]=0;
-		return 1;
-	}
-	return 0;
+	return key==KEY_BACK;
 }
 
-//converts strings representing keys into their virtual scan codes, like changing alt to VK_ALT
+//converts strings representing keys into their virtual scan codes, like changing alt to KEY_ALT
 
 int TextToKey(char *text)
 {
@@ -1335,49 +1301,49 @@ int TextToKey(char *text)
 		}
 	}
 	
-	if(stricmp(text,"alt")==0)
+	if(strcasecmp(text,"alt")==0)
 	{
-		return VK_MENU;
+		return KEY_MENU;
 	}
-	if(stricmp(text,"ctrl")==0)
+	if(strcasecmp(text,"ctrl")==0)
 	{
-		return VK_CONTROL;
+		return KEY_CONTROL;
 	}
-	if(stricmp(text,"shift")==0)
+	if(strcasecmp(text,"shift")==0)
 	{
-		return VK_SHIFT;
+		return KEY_SHIFT;
 	}
-	if(stricmp(text,"tab")==0)
+	if(strcasecmp(text,"tab")==0)
 	{
-		return VK_TAB;
+		return KEY_TAB;
 	}
-	if(stricmp(text,"space")==0)
+	if(strcasecmp(text,"space")==0)
 	{
-		return VK_SPACE;
+		return KEY_SPACE;
 	}
-	if(stricmp(text,"lbutton")==0)
+	if(strcasecmp(text,"lbutton")==0)
 	{
-		return VK_LBUTTON;
+		return KEY_LBUTTON;
 	}
-	if(stricmp(text,"rbutton")==0)
+	if(strcasecmp(text,"rbutton")==0)
 	{
-		return VK_RBUTTON;
+		return KEY_RBUTTON;
 	}
-	if(stricmp(text,"up")==0)
+	if(strcasecmp(text,"up")==0)
 	{
-		return VK_UP;
+		return KEY_UP;
 	}
-	if(stricmp(text,"down")==0)
+	if(strcasecmp(text,"down")==0)
 	{
-		return VK_DOWN;
+		return KEY_DOWN;
 	}
-	if(stricmp(text,"left")==0)
+	if(strcasecmp(text,"left")==0)
 	{
-		return VK_LEFT;
+		return KEY_LEFT;
 	}
-	if(stricmp(text,"right")==0)
+	if(strcasecmp(text,"right")==0)
 	{
-		return VK_RIGHT;
+		return KEY_RIGHT;
 	}
 
 	return 0;
@@ -1433,16 +1399,14 @@ void HandleKey(DWORD key,DWORD flags)
 	}
 	if(HandleTalkKey(key,flags)) return;
 	if(flags&(1<<30)) return;
-#ifndef HK_WIN32_NATIVE
 	if(key==controls.pushtotalk) VoicePushToTalk(1);
-#endif
 	//placing a structure: left click (fire) builds it, right click cancels
 	if(menu==BUILDING&&key==controls.fire)
 	{
 		HandleMenuKey('1');
 		return;
 	}
-	if(menu==BUILDING&&key==VK_RBUTTON)
+	if(menu==BUILDING&&key==KEY_RBUTTON)
 	{
 		HandleMenuKey('2');
 		return;
@@ -1450,7 +1414,7 @@ void HandleKey(DWORD key,DWORD flags)
 	if(HandleMenuKey(key)) return;
 	int extended;
 	if(flags&(1<<24)) extended=1;
-	if(key==VK_F4) 
+	if(key==KEY_F4) 
 	{
 		consolevisible=1;
 		LoadTextures();
@@ -1460,22 +1424,18 @@ void HandleKey(DWORD key,DWORD flags)
 	if(key==controls.talk)
 	{
 		GetLocalPlayer()->talking=1;
-#ifndef HK_WIN32_NATIVE
 		ChatOpened(key);
 		return;
-#endif
 	}
 	if(key==controls.talkteam)
 	{
 		GetLocalPlayer()->talking=2;
-#ifndef HK_WIN32_NATIVE
 		ChatOpened(key);
 		return;
-#endif
 	}
-	if(key==VK_F1) LoadGuns();
-	if(key==VK_F2) LoadRandom("textures/ground/",TEX_LAND);
-	if(key==VK_F5) LoadControls();
+	if(key==KEY_F1) LoadGuns();
+	if(key==KEY_F2) LoadRandom("textures/ground/",TEX_LAND);
+	if(key==KEY_F5) LoadControls();
 	if(key==controls.forward) GetLocalPlayer()->up=1;
 	if(key==controls.back) GetLocalPlayer()->down=1;
 	if(key==controls.showscores) GetLocalPlayer()->scores=1;
@@ -1500,7 +1460,7 @@ void HandleKey(DWORD key,DWORD flags)
 	{
 		ClaimObject(GetLocalNum());
 	}
-	if(key==VK_F3) LoadSounds();
+	if(key==KEY_F3) LoadSounds();
 	if(key==controls.reload&&curtime>GetLocalPlayer()->nextfiretime) 
 	{
 		int transferamt=GetAmmoHold(GetLocalPlayer()->weapon);
@@ -1534,9 +1494,7 @@ void HandleKeyUp(DWORD key,DWORD flags)
 	if(key==controls.jetpack) GetLocalPlayer()->jetpack=0;
 	if(key==controls.hangglide) GetLocalPlayer()->hangglide=0;	
 	if(key==controls.seemoney) GetLocalPlayer()->seemoney=0;
-#ifndef HK_WIN32_NATIVE
 	if(key==controls.pushtotalk) VoicePushToTalk(0);
-#endif
 }
 
 //called to switch weapons (when the mouse wheel is scrolled etc.)

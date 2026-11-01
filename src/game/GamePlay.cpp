@@ -24,7 +24,7 @@ int NextFreeServerObject()
 	if(!sobject[i].type)
 	{
 		num=i;
-		ZeroMemory(&sobject[i],sizeof(ServerObject));
+		memset(&sobject[i],0,sizeof(ServerObject));
 		break;
 	}
 	return num;
@@ -61,10 +61,6 @@ int GetRandomPlayer(int teamnum)
 
 void GPlayerEnterGame(int num)
 {
-#ifdef HKDS
-	if(num==0)
-		return;
-#endif
 	if(sv.gamemode==0)
 	{
 		int t1size=GetTeamSize(1,0);
@@ -236,17 +232,15 @@ void GRestartPlayers()
 		GetPlayer(i)->playstate=1;
 		GetPlayer(i)->team=0;
 	}
-#ifndef HKDS
 	GetLocalPlayer()->playstate=10;
 	GPlayerEnterGame(0);
-#endif
 }
 
 void GReset()
 {
-	ZeroMemory(&rgd,sizeof(rgd));
-	ZeroMemory(&gd,sizeof(gd));
-	ZeroMemory(&team,sizeof(team));
+	memset(&rgd,0,sizeof(rgd));
+	memset(&gd,0,sizeof(gd));
+	memset(&team,0,sizeof(team));
 	for(int i=0;i<MAXSERVEROBJS;i++)
 	{
 		if(sobject[i].type)

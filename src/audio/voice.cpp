@@ -10,7 +10,6 @@
 //HK_VOICE_AUTOTALK=1 transmits all the time, HK_VOICE_LOOPBACK=1 plays your own
 //voice through the receive path, HK_VOICE_LOG=1 logs talk spurts on stderr.
 
-#ifndef HK_WIN32_NATIVE
 
 #include "vector.h"
 #include "playing.h"
@@ -404,4 +403,3 @@ void VoiceUpdate()
 	}
 }
 
-#endif // !HK_WIN32_NATIVE

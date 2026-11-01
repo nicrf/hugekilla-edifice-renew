@@ -19,6 +19,7 @@
 #include "multiplay.h"
 #include "sound.h"
 #include "ui.h"
+#include "hktime.h"
 float cloudposx,cloudposy;
 float cloudmistposx,cloudmistposy;	
 #define PI (3.1415926)
@@ -1142,28 +1143,10 @@ void DrawGunSelection()
 
 void DrawConsole()
 {
-#ifndef HK_WIN32_NATIVE
 	glClearColor(0,0,0,0);
 	glClear(GL_COLOR_BUFFER_BIT);
 	DrawConsolePanel(1);
-	SwapBuffers(GetGlHDC());
-#else
-	glColor3f(1,1,1);
-	glEnable(GL_TEXTURE_2D);
-	glBlendFunc(GL_SRC_ALPHA,GL_ZERO );
-	glEnable(GL_BLEND);
-	glTexEnvi(GL_TEXTURE_ENV,GL_TEXTURE_ENV_MODE,GL_MODULATE);
-	glClearColor(0,0,0,0);
-	glClear(GL_COLOR_BUFFER_BIT);
-	for(int i=0;i<15;i++)
-	{
-		DrawText(- 1,-.7+i*.1,consoletext[i]);
-	}
-	DrawText(-1,-.8,consolecommand);
-	DrawText(-1+(.040*strlen(consolecommand)),-.8,"_");
-	//InvalidateRect(GetHWND(),0,0);
-	SwapBuffers(GetGlHDC());
-#endif
+	HKSwapWindow();
 }
 
 //redraw calls draw to draw the world, then it adds 2d graphics on top
@@ -1220,7 +1203,7 @@ void ScreenShot()
 		hdr->ImportantColors=0;
 		char filename[255];
 		strcpy(filename,"screenshot-");
-		itoa(RND*1000,&filename[strlen(filename)],16);
+		sprintf(&filename[strlen(filename)],"%x",(unsigned)(int)(RND*1000));
 		strcat(filename,".bmp");
 		FILE *file=HKFileOpen(UserFile(filename),"wb");
 		if(file)
@@ -1236,7 +1219,7 @@ void ScreenShot()
 
 void Redraw()
 {
-	SwapBuffers(GetGlHDC());
+	HKSwapWindow();
 	glMatrixMode(GL_PROJECTION);
 	glLoadIdentity();
 	glMatrixMode(GL_MODELVIEW);
@@ -1270,14 +1253,6 @@ void Redraw()
 	blockfaces=0;
 	landfaces=0;
 	
-#ifdef HK_WIN32_NATIVE
-	if(consolevisible)
-	{
-		DrawConsole();
-		return;
-	}
-	else
-#endif
 	{
 		glClear(GL_COLOR_BUFFER_BIT);
 	
@@ -1316,79 +1291,21 @@ void Redraw()
 			consolepartvisible--;
 		consolescrolltime=curtime+500;
 	}
-	static LARGE_INTEGER lasttime;
-	LARGE_INTEGER tmptime;
-	LARGE_INTEGER freq;
-	QueryPerformanceFrequency(&freq);
-	QueryPerformanceCounter(&tmptime);
-	framefps=freq.QuadPart/(tmptime.QuadPart-lasttime.QuadPart);
+	static int64_t lasttime;
+	int64_t tmptime=HKPerfCounter();
+	framefps=HKPerfFrequency()/(tmptime-lasttime);
 	curfps=(curfps*5+framefps)/6;
 	lasttime=tmptime;
 	char tmptext[40];
-	itoa(curfps,tmptext,10);
+	sprintf(tmptext,"%d",(int)curfps);
 	if(!consolevisible)
 	{
 		UIText(-.97f,.88f,tmptext);
 		if(menu) UITextLines(-.6f,.5f,menutext);
 	}
-#ifdef HK_WIN32_NATIVE  // original score table, replaced by DrawScoreboard (src/ui/scoreboard.cpp)
-	if(GetLocalPlayer()->scores||rgd.gamestate==2)
-	{
-		DrawText(-.8,.74,"Name");
-		DrawText(-.1,.74,"Ping");
-		DrawText(.1,.74,"Drop");
-		DrawText(.3,.74,"Kills");
-		DrawText(.5,.74,"Deaths");
-		for(int i=0;i<numplayers;i++)
-		{
-			Player *cur=GetPlayer(i);
-			if(cur==GetLocalPlayer())
-			{
-				glColor3f(1,1,1);
-				DrawText(-.86,.60-i*.1,">");
-			}
-			//else
-			{
-				if(cur->team==0)glColor3f(1,1,1);
-				if(cur->team==1)glColor3f(1,0,0);
-				if(cur->team==2)glColor3f(0,0,1);
-			}
-			DrawText(-.8,.60-i*.1,cur->name);
-			itoa(cur->ping,tmptext,10);
-			DrawText(-.1,.60-i*.1,tmptext);
-			itoa((cur->packetloss*100)/30000,tmptext,10);
-			strcat(tmptext,"%");
-			DrawText(.1,.60-i*.1,tmptext);
-			itoa(cur->kills,tmptext,10);
-			if(GetPlayer(i)->playstate>=10)DrawText(.3,.60-i*.1,tmptext);
-			else
-				if(i==0)
-					DrawText(.3,.60-i*.1,"Server");
-				else
-					DrawText(.3,.60-i*.1,"Connecting");
-			itoa(cur->deaths,tmptext,10);
-			if(GetPlayer(i)->playstate>=10)DrawText(.5,.60-i*.1,tmptext);
-		}
-		glColor3f(1,1,1);
-	}
-#endif
-	itoa(curtime&999,tmptext,10);
+	sprintf(tmptext,"%d",(int)(curtime&999));
 	int i;
-#ifdef HK_WIN32_NATIVE
-	for(i=0;i<consolepartvisible;i++)
-	{
-		DrawText(- 1,1-(consolepartvisible-i)*.1,consoletext[i]);
-	}
-#else
 	if(!consolevisible) DrawConsoleNotify();   //src/ui/console.cpp
-#endif
-#ifdef HK_WIN32_NATIVE
-	if(GetLocalPlayer()->talking)
-	{
-		DrawText(-.65,0,"Say:");
-		DrawText(-.5,0,talktext);
-	}
-#else
 	DrawChat();   //src/ui/chat.cpp
 	if(GetLocalPlayer()->fzoom>.5f&&GetLocalPlayer()->playstate>=10)
 	{
@@ -1401,11 +1318,10 @@ void Redraw()
 		glColor3f(1,1,1);
 	}
 	DrawVoiceHUD();
-#endif
 	
-	itoa(cursendrate,tmptext,10);
+	sprintf(tmptext,"%d",(int)cursendrate);
 	UIText(.5f,.88f,tmptext);
-	itoa(currecvrate,tmptext,10);
+	sprintf(tmptext,"%d",(int)currecvrate);
 	UIText(.7f,.88f,tmptext);
 	char faceinfo[100];
 	
@@ -1446,14 +1362,14 @@ void Redraw()
 	datasendthisframe=0;
 	datarecvthisframe=0;
 
-	itoa(GetLocalNum(),tmptext,10);
+	sprintf(tmptext,"%d",(int)(GetLocalNum()));
 	UIText(.3f,.88f,tmptext);
-	itoa(GetLocalPlayer()->ammoreserves[GetLocalPlayer()->weapon],tmptext,10);
+	sprintf(tmptext,"%d",(int)(GetLocalPlayer()->ammoreserves[GetLocalPlayer()->weapon]));
 	//DrawText(.3,-.95,tmptext);
 	float offset=-1.2;
-	itoa(GetLocalPlayer()->ammoingun[GetLocalPlayer()->weapon],tmptext,10);
+	sprintf(tmptext,"%d",(int)(GetLocalPlayer()->ammoingun[GetLocalPlayer()->weapon]));
 	UIText(.37f+offset,-.94f,tmptext,.065f);
-	itoa(GetLocalPlayer()->life,tmptext,10);
+	sprintf(tmptext,"%d",(int)(GetLocalPlayer()->life));
 	UIText(.57f+offset,-.94f,tmptext,.065f);
 	int flags[3];
 	flags[0]=flags[1]=flags[2]=0;
@@ -1514,7 +1430,7 @@ void Redraw()
 			if(credits>1)
 			{
 				char tmptxt[50];
-				itoa(credits,tmptxt,10);
+				sprintf(tmptxt,"%d",(int)credits);
 				UIText(.36f+offset,yoffset-.09f,tmptxt,.06f);
 			}
 		}
@@ -1598,10 +1514,8 @@ void Redraw()
 	if(GetLocalPlayer()->scores||rgd.gamestate==2)
 		DrawScoreboard();
 	DrawBuildMenu();
-#ifndef HK_WIN32_NATIVE
 	DrawSpawnScreen();
 	if(consolevisible) DrawConsolePanel(0);
-#endif
 	ScreenShot();	
 }
 
@@ -1652,7 +1566,6 @@ void Draw(float offset)
 	
 	glPushMatrix();
 	
-	RECT winrect;
 	glLoadIdentity();
 	
 	//the zoom narrows the field of view. Redraw multiplied it into the projection
@@ -2196,10 +2109,6 @@ void RedrawSplash(int texnum,char *text,int drawlogo)
 
 	if(text)
 		UIText(-.97f,-.97f,text);
-	PAINTSTRUCT ps;
-	HWND hWnd=GetHWND();
-	HDC hdc = BeginPaint(hWnd, &ps);
-	EndPaint(hWnd, &ps);
 	
 }
 

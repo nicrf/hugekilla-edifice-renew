@@ -223,11 +223,11 @@ int PlaceStructure(int task)
 		else rot=3;
 	}
 	//facing the player, then turned by the wheel
-	CopyMemory(rotstructure,curstructure,sizeof(curstructure));
+	memcpy(rotstructure,curstructure,sizeof(curstructure));
 	for(int i=0;i<rot+buildrot;i++)
 	{
 		RotateStructure(rotstructure,tmpstructure);
-		CopyMemory(rotstructure,tmpstructure,sizeof(rotstructure));
+		memcpy(rotstructure,tmpstructure,sizeof(rotstructure));
 	}
 	//its 'r' blocks give its height: as high above the aimed ground as they were
 	//above the ground under a standing player (eye about 1.5 over it)
@@ -359,7 +359,7 @@ void DisplayBuildingType(char *path)
 		snprintf(name,sizeof(name),"%s",entries[i].name.c_str());
 		char *dot=strchr(name,'.');
 		if(dot) *dot=0;
-		itoa(i+1,&menutext[strlen(menutext)],10);
+		sprintf(&menutext[strlen(menutext)],"%d",(int)(i+1));
 		strcat(menutext,". ");
 		strcat(menutext,name);
 		if(entries[i].isdir)

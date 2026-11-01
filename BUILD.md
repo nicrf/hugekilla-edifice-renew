@@ -111,17 +111,19 @@ src/game/      boucle de jeu, terrain (land*), structures, physique, config, vec
 src/render/    rendu OpenGL (redrawing), textures (registre textures.h, image.cpp = stb_image), modèles .cob (ase, models.h)
 src/net/       sockets UDP (sock), protocole et serveur/client (multiplay*)
 src/ui/        menus en jeu, console, Options, Server Setup, crédits
-src/audio/     sound_sdl.cpp (SDL) ; sound.cpp = DirectSound d'origine, plus compilé
-src/platform/  platform_sdl.cpp : main SDL (fenêtre, contexte GL, entrées, platform.h) ; gl.h : OpenGL et GLU ; fileio.* : accès aux fichiers (std::filesystem, stdio)
-src/compat/    win32compat.* : émulation Win32 (POSIX) / redirections SDL (Windows)
+src/audio/     sound_sdl.cpp (son SDL), voice.cpp (chat vocal opus)
+src/platform/  platform_sdl.cpp : main SDL (fenêtre, contexte GL, entrées, dossiers ; platform.h) ;
+               system_sdl.cpp : horloges (hktime.h), touches tenues (hkkeys.h), boîtes de message ;
+               hktypes.h : DWORD/WORD/BYTE ; hksocket.h : sockets (Winsock / POSIX) ;
+               gl.h : OpenGL et GLU ; fileio.* : accès aux fichiers (std::filesystem, stdio) ;
+               windows/ : edifice.rc et icônes de Edifice.exe
 src/third_party/ stb/stb_image.h v2.30 (nothings/stb 31c1ad3, domaine public / MIT, licence dans stb/LICENSE)
-win32/         hugekilla.rc, resource.h, icônes ; .sln/.vcproj d'origine pour référence
 data/          données du jeu (ini, textures, sons, objets, Structures)
 ```
 
-Le code Win32 natif d'origine (WinMain, DirectSound, boîtes de dialogue) reste lisible dans les sources derrière `HK_WIN32_NATIVE`, jamais défini.
+Un seul chemin de code : `main()` est celui de SDL sur les trois systèmes (`SDL2main` fournit `WinMain` sous Windows). Le build Win32 natif d'origine (WinMain/WndProc, DirectSound, boîtes de dialogue, menus, variante serveur dédié `HKDS`, projet Visual Studio 2003) n'était plus compilé : il a été retiré (M12.3), il reste dans l'historique git.
 
-Chaque `.cpp` inclut ce qu'il utilise (plus de `StdAfx.h`) : les noms Win32 (`DWORD`, `SOCKADDR_IN`…) par `win32compat.h`, OpenGL par `gl.h`, et les globales partagées par le header du module qui les définit (`land.h`, `playing.h`, `multiplay.h`, `redrawing.h`, `models.h`, `ui.h`, `platform.h`…), déclarées une seule fois : pas d'`extern` local dans un `.cpp`.
+Chaque `.cpp` inclut ce qu'il utilise (plus de `StdAfx.h` ni d'émulation Win32) : les types `DWORD`/`WORD`/`BYTE` par `hktypes.h` (gardés : `DWORD` fait 32 bits dans les structs réseau et les sauvegardes), l'horloge par `hktime.h` (`HKTicks`, `HKPerfCounter`, `HKSleep`), les codes de touches par `hkkeys.h` (`KEY_TAB`, `KEY_F1`… : les valeurs des codes VK de Windows, que `control.ini` désigne par leur nom), les sockets par `hksocket.h`, OpenGL par `gl.h`, et les globales partagées par le header du module qui les définit (`land.h`, `playing.h`, `multiplay.h`, `redrawing.h`, `models.h`, `ui.h`, `platform.h`…), déclarées une seule fois : pas d'`extern` local dans un `.cpp`.
 
 ## Données
 
@@ -173,7 +175,7 @@ Les lettres suivent la disposition du clavier : sur AZERTY, remappez Avancer/Gau
 - `HK_AUTOSTART=1` démarre un serveur local directement (avec `HK_MAPFILE=<fichier .map>` : sur cette carte).
 - `HK_ZOOM_TEST=1` simule un appui sur la touche de zoom (zoom ×3).
 - `HK_SEED=N` génère le même monde à chaque lancement (pour comparer des captures).
-- `HK_KEYLOG=1` affiche dans le terminal chaque touche reçue par le jeu (code VK) et les changements de zoom.
+- `HK_KEYLOG=1` affiche dans le terminal chaque touche reçue par le jeu (code de `hkkeys.h`, celui des touches VK de Windows) et les changements de zoom.
 - `HK_MENU=options|options2|player|credits|join|internet|server|serverstart` ouvre cet écran au démarrage (`internet` : l'onglet Internet de Join) ; `build`, `scores` et `chat` démarrent un serveur local et ouvrent le menu de construction, les scores ou le chat.
 - `HK_LOBBYJOIN=<code>` cherche ce code de partie sur le lobby (`net.ini` `lobby=`) et rejoint la partie, par l'onglet Internet (en P2P si elle a une identité, voir GameNetworkingSockets).
 - `HK_P2P=0|1|relay` remplace `p2p=` de `net.ini` ; `HK_GNS_DEBUG=1` affiche les messages de GameNetworkingSockets. `HK_SIGNAL_TCP=1` : signalisation par le relais TCP même si le lobby propose son relais WebSocket (`wss://`). `EDIFICE_TEST_CA_FILE=cert.pem` (tests seulement) : certificat PEM d'un lobby auto-signé, accepté en plus de ceux du système pour le lobby et la signalisation (la vérification reste faite).

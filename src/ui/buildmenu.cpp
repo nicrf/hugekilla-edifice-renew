@@ -8,6 +8,7 @@
 #include "redrawing.h"
 #include "playing.h"
 #include "ui.h"
+#include "hkkeys.h"
 #include <ctype.h>
 
 #define MAXENTRIES 64
@@ -157,9 +158,9 @@ void BuildMenuWheel(int dir)
 int BuildMenuHandleKey(int vk)
 {
 	if(!buildmenuopen) return 0;
-	if(vk==VK_ESCAPE||vk==controls.build||vk==VK_RBUTTON) CloseBuildMenu();
-	if(vk==VK_UP) BuildMenuWheel(1);
-	if(vk==VK_DOWN) BuildMenuWheel(-1);
+	if(vk==KEY_ESCAPE||vk==controls.build||vk==KEY_RBUTTON) CloseBuildMenu();
+	if(vk==KEY_UP) BuildMenuWheel(1);
+	if(vk==KEY_DOWN) BuildMenuWheel(-1);
 	return 1;
 }
 
