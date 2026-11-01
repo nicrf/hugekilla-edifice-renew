@@ -101,8 +101,10 @@ jobs:
           path: netplay-logs
 
   gns:
-    # Experimental (roadmap M7): GameNetworkingSockets built through vcpkg, and an
-    # encrypted loopback connection test. Not required for releases yet.
+    # Experimental (roadmap M7): GameNetworkingSockets built through vcpkg, an
+    # encrypted loopback connection test, and the game built with EDIFICE_GNS=ON.
+    # On Linux, netplay through GameNetworkingSockets (tests/run_gns_netplay_test.sh).
+    # Not required for releases yet.
     strategy:
       fail-fast: false
       matrix:
@@ -120,6 +122,11 @@ jobs:
           sudo apt-get install -y build-essential cmake ninja-build pkg-config libglu1-mesa-dev \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev \
             libxkbcommon-dev libwayland-dev libasound2-dev libpulse-dev
+
+      - name: Virtual display and software OpenGL (Linux)
+        if: runner.os == 'Linux'
+        timeout-minutes: 20
+        run: .github/scripts/apt-install.sh xvfb libgl1-mesa-dri
 
       - name: Build tools (macOS)
         if: runner.os == 'macOS'
@@ -146,11 +153,23 @@ jobs:
           cmake -S . -B build/gns $extra -DCMAKE_BUILD_TYPE=Release -DEDIFICE_GNS=ON -DVCPKG_MANIFEST_FEATURES=gns \
             -DCMAKE_TOOLCHAIN_FILE="$RUNNER_TEMP/vcpkg/scripts/buildsystems/vcpkg.cmake"
 
-      - name: Build and run the loopback test
+      - name: Build the game and the tests, run the loopback test
         shell: bash
         run: |
-          cmake --build build/gns --config Release --target gns_loopback_test
+          cmake --build build/gns --config Release
           ctest --test-dir build/gns -C Release -R gns_loopback --output-on-failure
+
+      - name: Netplay through GameNetworkingSockets (Linux)
+        if: runner.os == 'Linux'
+        timeout-minutes: 15
+        run: tests/run_gns_netplay_test.sh build/gns/Edifice build/gns/gns_netplay_test gns-logs
+
+      - uses: actions/upload-artifact@v4
+        if: failure() && runner.os == 'Linux'
+        with:
+          name: gns-netplay-logs
+          path: gns-logs
+          if-no-files-found: ignore
 
   fuzzing:
     # libFuzzer harnesses of every network and file parser (tests/fuzz): seeds
