@@ -95,6 +95,19 @@ class Client:
                 out.append(m)
         return out
 
+    def drain(self):
+        """handles whatever is already queued, without waiting"""
+        if not hasattr(self, "client"):
+            return
+        self.s.setblocking(False)
+        try:
+            while True:
+                data, addr = self.s.recvfrom(65536)
+                if data:
+                    self.handle(data)
+        except (BlockingIOError, socket.error):
+            pass
+
     def pump(self, wait):
         end = time.time() + wait
         got = []
@@ -111,11 +124,13 @@ class Client:
                 got += self.handle(data)
         return got
 
-    def join(self, trailer):
+    def join(self, trailer, others=()):
         self.s.sendto(packet(bytes([REQUESTENTER, len(self.name)]) + self.name + b"\x00" + trailer), SERVER)
         port = None
         end = time.time() + 3
         while time.time() < end and port is None:
+            for o in others:
+                o.drain()
             self.s.settimeout(0.5)
             try:
                 data, addr = self.s.recvfrom(65536)
@@ -135,6 +150,8 @@ class Client:
         self.s.sendto(bytes([LASTRELIABLE]) + checksum(body) + body, self.client)
         end = time.time() + 15
         while time.time() < end:
+            for o in others:
+                o.drain()
             for m in self.pump(0.3):
                 if m[0] == SIMPLE and len(m) >= 12 and m[1] == JOINGAME and \
                         struct.unpack_from("<I", m, 4)[0] == self.slot:
@@ -166,8 +183,8 @@ _, proto, layout, vlen = struct.unpack_from("<IHIB", t, 0)
 trailer = t[:11 + vlen]
 
 clients = [Client(n) for n in (b"Alice", b"Bob", b"Carol")]
-for c in clients:
-    if not c.join(trailer):
+for n, c in enumerate(clients):
+    if not c.join(trailer, clients[:n]):
         print("FAIL: %s could not join" % c.name.decode()); sys.exit(1)
     print("%s joined as slot %d" % (c.name.decode(), c.slot))
 a, b, c = clients
@@ -181,16 +198,28 @@ def check(cond, what):
     ok &= bool(cond)
 
 
+bpos = [500]
+
+
 def place(bx):
-    b.send(position(bx, 60, 100))
-    c.send(position(5, 60, 350))
-    time.sleep(0.05)
+    bpos[0] = bx
+    for _ in range(5):
+        b.send(position(bx, 60, 100))
+        c.send(position(5, 60, 350))
+        a.send(position(5, 60, 100))
+        time.sleep(0.03)
+        for cl in clients:
+            cl.drain()
 
 
 def talk(first, count, extra=()):
     for k in range(count):
+        b.send(position(bpos[0], 60, 100))
+        c.send(position(5, 60, 350))
         a.send(position(5, 60, 100), voice(c.slot, first + k, bytes([0x40 + k]) * 40), *extra)
         time.sleep(0.02)
+        for cl in clients:
+            cl.drain()
 
 
 for cl in clients:
