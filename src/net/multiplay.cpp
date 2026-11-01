@@ -184,7 +184,7 @@ static void SendInfo(SOCKADDR_IN dest)
 	len+=WriteVersionTrailer(&buf[len]);
 	//server details for the join list (ignored by older clients)
 	buf[len++]=(char)UsedSlots();
-	buf[len++]=(char)MAXPLAYERS;
+	buf[len++]=(char)ServerMaxPlayers();
 	buf[len++]=(char)sv.gamemode;
 	buf[len++]=(char)sv.capturelimit;
 	//capabilities (M11 phases 2, 3a and 3b, version.h; ignored by older clients)
@@ -1197,6 +1197,18 @@ void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pn
 	}
 }
 
+//players a server takes, itself included: all of them natively; fewer in a browser,
+//where the server shares the page's single thread with the game and its drawing
+//(and WebRTC sends through JavaScript), measured with tests/net_webhost.py
+int ServerMaxPlayers()
+{
+#ifdef __EMSCRIPTEN__
+	return WEBHOSTMAXPLAYERS;
+#else
+	return MAXPLAYERS;
+#endif
+}
+
 //called every frame on the server side
 
 void ServerLoop()
@@ -1222,7 +1234,7 @@ void ServerLoop()
 				PeerVersion peer;
 				ReadVersionTrailer((char *)&msg+trailer,msglen-trailer,&peer);
 				//the first free slot, one left by a player who left too (M11 phase 3b)
-				int addplayer=SlotFirstFree(slotused,1,MAXPLAYERS);
+				int addplayer=SlotFirstFree(slotused,1,ServerMaxPlayers());
 
 				char message[1000];
 				strcpy(message,reqname);
@@ -1953,7 +1965,7 @@ int JoinNetQuery(const char *host,int port)
 //info link becomes a P2P one (GameNetworkingSockets, WebRTC in a browser) if it
 //isn't. Returns 0 if P2P can't be used (the caller asks the host directly,
 //JoinNetQuery).
-int JoinNetQueryP2P(const char *address,int port,const char *identity)
+int JoinNetQueryP2P(const char *address,int port,const char *identity,int webhost)
 {
 	if(!NetLinkIsP2P(infosock.link))
 	{
@@ -1963,7 +1975,7 @@ int JoinNetQueryP2P(const char *address,int port,const char *identity)
 	}
 	SOCKADDR_IN dest=MakeSockAddr(0,0,0,0,htons((WORD)port));
 	dest.sin_addr.s_addr=inet_addr(address);
-	if(dest.sin_addr.s_addr==INADDR_NONE||!NetQueryHostP2P(&dest,identity)) return 0;
+	if(dest.sin_addr.s_addr==INADDR_NONE||!NetQueryHostP2P(&dest,identity,webhost)) return 0;
 	SendInfoRequest(dest);   //goes out once connected
 	return 1;
 }

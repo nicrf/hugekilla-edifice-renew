@@ -25,7 +25,8 @@ void JoinNetClose();
 void JoinNetClearList();
 void JoinNetSearchLAN();
 int JoinNetQuery(const char *host,int port=0);
-int JoinNetQueryP2P(const char *address,int port,const char *identity);
+//webhost: the game is hosted in a browser (WebRTC only, lobby "host":"web")
+int JoinNetQueryP2P(const char *address,int port,const char *identity,int webhost=0);
 void JoinNetRequestInfo(const char *address,int port);
 int JoinNetFind(const char *address,int port);
 int JoinNetConnect(int index,char *reason,int reasonsize);
@@ -42,6 +43,8 @@ void HandleJoinScreenText(const char *text);
 void JoinScreenClick(int clicks);
 void DrawJoinScreen();
 #define MAXPLAYERS 32
+#define WEBHOSTMAXPLAYERS 8   //a server in a browser (host included), see ServerMaxPlayers
+int ServerMaxPlayers();       //players this server takes, itself included
 void SockLoop();
 void CloseSocks();
 void InitSocks();

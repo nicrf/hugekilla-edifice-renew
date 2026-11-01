@@ -88,14 +88,14 @@ Chaque image dit ce qu'elle est : `GET /v1/version` renvoie `{"version": "0.5.4"
 
 - **Tags de l'image** (`ghcr.io/nicrf/edifice-lobby`) : `latest` suit `main` ; chaque release du jeu `vX.Y.Z` publie `X.Y.Z` et `X.Y` ; chaque commit a aussi son `sha-<commit>`.
 - **Choisir sa version** : `EDIFICE_LOBBY_TAG` dans `.env` (défaut `latest`). `EDIFICE_LOBBY_TAG=0.5` garde la ligne 0.5 avec ses correctifs ; `0.5.4` fige une version exacte ; revenir en arrière = remettre l'ancien tag puis `docker compose pull && docker compose up -d`.
-- **`api`** monte quand l'API gagne quelque chose dont un jeu peut dépendre (2 : les adresses `lan` d'une partie ; 3 : CORS pour la version web). Les ajouts restent compatibles : un jeu plus ancien ignore ce qu'il ne connaît pas.
+- **`api`** monte quand l'API gagne quelque chose dont un jeu peut dépendre (2 : les adresses `lan` d'une partie ; 3 : CORS pour la version web ; 4 : `webrtc`, un hôte que les navigateurs rejoignent ; 5 : `host: "web"`, une partie hébergée dans un navigateur). Les ajouts restent compatibles : un jeu plus ancien ignore ce qu'il ne connaît pas.
 
 ## API
 
 | Requête | Réponse |
 |---|---|
 | `POST /v1/sessions` | `identity`, `token`, serveurs STUN/TURN avec identifiants temporaires (12 h), `signaling` (`hôte:port` du relais de signalisation TCP, avec `-public-host`), `signaling_url` (le même en WebSocket, `wss://hôte/v1/signal`) |
-| `POST /v1/servers` `{name, port, version, protocol, players, maxplayers, mode, visibility, identity, session, lan}` | `id`, `token`, `refresh_seconds` |
+| `POST /v1/servers` `{name, port, version, protocol, players, maxplayers, mode, visibility, identity, session, lan, webrtc, host}` | `id`, `token`, `refresh_seconds` |
 | `PUT /v1/servers/{id}` (même corps, `Authorization: Bearer <token>`) | 204 : partie renouvelée |
 | `DELETE /v1/servers/{id}` (`Authorization: Bearer <token>`) | 204 |
 | `GET /v1/servers?protocol=N` | `{"servers": [...]}` : parties publiques, les plus peuplées d'abord |
@@ -103,7 +103,7 @@ Chaque image dit ce qu'elle est : `GET /v1/version` renvoie `{"version": "0.5.4"
 | `GET /v1/signal` (`Upgrade: websocket`) | relais de signalisation en WebSocket (voir plus bas) |
 | `GET /healthz` | `ok` |
 
-L'adresse d'une partie est **l'IP vue par le serveur**, jamais celle déclarée par l'hôte, et doit être publique (sauf `-allow-private`). De même, `identity` (à laquelle les joueurs se connectent en P2P) n'est listée que si `session` est le jeton de la session de cette identité : personne ne peut annoncer une partie sous l'identité d'un autre (sans preuve, la partie est listée sans identité ; le jeton n'est jamais renvoyé). `visibility` vaut `public` (listée), `friends` ou `private` (non listées, joignables par leur id). L'id est le **code de partie** : 6 caractères (chiffres et majuscules, sans 0/O ni 1/I) à se transmettre ; la recherche ignore la casse, les tirets et les espaces, et compte dans la limite de requêtes par IP pour qu'on ne puisse pas énumérer les parties privées. Limites : 4 parties par IP, requêtes d'écriture limitées par IP, corps de 4 Ko maximum, textes réduits à l'ASCII imprimable.
+L'adresse d'une partie est **l'IP vue par le serveur**, jamais celle déclarée par l'hôte, et doit être publique (sauf `-allow-private`). De même, `identity` (à laquelle les joueurs se connectent en P2P) n'est listée que si `session` est le jeton de la session de cette identité : personne ne peut annoncer une partie sous l'identité d'un autre (sans preuve, la partie est listée sans identité ; le jeton n'est jamais renvoyé). `webrtc: true` (API 4 : l'hôte prend les DataChannels WebRTC des navigateurs) n'est gardé qu'avec une identité vérifiée, et `host: "web"` (API 5 : partie hébergée dans un navigateur, joignable par WebRTC seulement, la version de bureau fait alors l'offre elle-même) qu'avec `webrtc` ; toute autre valeur de `host` est ignorée. `visibility` vaut `public` (listée), `friends` ou `private` (non listées, joignables par leur id). L'id est le **code de partie** : 6 caractères (chiffres et majuscules, sans 0/O ni 1/I) à se transmettre ; la recherche ignore la casse, les tirets et les espaces, et compte dans la limite de requêtes par IP pour qu'on ne puisse pas énumérer les parties privées. Limites : 4 parties par IP, requêtes d'écriture limitées par IP, corps de 4 Ko maximum, textes réduits à l'ASCII imprimable.
 
 Même réseau : `lan` (facultatif) donne les adresses IPv4 privées de l'hôte (`10/8`, `172.16/12`, `192.168/16`, 4 au plus ; les autres sont ignorées). Le lobby ne les renvoie (champ `lan` d'une partie, dans la liste comme par le code) **qu'aux joueurs dont la requête vient de la même adresse publique que l'hôte** (même règle d'adresse que l'annonce, donc avec `EDIFICE_TRUST_PROXY` / `EDIFICE_TRUSTED_PROXIES`) : derrière le même routeur, ils rejoignent l'hôte par son adresse locale (la plupart des routeurs ne renvoient pas vers le LAN un paquet adressé à leur propre IP publique). Les autres joueurs ne les voient jamais. Les anciennes versions du jeu n'envoient ni ne lisent ce champ ; les anciens lobbys l'ignorent.
 

@@ -182,16 +182,12 @@ static int Handle(const std::string &line)
 	static unsigned char payload[SIGNAL_MAXPAYLOAD];
 	int size;
 #ifdef EDIFICE_WEBRTC
-	//a browser's WebRTC signal (M14 task 3): for the bridge, only while hosting
+	//a WebRTC signal (M14 task 3): for the bridge, which takes it while an info
+	//link is open (a browser's offer to our server, a browser host's answer)
 	static SignalRtc rtc;
 	if(SignalRtcParseLine(line.data(),(int)line.size(),sender,sizeof(sender),&rtc))
 	{
-		int hosting;
-		{
-			std::lock_guard<std::mutex> l(lock);
-			hosting=listening>0;
-		}
-		if(hosting) RtcHostSignal(sender,rtc);
+		RtcHostSignal(sender,rtc);
 		return 1;
 	}
 #endif

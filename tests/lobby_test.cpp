@@ -163,6 +163,26 @@ static void Parsers()
 		"\"identity\":\"str:edifice-1\",\"webrtc\":false}";
 	CHECK(LobbyParseGame(rtcfalse,(int)strlen(rtcfalse),&g)==1&&g.webrtc==0);
 
+	// "host":"web" (API 5): a browser host, written and read only with webrtc
+	LobbyAnnouncement web=withid;
+	web.webrtc=1;
+	web.webhost=1;
+	CHECK(LobbyAnnouncementJSON(&web,withbody,sizeof(withbody))&&strstr(withbody,"\"webrtc\":true,\"host\":\"web\""));
+	web.webrtc=0;
+	CHECK(LobbyAnnouncementJSON(&web,withbody,sizeof(withbody))&&!strstr(withbody,"host"));
+	const char *webg="{\"id\":\"W5\",\"name\":\"n\",\"address\":\"203.0.113.7\",\"port\":27020,\"protocol\":5,"
+		"\"identity\":\"str:edifice-1\",\"webrtc\":true,\"host\":\"web\"}";
+	CHECK(LobbyParseGame(webg,(int)strlen(webg),&g)==1&&g.webrtc==1&&g.webhost==1);
+	const char *webnortc="{\"id\":\"W6\",\"name\":\"n\",\"address\":\"203.0.113.7\",\"port\":27020,\"protocol\":5,"
+		"\"identity\":\"str:edifice-1\",\"host\":\"web\"}";
+	CHECK(LobbyParseGame(webnortc,(int)strlen(webnortc),&g)==1&&g.webhost==0);
+	const char *webodd="{\"id\":\"W7\",\"name\":\"n\",\"address\":\"203.0.113.7\",\"port\":27020,\"protocol\":5,"
+		"\"identity\":\"str:edifice-1\",\"webrtc\":true,\"host\":[\"web\"]}";
+	CHECK(LobbyParseGame(webodd,(int)strlen(webodd),&g)==1&&g.webhost==0);
+	const char *weblong="{\"id\":\"W8\",\"name\":\"n\",\"address\":\"203.0.113.7\",\"port\":27020,\"protocol\":5,"
+		"\"identity\":\"str:edifice-1\",\"webrtc\":true,\"host\":\"webbrowser-something\"}";
+	CHECK(LobbyParseGame(weblong,(int)strlen(weblong),&g)==1&&g.webhost==0);
+
 	// LAN addresses (same network): only private IPv4 written and read, never a reason
 	// to drop the game
 	CHECK(LobbyLANAddress("10.0.0.1")&&LobbyLANAddress("172.16.0.1")&&LobbyLANAddress("172.31.9.9")&&

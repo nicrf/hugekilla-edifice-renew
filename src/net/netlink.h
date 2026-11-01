@@ -39,8 +39,15 @@ void NetQueryHost(const SOCKADDR_IN *dest);
 void NetLinkShutdown();
 //1 if link is an info link that joins P2P (GameNetworkingSockets; WebRTC in a browser)
 int NetLinkIsP2P(DatagramLink *link);
-//1 if a host of this build takes browsers (EDIFICE_WEBRTC: announced as webrtc)
+//1 if a host of this build takes browsers (EDIFICE_WEBRTC, or the web build:
+//announced as webrtc)
 int NetWebRtcHost();
+//1 if this build hosts in a browser: announced "host":"web", WebRTC only
+int NetHostInBrowser();
+//1 if this build can join a game hosted in a browser (WebRTC, P2P on)
+int NetCanJoinBrowserHost();
+//the web build, hosting an Internet game: the page asks to keep its tab open
+void NetHostBanner(int on);
 
 //P2P: 0 off (or built without GameNetworkingSockets), 1 on, 2 relay only
 int NetP2PMode();
@@ -48,7 +55,9 @@ int NetP2PMode();
 //relay when the session names none). 1 if P2P is ready (a host: listens)
 int NetP2PStart(const LobbySession *session,const char *lobbyurl);
 //client: opens a P2P connection to the host identity, named dest (the address and
-//info port the lobby lists): what is sent to dest goes through it. 1 if opening.
-int NetQueryHostP2P(const SOCKADDR_IN *dest,const char *identity);
+//info port the lobby lists): what is sent to dest goes through it. webhost: the
+//game is hosted in a browser, joined over WebRTC (a desktop game offers a
+//DataChannel, rtchost.h). 1 if opening.
+int NetQueryHostP2P(const SOCKADDR_IN *dest,const char *identity,int webhost=0);
 
 #endif

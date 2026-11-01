@@ -6,6 +6,9 @@
 //its own to join a game P2P.
 //The host also announces its LAN addresses: the lobby gives them only to players
 //from its own public address (behind the same router), who join it there.
+//A game hosted in a browser (the web build) is announced "host":"web": it takes
+//WebRTC only (webrtclink.cpp), so it is listed only once P2P is ready, and desktop
+//clients join it over WebRTC too (rtchost.cpp).
 
 #include "platform.h"
 #include "cfgfile.h"
@@ -150,6 +153,7 @@ static void AddLan(char addr[][16],int *n,int max,in_addr a)
 static int LanAddresses(char addr[][16],int max)
 {
 	int n=0;
+	if(NetHostInBrowser()) return 0;   //no UDP to reach it there: WebRTC finds the LAN route
 	SOCKET s=socket(AF_INET,SOCK_DGRAM,0);
 	if(s!=INVALID_SOCKET)
 	{
@@ -204,12 +208,6 @@ static void ReadVisibility()
 		CopyIniString(hostvisibility,ini.GetValues("servervisibility"),sizeof(hostvisibility));
 	if(strcmp(hostvisibility,"public")&&strcmp(hostvisibility,"friends")&&strcmp(hostvisibility,"private"))
 		strcpy(hostvisibility,"lan");
-#ifdef __EMSCRIPTEN__
-	//a game hosted in a browser can't be reached (no UDP; a browser joins native
-	//hosts over WebRTC, but hosting would need the same bridge in JavaScript,
-	//roadmap M14 task 3): never announced, the list would show a game nobody joins
-	strcpy(hostvisibility,"lan");
-#endif
 }
 
 int LobbyHostInternet()
@@ -232,6 +230,14 @@ void LobbyHostStart()
 	//P2P first needs a session (our identity); without P2P, nothing to ask
 	hostp2p=0;
 	hoststate=NetP2PMode()&&LobbySessionStart()>=0?HOST_SESSION:HOST_ANNOUNCE;
+	if(hoststate==HOST_ANNOUNCE&&NetHostInBrowser())
+	{
+		//a browser is reached over WebRTC or not at all: never listed without it
+		Say("Not listed: hosting from the browser needs P2P (p2p= in net.ini)");
+		hoststate=HOST_OFF;
+		return;
+	}
+	NetHostBanner(1);
 	hostnext=HKTicks();
 	hostplayers=-1;
 	hostnumlan=LanAddresses(hostlan,LOBBY_MAXLAN);
@@ -248,12 +254,13 @@ static void HostSend(int players)
 	a.version=EDIFICE_VERSION_STRING;
 	a.protocol=EDIFICE_PROTOCOL_VERSION;
 	a.players=players;
-	a.maxplayers=MAXPLAYERS;
+	a.maxplayers=ServerMaxPlayers();
 	a.mode=sv.gamemode;
 	a.visibility=hostvisibility;
 	a.identity=hostp2p&&s?s->identity:"";   //the lobby lists it with its token only
 	a.session=hostp2p&&s?s->token:"";
 	a.webrtc=hostp2p&&NetWebRtcHost();     //browsers join through the same identity
+	a.webhost=a.webrtc&&NetHostInBrowser(); //and only so, desktop clients included
 	a.numlan=hostnumlan;
 	for(int i=0;i<hostnumlan;i++) a.lan[i]=hostlan[i];
 	if(LobbyAnnouncementJSON(&a,body,sizeof(body)))
@@ -284,6 +291,14 @@ void LobbyHostLoop(int players)
 		if(!r) return;
 		if(r>0) hostp2p=NetP2PStart(LobbySessionGet(),LobbyGetURL());
 		else fprintf(stderr,"%s\n",text);
+		if(!hostp2p&&NetHostInBrowser())
+		{
+			//nobody could join it: not listed (LobbyHostStart)
+			Say("Not listed: no P2P with the lobby, the game stays in this browser");
+			NetHostBanner(0);
+			hoststate=HOST_OFF;
+			return;
+		}
 		if(!hostp2p) Say("No P2P: players will have to reach your UDP ports");
 		hoststate=HOST_ANNOUNCE;
 		hostnext=now;
@@ -344,6 +359,7 @@ void LobbyHostStop()
 		LobbyDrop(LobbySend("DELETE",path,0,hosttoken));
 	}
 	hostrequest=0;
+	if(hoststate!=HOST_OFF) NetHostBanner(0);
 	hoststate=HOST_OFF;
 	hostid[0]=hosttoken[0]=0;
 }

@@ -35,7 +35,7 @@ static int UseGns(int *port)
 
 //The browser has no UDP (roadmap M14): Emscripten would turn each address into a
 //WebSocket connection. A solo game's info socket sends into the void; an Internet
-//game is joined over a WebRTC DataChannel (WebRtcLink, M14 task 3).
+//game is joined, or hosted, over WebRTC DataChannels (WebRtcLink, M14 task 3).
 class NullLink:public DatagramLink
 {
 public:
@@ -47,8 +47,8 @@ public:
 DatagramLink *NetOpenInfoLink(WORD port,int host,int p2p)
 {
 #ifdef __EMSCRIPTEN__
-	(void)port;(void)host;(void)p2p;
-	return WebRtcLink::OpenInfo();
+	(void)port;
+	return WebRtcLink::OpenInfo(host&&p2p);   //an Internet host takes clients' offers
 #else
 	UdpLink *udp=UdpLink::Open(port,1);
 #ifdef EDIFICE_GNS
@@ -58,8 +58,9 @@ DatagramLink *NetOpenInfoLink(WORD port,int host,int p2p)
 	{
 		GnsLink *link=GnsLink::OpenInfo(udp,host,gnsport,ip);
 #ifdef EDIFICE_WEBRTC
-		//an Internet host also takes browsers, over WebRTC (rtchost.h)
-		if(link&&host&&p2p&&NetP2PMode()) return RtcHostInfoLink(link);
+		//an Internet host also takes browsers, and a client joins a browser host,
+		//over WebRTC (rtchost.h)
+		if(link) return RtcHostInfoLink(link,host&&p2p&&NetP2PMode());
 #endif
 		if(link) return link;
 		fprintf(stderr,"gns: unavailable, plain UDP only\n");
@@ -76,6 +77,9 @@ DatagramLink *NetOpenDataLink(WORD port,const SOCKADDR_IN *server)
 	DatagramLink *link=WebRtcLink::OpenData(server);
 	return link?link:new NullLink;
 #else
+#ifdef EDIFICE_WEBRTC
+	if(DatagramLink *browser=RtcHostOpenData(server)) return browser;   //a browser host
+#endif
 #ifdef EDIFICE_GNS
 	GnsLink *link=GnsLink::OpenData(server);
 	if(link) return link;
@@ -86,6 +90,9 @@ DatagramLink *NetOpenDataLink(WORD port,const SOCKADDR_IN *server)
 
 DatagramLink *NetOpenPeerLink(const SOCKADDR_IN *source)
 {
+#ifdef __EMSCRIPTEN__
+	return WebRtcLink::OpenData(source);   //every client of a browser host is one
+#endif
 #ifdef EDIFICE_WEBRTC
 	if(DatagramLink *browser=RtcHostOpenData(source)) return browser;
 #endif
@@ -98,6 +105,9 @@ DatagramLink *NetOpenPeerLink(const SOCKADDR_IN *source)
 
 int NetSourceIsConnection(const SOCKADDR_IN *source)
 {
+#ifdef __EMSCRIPTEN__
+	return WebRtcLink::IsPeer(source);   //DTLS proved who it is
+#endif
 #ifdef EDIFICE_WEBRTC
 	if(RtcHostIsPeer(source)) return 1;   //DTLS proved who it is
 #endif
@@ -133,6 +143,9 @@ void NetLinkShutdown()
 int NetLinkIsP2P(DatagramLink *link)
 {
 #ifdef EDIFICE_GNS
+#ifdef EDIFICE_WEBRTC
+	if(RtcHostIsInfoLink(link)) return 1;   //around a GnsLink
+#endif
 	return link&&dynamic_cast<GnsLink *>(link)!=0;
 #elif defined(__EMSCRIPTEN__)
 	return link&&dynamic_cast<WebRtcLink *>(link)!=0;
@@ -144,7 +157,7 @@ int NetLinkIsP2P(DatagramLink *link)
 
 int NetWebRtcHost()
 {
-#ifdef EDIFICE_WEBRTC
+#if defined(EDIFICE_WEBRTC)||defined(__EMSCRIPTEN__)
 	return 1;
 #else
 	return 0;
@@ -238,15 +251,48 @@ int NetP2PStart(const LobbySession *s,const char *lobbyurl)
 #endif
 }
 
-int NetQueryHostP2P(const SOCKADDR_IN *dest,const char *identity)
+int NetQueryHostP2P(const SOCKADDR_IN *dest,const char *identity,int webhost)
 {
 #ifdef __EMSCRIPTEN__
+	(void)webhost;   //a browser speaks WebRTC to every host
 	WebRtcLink *info=WebRtcLink::CurrentInfo();
 	return info&&info->ConnectP2P(dest,identity);
 #elif defined(EDIFICE_GNS)
+#ifdef EDIFICE_WEBRTC
+	if(webhost) return RtcHostConnect(dest,identity);   //a browser host: WebRTC only
+#endif
+	if(webhost) return 0;
 	GnsLink *info=GnsLink::CurrentInfo();
 	return info&&info->ConnectP2P(dest,identity);
 #else
+	(void)webhost;
 	return 0;
+#endif
+}
+
+int NetCanJoinBrowserHost()
+{
+#if defined(EDIFICE_WEBRTC)||defined(__EMSCRIPTEN__)
+	return NetP2PMode()!=0;
+#else
+	return 0;
+#endif
+}
+
+int NetHostInBrowser()
+{
+#ifdef __EMSCRIPTEN__
+	return 1;
+#else
+	return 0;
+#endif
+}
+
+void NetHostBanner(int on)
+{
+#ifdef __EMSCRIPTEN__
+	WebRtcLink::HostBanner(on);
+#else
+	(void)on;
 #endif
 }
