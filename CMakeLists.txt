@@ -333,6 +333,14 @@ if(EDIFICE_GNS)
     target_link_libraries(gns_p2p_test PRIVATE ${HK_CURL_LIB})
     target_compile_definitions(gns_p2p_test PRIVATE EDIFICE_LOBBY_CURL)
   endif()
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # vcpkg links its own OpenSSL statically for GameNetworkingSockets; exported,
+    # its symbols would take the place of the system libcrypto that libcurl and
+    # libssl use (HTTPS to the lobby then fails in the TLS handshake)
+    foreach(t Edifice gns_netplay_test gns_p2p_test)
+      target_link_options(${t} PRIVATE -Wl,--exclude-libs,ALL)
+    endforeach()
+  endif()
   if(MSVC)
     set_property(TARGET gns_loopback_test gns_netplay_test gns_p2p_test PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
     target_compile_definitions(gns_netplay_test PRIVATE WIN32 _WINDOWS _MBCS _USE_MATH_DEFINES NOMINMAX
