@@ -50,6 +50,7 @@ static id<MTLDevice> device;
 static id<CAMetalDrawable> drawable;
 static void *framepool;
 static NSWindow *nswindow;
+static Uint32 presentpause;       //SDL_GetTicks() until which the window isn't presented
 
 unsigned RWindowFlags()
 {
@@ -139,7 +140,18 @@ sg_swapchain RSokolSwapchain()
 		sc.invalid=true;
 		return sc;
 	}
+	//the same when the compositor stops taking frames while the window still looks
+	//visible (a VM without a display): after a long wait, skip half a second of frames
+	//so that the game runs on
+	if(presentpause&&!SDL_TICKS_PASSED(SDL_GetTicks(),presentpause))
+	{
+		sc.invalid=true;
+		return sc;
+	}
+	presentpause=0;
+	Uint32 asked=SDL_GetTicks();
 	drawable=[layer nextDrawable];
+	if(SDL_GetTicks()-asked>100) presentpause=SDL_GetTicks()+500;
 	if(!drawable)
 	{
 		sc.invalid=true;

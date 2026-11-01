@@ -6,7 +6,7 @@ Each scene runs in a fresh user folder (HK_USERDIR; net.ini with servervisibilit
 and no lobby, so nothing is announced), saves one frame (HK_SHOT, HK_FIXEDCLOCK=16)
 and is stopped. A scene fails when the game exits or saves nothing within 60 s, when
 its log has a sokol_gfx error or validation message (a Debug build validates every
-call), or when the frame is one flat color. --ref compares with the same captures of
+call; warnings are only shown), or when the frame is one flat color. --ref compares with the same captures of
 another build (tests/pixel_diff.py), for information: what the CI's runners draw
 (software GL, WARP, a virtual GPU) differs from a real GPU. Linux needs a display
 (xvfb-run). Used by the CI's sokol job."""
@@ -87,14 +87,18 @@ def run_scene(exe, name, env_extra, outdir):
         shutil.rmtree(userdir, ignore_errors=True)
     with open(log, "rb") as f:
         text = f.read().decode("utf-8", "replace")
-    problems = []
+    problems, notes = [], []
     if exited is not None:
         problems.append("exited with code %d" % exited)
     for line in text.splitlines():
-        # sokol_gfx's log (errors, validation) and the window side's failures (rcontext.h)
-        if line.startswith(("sokol_gfx", "SDL_GL_CreateContext", "SDL_Metal_CreateView", "no Metal device",
-                            "D3D11CreateDeviceAndSwapChain", "SDL_GetWindowWMInfo", "SDL_CreateWindow")):
+        # sokol_gfx's errors (validation included; its warnings are informative, like
+        # the D3D11 feature level) and the window side's failures (rcontext.h)
+        if line.startswith(("sokol_gfx panic", "sokol_gfx error", "SDL_GL_CreateContext", "SDL_Metal_CreateView",
+                            "no Metal device", "D3D11CreateDeviceAndSwapChain", "SDL_GetWindowWMInfo",
+                            "SDL_CreateWindow")):
             problems.append(line)
+        elif line.startswith("sokol_gfx") and line not in notes:
+            notes.append(line)
     if not os.path.isfile(shot):
         problems.append("no frame saved within 60 s")
     else:
@@ -102,7 +106,7 @@ def run_scene(exe, name, env_extra, outdir):
         # one flat color: nothing drawn (a black window, or a present that never came)
         if px[:3] * (w * h) == px:
             problems.append("the frame is one flat color %s" % tuple(px[:3]))
-    return problems, text
+    return problems, notes, text
 
 
 def main():
@@ -117,11 +121,11 @@ def main():
     print("%s: captures in %s" % (platform.system(), outdir))
     failed = 0
     for name, env in SCENES:
-        problems, text = run_scene(exe, name, env, outdir)
+        problems, notes, text = run_scene(exe, name, env, outdir)
         first = next((l[9:] for l in text.splitlines() if l.startswith("console: Edifice ")), "")
         status = "ok" if not problems else "FAILED"
         print("%-8s %s %s" % (name, status, first))
-        for pr in problems[:10]:
+        for pr in problems[:10] + notes[:5]:
             print("    " + pr)
         if problems:
             failed += 1
