@@ -118,8 +118,9 @@ try:
     # a second game joins it by its code, typed like a player would
     typed = code[:3].lower() + "-" + code[3:]
     client = start("client", [GAME], game_env("client", 27040, {"HK_LOBBYJOIN": typed}))
-    wait_for("the host reports the joined player",
-             lambda: (listed("host") or {}).get("players") == 2 or None, 60)
+    if wait_for("the host reports the joined player",
+                lambda: (listed("host") or {}).get("players") == 2 or None, 60):
+        check(True, "joined by game code '%s': the host's renewal says 2 players" % typed)
 
     # the host quits: its game leaves the list right away
     client.send_signal(signal.SIGTERM)
