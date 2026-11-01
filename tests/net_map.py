@@ -3,7 +3,7 @@ that map to the clients that join: its land and sky in LANDINFO, and every
 one of its blocks in BLOCKS.
     python3 tests/net_map.py --write FILE      writes the test map (this script's
                                                own writer of the format)
-    HK_AUTOSTART=1 HK_MAPFILE=FILE <Edifice binary> &
+    HK_AUTOSTART=1 HK_MAPFILE=FILE <Edifice binary> &    (FILE: absolute path)
     python3 tests/net_map.py FILE              joins (tests/net_join.py) and checks
 tests/run_netplay_tests.sh does both."""
 import os, struct, subprocess, sys, tempfile, zlib

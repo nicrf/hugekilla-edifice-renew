@@ -26,10 +26,12 @@ for t in net_handshake net_identity net_join net_fuzz net_voice net_map; do
 	log="$LOGDIR/$t.log"
 	args=()
 	if [ "$t" = net_map ]; then
-		# a server started with a saved map (HK_MAPFILE), written by the test itself
-		python3 tests/net_map.py --write "$LOGDIR/test.map" || status=1
-		args=("$LOGDIR/test.map")
-		HK_MAPFILE="$LOGDIR/test.map" "$BIN" >"$log" 2>&1 &
+		# a server started with a saved map (HK_MAPFILE), written by the test itself;
+		# absolute path: the game runs from its data folder
+		map="$(cd "$LOGDIR" && pwd)/test.map"
+		python3 tests/net_map.py --write "$map" || status=1
+		args=("$map")
+		HK_MAPFILE="$map" "$BIN" >"$log" 2>&1 &
 	else
 		"$BIN" >"$log" 2>&1 &
 	fi

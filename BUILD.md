@@ -50,7 +50,7 @@ Avec les presets CMake : `cmake --preset macos-release && cmake --build --preset
   - `python3 tests/net_join.py` : rejoint la partie comme un vrai client et décode PLAYERNAMES, LANDINFO, SERVERVARS, etc. (tailles et valeurs du format explicite), puis envoie des messages tronqués ;
   - `python3 tests/net_fuzz.py` : paquets malformés, à lancer de préférence contre un build AddressSanitizer (voir l'en-tête du script) ;
   - `python3 tests/net_voice.py` : trois clients ; la voix n'est relayée qu'au joueur proche (y compris de l'autre côté du bord du monde), sous le numéro de l'émetteur, et jamais si le message est malformé ;
-  - `python3 tests/net_map.py --write test.map`, puis `HK_AUTOSTART=1 HK_MAPFILE=test.map <binaire> &` et `python3 tests/net_map.py test.map` : un client qui rejoint un serveur lancé avec une carte reçoit son relief, son ciel et tous ses blocs.
+  - `python3 tests/net_map.py --write /tmp/test.map`, puis `HK_AUTOSTART=1 HK_MAPFILE=/tmp/test.map <binaire> &` et `python3 tests/net_map.py /tmp/test.map` : un client qui rejoint un serveur lancé avec une carte reçoit son relief, son ciel et tous ses blocs.
   - `tests/run_netplay_tests.sh <binaire>` lance les six, un serveur neuf par test (sous Linux avec Xvfb si aucun écran) ; la CI le fait à chaque push contre un build AddressSanitizer, et une release n'est publiée que s'ils passent.
 - Partie à deux sur une machine : `HK_AUTOSTART=1 <binaire> &` puis `HK_JOIN=127.0.0.1 <binaire>` (le second rejoint le premier serveur qui répond).
 
@@ -115,7 +115,7 @@ Le terrain (relief, ciel, décor) et tous les bâtiments, dans `maps/<nom>.map` 
 - `loadmap <nom>` : sur le serveur, remplace le monde par la carte pour tout le monde (les clients la reçoivent comme un nouveau terrain : LANDINFO, puis tous les blocs) ; hors partie, démarre un serveur avec cette carte ; refusé quand on est client d'un autre serveur ;
 - `maps` : liste les cartes enregistrées.
 
-Un serveur lancé avec une carte (`loadmap` ou Server Setup) la recharge à chaque nouvelle manche, avec ses bâtiments d'origine. Debug : `HK_AUTOSTART=1 HK_MAPFILE=<chemin>` démarre le serveur avec ce fichier.
+Un serveur lancé avec une carte (`loadmap` ou Server Setup) la recharge à chaque nouvelle manche, avec ses bâtiments d'origine. Debug : `HK_AUTOSTART=1 HK_MAPFILE=<chemin absolu>` démarre le serveur avec ce fichier (le jeu se place dans son dossier de données : un chemin relatif partirait de là).
 
 Format 2, décrit dans `src/game/mapfile.h` : en-tête `EDIFICEMAP`, version du format, protocole (informatif) et dimensions de la grille, puis le ciel, les `LandDefs` et les blocs écrits champ par champ en little-endian, en plages de cellules identiques (quelques Ko pour un monde peu construit), et un CRC-32. Un fichier tronqué, trop gros, corrompu, d'un autre format ou d'une autre taille de monde est refusé avec un message ; les noms de textures et les compteurs sont bornés comme ceux d'un message LANDINFO. Les sauvegardes du jeu d'origine (Windows, 2000 : `edifice` suivi des structs brutes, environ 55 Mo) se chargent aussi : les copier dans `maps/` avec l'extension `.map`. Leur relief, leur ciel et leurs bâtiments sont repris ; le décor (arbres, taches du sol) diffère, le générateur du monde ayant changé au protocole 3.
 
