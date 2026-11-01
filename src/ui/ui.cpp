@@ -96,7 +96,7 @@ static void DrawCredits()
 	CreditsSection(rightx,y,colw,"Third-party libraries",libraries,(int)(sizeof(libraries)/sizeof(libraries[0])));
 	RColor3f(.75f,.75f,.75f);
 	UITextFit(rightx,y+.03f,"Full texts: licenses/ folder of the game",colw,.045f);
-	UIRect(-.02f,-.05f,-.016f,.7f,1,1,1,.12f);   //column separator
+	UIRect(-.02f,-.2f,-.016f,.7f,1,1,1,.12f);   //column separator
 
 	RColor3f(.45f,.45f,.45f);
 	UIText(leftx,UITextY(-.87f,-.76f,.04f),"Click or press Esc to close",.04f);
