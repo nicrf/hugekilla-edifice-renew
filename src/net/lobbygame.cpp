@@ -27,11 +27,15 @@ static int havesession;
 static DWORD sessiontime;
 static int sessionrequest;
 
-//reads lobby= from net.ini (every time: the player may have just edited it)
+//the public edifice-lobby instance (server/), used when net.ini has no lobby= line
+#define DEFAULT_LOBBY "https://edifice.rousseaufournier.com"
+
+//reads lobby= from net.ini (every time: the player may have just edited it);
+//an empty lobby= turns Internet games off
 static void LoadLobbyURL()
 {
 	CfgFile ini;
-	lobbyurl[0]=0;
+	snprintf(lobbyurl,sizeof(lobbyurl),"%s",DEFAULT_LOBBY);
 	if(ini.Load(UserFile("net.ini"))&&ini.GetValues("lobby"))
 		CopyIniString(lobbyurl,ini.GetValues("lobby"),sizeof(lobbyurl));
 	char before[sizeof(lobbyurl)];
