@@ -149,7 +149,9 @@ build/fuzz/fuzz_map -max_total_time=60 /tmp/c    # fuzzing (le corpus grandit da
 
 ## Releases automatiques
 
-Le job `web` compile aussi la version web à chaque push et PR (`build.py --web --test --package`, emsdk épinglé par `EMSDK_VERSION`), puis la joue dans Chromium sans écran (`tests/web_smoke.py`) ; le site zippé et les captures sont gardés comme artefacts.
+Le job `web` compile aussi la version web à chaque push et PR (`build.py --web --test --package`, emsdk épinglé par `EMSDK_VERSION`), puis la joue dans Chromium sans écran (`tests/web_smoke.py`) ; le site zippé (`edifice-web`) et les captures (`web-shots`) sont gardés comme artefacts. À un tag, il publie aussi le site sur **GitHub Pages** (job `pages` : `https://nicrf.github.io/hugekilla-edifice-renew/`), et la release reçoit `Edifice-<version>-web.zip`.
+
+Une seule fois, pour que le déploiement passe : Settings → Pages → Build and deployment → Source : **GitHub Actions** ; puis Settings → Environments → `github-pages` → Deployment branches and tags → ajouter la règle de tag `v*` (la règle par défaut n'autorise que la branche par défaut, et le déploiement part d'un tag). Domaine personnalisé : Settings → Pages → Custom domain, et l'ajouter à `EDIFICE_CORS_ORIGINS` du lobby.
 
 `.github/workflows/release.yml` : à chaque tag `v*` poussé (`git tag v0.2.0 && git push origin v0.2.0`), GitHub Actions compile macOS, Linux et Windows avec `build.py --config Release --gns --package --test` (`--universal` sur macOS ; vcpkg épinglé par `VCPKG_COMMIT`, cache binaire gardé par `actions/cache`), vérifie chaque archive avec `tests/check_package.py`, puis publie une release GitHub avec les trois archives. À chaque push et PR, les archives sont aussi disponibles comme artefacts, sans release. Minimums : macOS 10.15 (Intel, pour `std::filesystem`) / 11 (Apple Silicon), glibc 2.35 (Ubuntu 22.04 et plus récentes), Windows 10.
 

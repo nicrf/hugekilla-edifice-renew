@@ -1,12 +1,13 @@
 # Builds Edifice on macOS, Linux and Windows.
 #  - push to main / pull request: build check, archives kept as workflow artifacts
 #  - tag v* (git tag v0.2.0 && git push origin v0.2.0): build + GitHub release with the 3 archives
-#    (only the 3 builds: the network tests and fuzzing already ran on the PR / main)
+#    and the web version's zip (only the builds: the network tests and fuzzing already ran on
+#    the PR / main), and the web version deployed to GitHub Pages
 #  - fuzzing: on main, every Monday, or by hand (Actions > Run workflow), not on PRs
 #  - sokol: the renderers (roadmap M13) built and drawn, on every push and PR: sokol_gfx
 #    in Debug (validation), and the fixed-function OpenGL backend kept for one release
 #  - web: the web version (roadmap M14, Emscripten) built and played in headless
-#    Chromium, on every push and PR
+#    Chromium, on every push and PR; at a tag, also deployed to GitHub Pages (job pages)
 name: Build & release
 
 on:
@@ -256,13 +257,31 @@ jobs:
           python tests/web_smoke.py build/web --out web-shots --lobby build/edifice-lobby
 
       - uses: actions/upload-artifact@v4
-        if: always()
         with:
           name: edifice-web
-          path: |
-            dist/Edifice-*-web.zip
-            web-shots
+          path: dist/Edifice-*-web.zip
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: web-shots
+          path: web-shots
           if-no-files-found: ignore
+
+      # a release: the site as GitHub Pages takes it (the job pages deploys it); only
+      # the page's four files, not the unit tests built next to them
+      - name: Stage the site for GitHub Pages
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          mkdir site
+          cp build/web/index.html build/web/index.js build/web/index.wasm build/web/index.data site/
+          ls -l site
+
+      - uses: actions/upload-pages-artifact@v3
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          path: site
 
   fuzzing:
     if: github.event_name != 'pull_request' && !startsWith(github.ref, 'refs/tags/v')
@@ -338,16 +357,35 @@ jobs:
       - run: go test -race ./...
       - run: docker build -t edifice-lobby .
 
+  pages:
+    # The web version on GitHub Pages (https://nicrf.github.io/hugekilla-edifice-renew/),
+    # at each release tag. Needs Settings > Pages > Source: GitHub Actions, and the
+    # github-pages environment must let tags v* deploy (BUILD.md, "Version web").
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [web]
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build]
+    needs: [build, web]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      # the archives: edifice-macos, -linux, -windows and -web (not the screenshots)
       - uses: actions/download-artifact@v4
         with:
           path: dist
+          pattern: edifice-*
           merge-multiple: true
 
       - uses: softprops/action-gh-release@v2
@@ -363,5 +401,7 @@ jobs:
             - **macOS**: unzip, then right-click `Edifice.app` → Open the first time (the app is not notarized).
             - **Linux**: `tar xzf`, then `./Edifice` (keep the `data/` folder next to it).
             - **Windows**: unzip, then run `Edifice.exe` (SmartScreen may warn: More info → Run anyway).
+            - **Web** (solo for now): play at https://nicrf.github.io/hugekilla-edifice-renew/ in a browser with WebGL 2,
+              or serve the `-web.zip` from any web server (not from `file://`).
 
             Original game by Nelson Planting and John Thomas: https://sourceforge.net/p/hugekilla/code/HEAD/tree/HugeKilla/
