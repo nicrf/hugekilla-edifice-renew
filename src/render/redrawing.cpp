@@ -51,7 +51,7 @@ AseObj projectile[10];
 AseObj servercobs[50][3];
 AseObj hangglider;
 GraphicsPrefs graphicsprefs;
-FxPrefs fxprefs={1,1,1};
+FxPrefs fxprefs={1,1,1,1};
 GunDrawInfo gun[10];
 
 int landfaces;
@@ -894,6 +894,17 @@ void DrawText3D(Vector facing,Vector pos,float scale,char *text)
 	RCullFace(RFACE_FRONT);
 }
 
+//the waves' phase, moved a little at each DrawWater
+static float wox;
+static float woy;
+
+//the surface's height at x, as DrawWater draws it (the waves run along x); effects
+//put their ripples there
+float WaterSurfaceHeight(float x)
+{
+	return WATERHEIGHT+sinf(x/WATERBLOCKSIZE*3.141592653f/4+woy*3.141592653f*8)/6;
+}
+
 //draws the water where it needs to be drawn (the isdrawing variable is used to restart the triangle strip,
 // since having a huge strip was causing problems on some graphics cards)
 
@@ -905,8 +916,6 @@ void DrawWater(int size,float cx,float cy)
 	cy/=WATERBLOCKSIZE;
 	int isdrawing;
 	int isvisible;
-	static float wox;
-	static float woy;
 	woy+=.0009;
 	wox+=.0003;
 	if(wox>4) wox-=4;
@@ -1945,8 +1954,9 @@ void Draw(float offset)
 	REnd();
 	RPopAttrib();
 	RCullFace(RFACE_FRONT);
+	DrawEffects(0);
 	DrawWater(50,drawpos.x,drawpos.z);
-	DrawEffects();
+	DrawEffects(1);
 	
 	
 	RDisable(RCAP_TEXTURE);

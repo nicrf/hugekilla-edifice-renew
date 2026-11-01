@@ -60,6 +60,7 @@ struct FxPrefs
 	int viewmodel;        //the gun in its own pass: never inside walls or terrain
 	int explosions;       //grenades: fireball, flash, sparks, debris (effects.cpp)
 	int smoke;            //smoke after explosions, trails of grenades in flight
+	int impacts;          //bullets: splashes on the water, bubbles under it, dust on land
 };
 
 struct Particle
@@ -77,6 +78,7 @@ struct LillyPad
 };
 
 //redrawing.cpp (the 3D models: models.h)
+float WaterSurfaceHeight(float x);
 extern GraphicsPrefs graphicsprefs;
 extern FxPrefs fxprefs;
 extern Particle particle[MAXPARTICLES];
