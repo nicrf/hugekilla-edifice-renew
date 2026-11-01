@@ -190,7 +190,6 @@ void InitConsole();
 #define BUYAUTOMATIC 0x22
 #define BUYACCESSORY 0x23
 #define BUILDING 0x40
-#define INFOMENU 0x80
 
 //playing.cpp
 extern DWORD curtime;       //game clock, ms

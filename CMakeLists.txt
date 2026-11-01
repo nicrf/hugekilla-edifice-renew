@@ -243,7 +243,7 @@ else()
     -Wno-format-security)
   if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     target_compile_options(Edifice PRIVATE -Wno-dangling-else -Wno-nonportable-include-path
-      -Wno-c++11-narrowing -Wno-pragma-once-outside-header -Wno-address-of-temporary
+      -Wno-c++11-narrowing -Wno-pragma-once-outside-header
       -Wno-implicit-const-int-float-conversion)
   elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     # GCC turns some VC6-isms into errors that clang only warns about.

@@ -1191,13 +1191,12 @@ int HandleMenuKey(DWORD key)
 				menutext[0]=0;
 				return 1;
 			}
+			//any other key closes it. This was the fall through into case INFOMENU,
+			//which itself never matched: 0x80 doesn't fit the signed char menu
+			menu=NOMENU;
+			menutext[0]=0;
+			return 1;
 		}
-		case INFOMENU:
-			{
-				menu=NOMENU;
-				menutext[0]=0;
-				return 1;
-			}
 	}
 	return 0;
 }

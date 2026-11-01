@@ -20,6 +20,13 @@
 #include "sound.h"
 #include "ui.h"
 #include "hktime.h"
+//glVertex3fv of a computed point: the temporary binds to the reference, where
+//glVertex3fv((float *)&(a+b)) took the address of an rvalue (GCC: -fpermissive)
+static inline void Vertex(const Vector &v)
+{
+	glVertex3f(v.x,v.y,v.z);
+}
+
 float cloudposx,cloudposy;
 float cloudmistposx,cloudmistposy;	
 #define PI (3.1415926)
@@ -1862,22 +1869,22 @@ void Draw(float offset)
 		{
 			glColor4f(.5,.5,.9,.2);
 			glVertex3fv((float *)&particle[i].pos);
-			glVertex3fv((float *)&(particle[i].pos+Vector(.05,-.5,0)));
-			glVertex3fv((float *)&(particle[i].pos+Vector(-.05,-.5,0)));
+			Vertex(particle[i].pos+Vector(.05,-.5,0));
+			Vertex(particle[i].pos+Vector(-.05,-.5,0));
 			glVertex3fv((float *)&particle[i].pos);
-			glVertex3fv((float *)&(particle[i].pos+Vector(0,-.5,-.05)));
-			glVertex3fv((float *)&(particle[i].pos+Vector(0,-.5,.05)));
+			Vertex(particle[i].pos+Vector(0,-.5,-.05));
+			Vertex(particle[i].pos+Vector(0,-.5,.05));
 		}
 		if(particle[i].type==2)
 		{
 
 			glColor4f(.9,.9,.9,.3);
 			glVertex3fv((float *)&particle[i].pos);
-			glVertex3fv((float *)&(particle[i].pos+Vector(.1,-.1,0)));
-			glVertex3fv((float *)&(particle[i].pos+Vector(-.1,-.1,0)));
+			Vertex(particle[i].pos+Vector(.1,-.1,0));
+			Vertex(particle[i].pos+Vector(-.1,-.1,0));
 			glVertex3fv((float *)&particle[i].pos);
-			glVertex3fv((float *)&(particle[i].pos+Vector(0,-.1,-.1)));
-			glVertex3fv((float *)&(particle[i].pos+Vector(0,-.1,.1)));
+			Vertex(particle[i].pos+Vector(0,-.1,-.1));
+			Vertex(particle[i].pos+Vector(0,-.1,.1));
 		}
 		if(particle[i].type==3)
 		{
@@ -1893,11 +1900,11 @@ void Draw(float offset)
 			else if(timeleft<2500) glColor4f(.9,.3,.1,.8);
 			else glColor4f(.9,.0,.0,.6);
 			glVertex3fv((float *)&particle[i].pos);
-			glVertex3fv((float *)&(particle[i].pos+Vector(.02,-.2,0)));
-			glVertex3fv((float *)&(particle[i].pos+Vector(-.02,-.2,0)));
+			Vertex(particle[i].pos+Vector(.02,-.2,0));
+			Vertex(particle[i].pos+Vector(-.02,-.2,0));
 			glVertex3fv((float *)&particle[i].pos);
-			glVertex3fv((float *)&(particle[i].pos+Vector(0,-.2,-.02)));
-			glVertex3fv((float *)&(particle[i].pos+Vector(0,-.2,.02)));
+			Vertex(particle[i].pos+Vector(0,-.2,-.02));
+			Vertex(particle[i].pos+Vector(0,-.2,.02));
 		}
 		if(particle[i].type==4)
 		{
@@ -1908,11 +1915,11 @@ void Draw(float offset)
 			else if(timeleft<850) glColor4f(.9,.3,.1,.8);
 			else glColor4f(.9,.0,.0,.6);
 			glVertex3fv((float *)&particle[i].pos);
-			glVertex3fv((float *)&(particle[i].pos+Vector(.1,-.1,0)+particle[i].vel*3));
-			glVertex3fv((float *)&(particle[i].pos+Vector(-.1,-.1,0)+particle[i].vel*3));
+			Vertex(particle[i].pos+Vector(.1,-.1,0)+particle[i].vel*3);
+			Vertex(particle[i].pos+Vector(-.1,-.1,0)+particle[i].vel*3);
 			glVertex3fv((float *)&particle[i].pos);
-			glVertex3fv((float *)&(particle[i].pos+Vector(0,-.1,-.1)+particle[i].vel*3));
-			glVertex3fv((float *)&(particle[i].pos+Vector(0,-.1,.1)+particle[i].vel*3));
+			Vertex(particle[i].pos+Vector(0,-.1,-.1)+particle[i].vel*3);
+			Vertex(particle[i].pos+Vector(0,-.1,.1)+particle[i].vel*3);
 		}
 		if(particle[i].type==5)
 		{
@@ -1931,13 +1938,13 @@ void Draw(float offset)
 			Vector pos=(GetLocalPlayer()->pos+particle[i].pos*10)/11;
 			float size=6;
 			glTexCoord2f(0,0);
-			glVertex3fv((float *)&(pos+up*size+right*size));
+			Vertex(pos+up*size+right*size);
 			glTexCoord2f(0,1);
-			glVertex3fv((float *)&(pos+up*size-right*size));
+			Vertex(pos+up*size-right*size);
 			glTexCoord2f(1,0);
-			glVertex3fv((float *)&(pos-up*size+right*size));
+			Vertex(pos-up*size+right*size);
 			glTexCoord2f(1,1);
-			glVertex3fv((float *)&(pos-up*size-right*size));
+			Vertex(pos-up*size-right*size);
 			glEnd();
 			glDisable(GL_TEXTURE_2D);
 			glEnable(GL_FOG);
@@ -1959,11 +1966,11 @@ void Draw(float offset)
 			glColor4f(.3,.15,.1,1);
 			
 			glVertex3fv((float *)&particle[i].pos);
-			glVertex3fv((float *)&(particle[i].pos+Vector(.07,-.07,0)+particle[i].vel*3));
-			glVertex3fv((float *)&(particle[i].pos+Vector(-.07,-.07,0)+particle[i].vel*3));
+			Vertex(particle[i].pos+Vector(.07,-.07,0)+particle[i].vel*3);
+			Vertex(particle[i].pos+Vector(-.07,-.07,0)+particle[i].vel*3);
 			glVertex3fv((float *)&particle[i].pos);
-			glVertex3fv((float *)&(particle[i].pos+Vector(0,-.07,-.07)+particle[i].vel*3));
-			glVertex3fv((float *)&(particle[i].pos+Vector(0,-.07,.07)+particle[i].vel*3));
+			Vertex(particle[i].pos+Vector(0,-.07,-.07)+particle[i].vel*3);
+			Vertex(particle[i].pos+Vector(0,-.07,.07)+particle[i].vel*3);
 		}
 	}
 	glEnd();
@@ -1986,7 +1993,7 @@ void Draw(float offset)
 		glColor4f(1,0,0,0);
 		glVertex3fv((float *)&spark[i]);
 		glColor4f(1,1,0,sparkbright[i]);
-		glVertex3fv((float *)&(spark[i]+sparkvel[i]*sparklen[i]));
+		Vertex(spark[i]+sparkvel[i]*sparklen[i]);
 		spark[i]+=sparkvel[i];
 		sparkbright[i]/=1.1;
 		if(spark[i].y<WATERHEIGHT) sparkbright[i]/=3.0;

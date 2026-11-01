@@ -2265,7 +2265,9 @@ unsigned char GetAng(float x,float y)
 	a+=.5;
 	a*=127;
 	a+=1;
-	return -a;	
+	//-a is in -128..-1: a negative float straight to unsigned char is undefined (UBSan);
+	//through int it wraps to 128..255, what the x86 and ARM code did anyway
+	return (unsigned char)(int)-a;
 }
 
 //called to receive a player position
@@ -2325,14 +2327,17 @@ void SendPosition(char srcnum,char destnum)
 	pos.keys|=(1<<4)*src->jetpack;
 	pos.keys|=(1<<5)*src->hanggliding;
 	
-	pos.posx=src->pos.x/LANDGRIDSIZE*65536;
-	pos.posy=src->pos.y/LANDGRIDSIZE*65536;
-	pos.posz=src->pos.z/LANDGRIDSIZE*65536;
+	//a position on the world's edge (x == LANDGRIDSIZE) gives 65536, below 0 a negative
+	//value: out of range for a WORD (undefined, UBSan); through int it wraps, as the
+	//compiled code always did (65536 is 0: the same place in the repeating world)
+	pos.posx=(WORD)(int)(src->pos.x/LANDGRIDSIZE*65536);
+	pos.posy=(WORD)(int)(src->pos.y/LANDGRIDSIZE*65536);
+	pos.posz=(WORD)(int)(src->pos.z/LANDGRIDSIZE*65536);
 	pos.fwd=GetAng(src->fwd.x,src->fwd.z);
 	pos.tilt=GetAng(src->tilt.x,src->tilt.y);
-	pos.velx=src->vel.x*64;
-	pos.vely=src->vel.y*64;
-	pos.velz=src->vel.z*64;
+	pos.velx=(char)(int)(src->vel.x*64);   //same: wraps beyond +-2 units per frame
+	pos.vely=(char)(int)(src->vel.y*64);
+	pos.velz=(char)(int)(src->vel.z*64);
 	pos.weapon=src->weapon;
 	pos.pnum=srcnum;
 	pos.state=src->playstate;
