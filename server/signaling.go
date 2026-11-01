@@ -25,10 +25,41 @@ type Signaling struct {
 
 type sigClient struct {
 	identity string
-	conn     net.Conn
+	conn     lineConn
 	out      chan string   // never closed: senders may still hold this client
 	done     chan struct{} // closed when the connection ends
 }
+
+// lineConn is a signaling connection, over TCP or WebSocket (websocket.go).
+type lineConn interface {
+	// ReadLine returns the next line without its end; false when the connection
+	// failed, ended, or sent a line longer than the relay takes
+	ReadLine(timeout time.Duration) (string, bool)
+	WriteLine(line string) error // line without '\n'
+	Close() error
+}
+
+type tcpLines struct {
+	conn   net.Conn
+	reader *bufio.Reader
+}
+
+func (c *tcpLines) ReadLine(timeout time.Duration) (string, bool) {
+	c.conn.SetReadDeadline(time.Now().Add(timeout))
+	line, err := c.reader.ReadSlice('\n')
+	if err != nil {
+		return "", false // includes lines longer than maxLine
+	}
+	return strings.TrimRight(string(line), "\r\n"), true
+}
+
+func (c *tcpLines) WriteLine(line string) error {
+	c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	_, err := c.conn.Write([]byte(line + "\n"))
+	return err
+}
+
+func (c *tcpLines) Close() error { return c.conn.Close() }
 
 func NewSignaling(sessions *Sessions) *Signaling {
 	return &Signaling{
@@ -60,16 +91,13 @@ func printable(s string) bool {
 }
 
 func (g *Signaling) handle(conn net.Conn) {
+	g.serve(&tcpLines{conn: conn, reader: bufio.NewReaderSize(conn, g.maxLine+2)})
+}
+
+// serve relays one connection until it ends (and closes it).
+func (g *Signaling) serve(conn lineConn) {
 	defer conn.Close()
-	reader := bufio.NewReaderSize(conn, g.maxLine+2)
-	readLine := func(timeout time.Duration) (string, bool) {
-		conn.SetReadDeadline(time.Now().Add(timeout))
-		line, err := reader.ReadSlice('\n')
-		if err != nil {
-			return "", false // includes lines longer than maxLine
-		}
-		return strings.TrimRight(string(line), "\r\n"), true
-	}
+	readLine := conn.ReadLine
 
 	hello, ok := readLine(10 * time.Second)
 	if !ok {
@@ -77,7 +105,7 @@ func (g *Signaling) handle(conn net.Conn) {
 	}
 	fields := strings.Fields(hello)
 	if len(fields) != 2 || !g.sessions.Check(fields[0], fields[1]) {
-		conn.Write([]byte("ERROR unauthorized\n"))
+		conn.WriteLine("ERROR unauthorized")
 		return
 	}
 	c := &sigClient{identity: fields[0], conn: conn, out: make(chan string, 64), done: make(chan struct{})}
@@ -99,8 +127,7 @@ func (g *Signaling) handle(conn net.Conn) {
 		for {
 			select {
 			case line := <-c.out:
-				conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-				if _, err := conn.Write([]byte(line)); err != nil {
+				if err := conn.WriteLine(line); err != nil {
 					conn.Close()
 					return
 				}
@@ -135,7 +162,7 @@ func (g *Signaling) handle(conn net.Conn) {
 			continue
 		}
 		select {
-		case target.out <- c.identity + " " + payload + "\n":
+		case target.out <- c.identity + " " + payload:
 		default: // receiver not keeping up: drop
 		}
 	}

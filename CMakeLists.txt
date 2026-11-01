@@ -279,6 +279,10 @@ add_executable(voice_test tests/voice_test.cpp)
 target_include_directories(voice_test PRIVATE ${SRC}/net ${SRC}/audio)
 target_link_libraries(voice_test PRIVATE Opus::opus)
 add_test(NAME voice COMMAND voice_test)
+# the server's anti-cheat checks (roadmap M11, src/net/anticheat.h)
+add_executable(anticheat_test tests/anticheat_test.cpp)
+target_include_directories(anticheat_test PRIVATE ${SRC}/net)
+add_test(NAME anticheat COMMAND anticheat_test)
 set(HK_TEST_INCLUDES ${SRC}/game ${SRC}/net ${SRC}/compat)
 if(NOT WIN32)
   list(APPEND HK_TEST_INCLUDES ${SRC}/compat/include)   # "windows.h": DWORD...
@@ -324,11 +328,6 @@ if(EDIFICE_GNS)
   target_sources(Edifice PRIVATE src/net/gnslink.cpp src/net/gnssignal.cpp)
   target_compile_definitions(Edifice PRIVATE EDIFICE_GNS)
   target_link_libraries(Edifice PRIVATE ${HK_GNS_LIB})
-  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    # The static OpenSSL of GameNetworkingSockets (vcpkg) must not be exported:
-    # the system libcurl's libssl would bind to it instead of the system libcrypto.
-    target_link_options(Edifice PRIVATE -Wl,--exclude-libs,ALL)
-  endif()
   if(MSVC)
     # Release archives run on a clean Windows: the C++ runtime DLLs go next to
     # Edifice.exe (app-local deployment, allowed by the Visual Studio redist
@@ -356,6 +355,14 @@ if(EDIFICE_GNS)
   if(HK_CURL_LIB)
     target_link_libraries(gns_p2p_test PRIVATE ${HK_CURL_LIB})
     target_compile_definitions(gns_p2p_test PRIVATE EDIFICE_LOBBY_CURL)
+  endif()
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # vcpkg links its own OpenSSL statically for GameNetworkingSockets; exported,
+    # its symbols would take the place of the system libcrypto that libcurl and
+    # libssl use (HTTPS to the lobby then fails in the TLS handshake)
+    foreach(t Edifice gns_netplay_test gns_p2p_test)
+      target_link_options(${t} PRIVATE -Wl,--exclude-libs,ALL)
+    endforeach()
   endif()
   if(MSVC)
     set_property(TARGET gns_loopback_test gns_netplay_test gns_p2p_test PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")

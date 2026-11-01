@@ -1,7 +1,8 @@
 // Unit test of the signaling relay protocol (src/net/signaling.cpp, roadmap M7d):
 // the lines the client writes, the readers of what the relay sends (hostile lines
 // included), the from_identity a GameNetworkingSockets signal claims, and the
-// STUN/TURN and relay addresses of a lobby session.
+// STUN/TURN and relay addresses of a lobby session, and the same relay over
+// WebSocket (the upgrade, frames both ways).
 #include "signaling.h"
 #include <stdio.h>
 #include <string.h>
@@ -161,12 +162,90 @@ static void Addresses()
 	CHECK(SignalValidIdentity(ME)&&!SignalValidIdentity("str:")&&!SignalValidIdentity(0)&&!SignalValidIdentity("ip:1.2.3.4"));
 }
 
+static void WebSocket()
+{
+	char host[64],path[64];
+	int port,tls;
+	CHECK(SignalParseURL("wss://lobby.example.org/v1/signal",host,sizeof(host),&port,path,sizeof(path),&tls)&&
+		!strcmp(host,"lobby.example.org")&&port==443&&tls==1&&!strcmp(path,"/v1/signal"));
+	CHECK(SignalParseURL("ws://127.0.0.1:18080/v1/signal",host,sizeof(host),&port,path,sizeof(path),&tls)&&
+		!strcmp(host,"127.0.0.1")&&port==18080&&tls==0&&!strcmp(path,"/v1/signal"));
+	CHECK(SignalParseURL("wss://x",host,sizeof(host),&port,path,sizeof(path),&tls)&&port==443&&!strcmp(path,"/"));
+	CHECK(SignalParseURL("wss://x:8443",host,sizeof(host),&port,path,sizeof(path),&tls)&&port==8443&&!strcmp(path,"/"));
+	CHECK(!SignalParseURL("https://x/v1/signal",host,sizeof(host),&port,path,sizeof(path),&tls));
+	CHECK(!SignalParseURL("wss://user@x/",host,sizeof(host),&port,path,sizeof(path),&tls));
+	CHECK(!SignalParseURL("wss://x:0/",host,sizeof(host),&port,path,sizeof(path),&tls));
+	CHECK(!SignalParseURL("wss://x:/",host,sizeof(host),&port,path,sizeof(path),&tls));
+	CHECK(!SignalParseURL("wss:///v1",host,sizeof(host),&port,path,sizeof(path),&tls));
+	CHECK(!SignalParseURL("wss://x/a b",host,sizeof(host),&port,path,sizeof(path),&tls));
+	CHECK(!SignalParseURL("wss://[::1]/",host,sizeof(host),&port,path,sizeof(path),&tls));
+	CHECK(!SignalParseURL(0,host,sizeof(host),&port,path,sizeof(path),&tls));
+
+	// RFC 6455 1.3: the key "the sample nonce"
+	const unsigned char key[16]={'t','h','e',' ','s','a','m','p','l','e',' ','n','o','n','c','e'};
+	std::string req=SignalWsRequest("lobby.example.org",443,1,"/v1/signal",key);
+	CHECK(req=="GET /v1/signal HTTP/1.1\r\nHost: lobby.example.org\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+		"Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n");
+	CHECK(SignalWsRequest("x",8443,1,"/",key).find("Host: x:8443\r\n")!=std::string::npos);
+
+	const char *ok="HTTP/1.1 101 Switching Protocols\r\nupgrade:  WebSocket \r\nConnection: Upgrade\r\n"
+		"Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n\r\n\x81\x02hi";
+	int oklen=(int)strlen(ok);
+	CHECK(SignalWsResponse(ok,oklen)==oklen-4);
+	CHECK(SignalWsResponse(ok,40)==0);
+	const char *refused="HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n\r\n{}";
+	CHECK(SignalWsResponse(refused,(int)strlen(refused))==-1);
+	const char *noupgrade="HTTP/1.1 101 Switching Protocols\r\nUpgrade: h2c\r\n\r\n";
+	CHECK(SignalWsResponse(noupgrade,(int)strlen(noupgrade))==-1);
+	std::string endless="HTTP/1.1 101 OK\r\n"+std::string(SIGNAL_WS_MAXRESPONSE,'a');
+	CHECK(SignalWsResponse(endless.data(),(int)endless.size())==-1);
+
+	// client frames are masked
+	const unsigned char mask[4]={0x37,0xfa,0x21,0x3d};
+	std::string frame;
+	SignalWsFrame(SIGNAL_WS_TEXT,"Hello",5,mask,&frame);
+	CHECK(frame=="\x81\x85\x37\xfa\x21\x3d\x7f\x9f\x4d\x51\x58");   // RFC 6455 5.7
+	frame.clear();
+	std::string big(300,'a');
+	SignalWsFrame(SIGNAL_WS_TEXT,big.data(),(int)big.size(),mask,&frame);
+	CHECK(frame.size()==8+300&&(unsigned char)frame[1]==(0x80|126)&&frame[2]==1&&frame[3]==44);
+
+	// server frames, in pieces
+	SignalWsReader r;
+	int op;
+	std::string payload;
+	std::string in=std::string("\x81\x05Hello",7)+std::string("\x89\x00",2)+std::string("\x82\x7e\x01\x2c",4)+big;
+	for(size_t i=0;i<in.size();i+=3) r.Add(in.data()+i,(int)(in.size()-i<3?in.size()-i:3));
+	CHECK(r.Next(&op,&payload)==1&&op==SIGNAL_WS_TEXT&&payload=="Hello");
+	CHECK(r.Next(&op,&payload)==1&&op==SIGNAL_WS_PING&&payload.empty());
+	CHECK(r.Next(&op,&payload)==1&&op==SIGNAL_WS_BINARY&&payload==big);
+	CHECK(r.Next(&op,&payload)==0);
+	// an overlong frame is skipped whole, what follows is read
+	std::string huge(SIGNAL_MAXLINE+10,'z');
+	in=std::string("\x81\x7e",2)+(char)(huge.size()>>8)+(char)(huge.size()&255)+huge+std::string("\x81\x02ok",4);
+	for(size_t i=0;i<in.size();i+=1000) r.Add(in.data()+i,(int)(in.size()-i<1000?in.size()-i:1000));
+	CHECK(r.Next(&op,&payload)==1&&payload=="ok");
+	std::string bigger=std::string("\x81\x7f\x00\x00\x00\x00\x00\x10\x00\x00",10);   // 1 MB announced
+	r.Add(bigger.data(),(int)bigger.size());
+	CHECK(r.Next(&op,&payload)==0);
+	// protocol errors: masked, fragmented, continuation, reserved bits, long control frame
+	const char *bad[]={"\x81\x82" "abcdxx","\x01\x01x","\x80\x01x","\xc1\x01x","\x89\x7e\x00\x80"};
+	const int badlen[]={8,3,3,3,4};
+	for(int i=0;i<5;i++)
+	{
+		SignalWsReader e;
+		e.Add(bad[i],badlen[i]);
+		CHECK(e.Next(&op,&payload)==-1);
+	}
+}
+
 int main()
 {
 	Lines();
 	Reader();
 	FromIdentity();
 	Addresses();
+	WebSocket();
 	if(failures) printf("%d failure(s)\n",failures);
 	else printf("signaling: all tests passed\n");
 	return failures?1:0;

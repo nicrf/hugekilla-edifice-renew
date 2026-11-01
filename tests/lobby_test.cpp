@@ -116,8 +116,9 @@ static void Parsers()
 	const char *sess="{\"identity\":\"str:edifice-0011223344556677\",\"token\":\"ab01\",\"expires\":\"2026-01-01T00:00:00Z\","
 		"\"ice\":{\"stun\":[\"stun:x:3478\",\"stun:a,b:1\",7],\"turn\":[{\"url\":\"turn:x:3478?transport=udp\",\"username\":\"1:str:e\","
 		"\"credential\":\"c+/=\"},{\"url\":\"turn:y\",\"username\":\"u v\",\"credential\":\"c\"},{\"url\":\"turn:z\"}]},"
-		"\"signaling\":\"lobby.example.org:10000\"}";
+		"\"signaling\":\"lobby.example.org:10000\",\"signaling_url\":\"wss://lobby.example.org/v1/signal\"}";
 	CHECK(LobbyParseSession(sess,(int)strlen(sess),&session)==1);
+	CHECK(!strcmp(session.signalurl,"wss://lobby.example.org/v1/signal"));
 	CHECK(!strcmp(session.identity,"str:edifice-0011223344556677")&&!strcmp(session.token,"ab01"));
 	CHECK(session.numstun==1&&!strcmp(session.stun[0],"stun:x:3478"));   // a comma, a number: skipped
 	CHECK(session.numturn==1&&!strcmp(session.turn[0].url,"turn:x:3478?transport=udp")&&
@@ -125,6 +126,8 @@ static void Parsers()
 	CHECK(!strcmp(session.signaling,"lobby.example.org:10000"));
 	const char *nosig="{\"identity\":\"str:edifice-1\",\"token\":\"ab\",\"signaling\":\"a b:1\",\"ice\":5}";
 	CHECK(LobbyParseSession(nosig,(int)strlen(nosig),&session)==1&&!session.signaling[0]&&!session.numstun);
+	const char *badurl="{\"identity\":\"str:edifice-1\",\"token\":\"ab\",\"signaling_url\":\"https://x/v1/signal\"}";
+	CHECK(LobbyParseSession(badurl,(int)strlen(badurl),&session)==1&&!session.signalurl[0]);
 	const char *spaced="{\"identity\":\"a b\",\"token\":\"ab\"}";
 	CHECK(LobbyParseSession(spaced,(int)strlen(spaced),&session)==0&&!session.identity[0]&&!session.token[0]);
 	char many[2000];

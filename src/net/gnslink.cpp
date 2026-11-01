@@ -402,10 +402,13 @@ int GnsLink::StartP2P(const GnsP2PConfig *config)
 	utils->SetGlobalConfigValueString(k_ESteamNetworkingConfig_P2P_TURN_PassList,config->turnpasses);
 	utils->SetGlobalConfigValueInt32(k_ESteamNetworkingConfig_P2P_Transport_ICE_Enable,config->relayonly?
 		k_nSteamNetworkingConfig_P2P_Transport_ICE_Enable_Relay:k_nSteamNetworkingConfig_P2P_Transport_ICE_Enable_All);
-	GnsSignalStart(config->signalhost,config->signalport,config->identity,config->token);
+	GnsSignalStart(config->signalhost,config->signalport,config->signalurl,config->identity,config->token);
 	p2pready=1;
-	fprintf(stderr,"gns: P2P as %s, signaling %s:%d, STUN %s, TURN %s%s\n",config->identity,
-		config->signalhost,config->signalport,config->stun[0]?config->stun:"none",
+	char relay[300];
+	if(config->signalurl&&config->signalurl[0]) snprintf(relay,sizeof(relay),"%s",config->signalurl);
+	else snprintf(relay,sizeof(relay),"%s:%d",config->signalhost,config->signalport);
+	fprintf(stderr,"gns: P2P as %s, signaling %s, STUN %s, TURN %s%s\n",config->identity,
+		relay,config->stun[0]?config->stun:"none",
 		config->turn[0]?config->turn:"none",config->relayonly?" (relay only)":"");
 	int ok=1;
 	for(size_t i=0;i<infolinks.size();i++)

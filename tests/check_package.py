@@ -12,11 +12,19 @@ Unpacks it into a temporary folder, then
   - a short run: the unpacked game started as a headless server (HK_AUTOSTART=1,
     with --gns HK_TRANSPORT=gns, which needs GameNetworkingSockets and OpenSSL to
     start: "gns: listening on port"), then tests/net_handshake.py against it
-    (only a warning on Windows, where the runners have no OpenGL 2).
-Linux needs a display (xvfb-run). Used by the CI on the three OS. --no-run skips
-the run: the server it starts uses the per-user net.ini where HOME/APPDATA don't
-move it (macOS), and would announce itself if servervisibility isn't lan there."""
+    (only a warning on Windows, where the runners have no OpenGL 2);
+  - with --lobby <edifice-lobby> (server/, go build): a real HTTPS exchange from
+    the unpacked game: a local lobby over TLS (self-signed certificate, trusted
+    through EDIFICE_TEST_CA_FILE; needs openssl), the server announces itself
+    there (servervisibility=public), opens its session and listens for P2P
+    connections. Catches a static OpenSSL taking the place of the system's under
+    libcurl (Linux).
+The game runs with its own user folder (XDG_DATA_HOME, CFFIXED_USER_HOME,
+APPDATA) and a net.ini written here: servervisibility=lan unless --lobby, so it
+never announces itself on the public lobby. Linux needs a display (xvfb-run).
+--no-run skips the run. Used by the CI on the three OS."""
 import glob
+import json
 import os
 import platform
 import re
@@ -26,6 +34,8 @@ import sys
 import tarfile
 import tempfile
 import time
+import urllib.request
+import ssl
 import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -177,12 +187,55 @@ def check_windows(top, gns):
     return exe
 
 
-def run_game(exe, gns, tmp):
+LOBBY_URL = "https://127.0.0.1:18090"
+SERVERNAME = "Package check"
+
+
+def start_lobby(lobby, tmp):
+    """edifice-lobby over HTTPS on 127.0.0.1:18090; returns (process, certificate)"""
+    cert, key = os.path.join(tmp, "lobby-cert.pem"), os.path.join(tmp, "lobby-key.pem")
+    subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "2",
+                    "-subj", "/CN=127.0.0.1", "-addext", "subjectAltName=IP:127.0.0.1",
+                    "-keyout", key, "-out", cert], check=True, capture_output=True)
+    log = open(os.path.join(tmp, "lobby.log"), "w")
+    # -allow-private: the game announces itself from this machine
+    p = subprocess.Popen([lobby, "-http", "127.0.0.1:18090", "-signal", "127.0.0.1:18091",
+                          "-turn", "127.0.0.1:18478", "-public-host", "127.0.0.1",
+                          "-tls-cert", cert, "-tls-key", key, "-allow-private"],
+                         stdout=log, stderr=subprocess.STDOUT)
+    return p, cert
+
+
+def lobby_get(path, cert):
+    ctx = ssl.create_default_context(cafile=cert)
+    try:
+        with urllib.request.urlopen(LOBBY_URL + path, timeout=5, context=ctx) as r:
+            return json.loads(r.read() or b"null")
+    except (OSError, ValueError):
+        return None
+
+
+def user_folder(home):
+    """where the game looks for its net.ini, for the env set by run_game"""
+    if SYSTEM == "Darwin":
+        return os.path.join(home, "Library", "Application Support", "Edifice")
+    return os.path.join(home, "Edifice")
+
+
+def run_game(exe, gns, tmp, lobby=None):
     env = dict(os.environ)
     home = os.path.join(tmp, "home")       # fresh settings folder (copied from data/)
-    os.makedirs(home)
-    env.update(HOME=home, XDG_DATA_HOME=home, APPDATA=home, SDL_AUDIODRIVER="dummy",
-               HK_AUTOSTART="1", HK_CONSOLE_LOG="1", HK_SHOT=os.devnull, HK_SHOT_FRAME="999999")
+    os.makedirs(user_folder(home))
+    lobbyproc = cert = None
+    if lobby:
+        lobbyproc, cert = start_lobby(lobby, tmp)
+        env["EDIFICE_TEST_CA_FILE"] = cert
+    with open(os.path.join(user_folder(home), "net.ini"), "w", newline="\r\n") as f:
+        f.write("infosendport=27020\ndatasendport=27021\nservername=%s\n" % SERVERNAME)
+        f.write("lobby=%s\nservervisibility=public\n" % LOBBY_URL if lobby else "servervisibility=lan\n")
+    env.update(HOME=home, XDG_DATA_HOME=home, CFFIXED_USER_HOME=home, APPDATA=home,
+               SDL_AUDIODRIVER="dummy", HK_AUTOSTART="1", HK_CONSOLE_LOG="1",
+               HK_SHOT=os.devnull, HK_SHOT_FRAME="999999")
     env.pop("HK_P2P", None)
     if gns:
         env["HK_TRANSPORT"] = "gns"
@@ -225,6 +278,8 @@ def run_game(exe, gns, tmp):
             if p.poll() is not None:
                 report("the game exited during the handshake test, code %d (0x%08x)" %
                        (p.returncode, p.returncode & 0xffffffff))
+            if lobby and p.poll() is None:
+                check_lobby(p, log, cert, gns)
     finally:
         if p.poll() is None:
             p.kill()
@@ -232,11 +287,53 @@ def run_game(exe, gns, tmp):
         with open(log, errors="replace") as f:
             txt = f.read()
         print("-- game log (tail):\n" + "\n".join(txt.splitlines()[-25:]))
+        if lobbyproc:
+            lobbyproc.kill()
+            lobbyproc.wait()
+            if errors:
+                with open(os.path.join(tmp, "lobby.log"), errors="replace") as f:
+                    print("-- lobby log (tail):\n" + "\n".join(f.read().splitlines()[-15:]))
+
+
+def check_lobby(p, log, cert, gns):
+    """the game's HTTPS requests reached the local lobby: it is listed, and (GNS)
+    listens for P2P connections under the identity of its lobby session"""
+    end = time.time() + 60
+    servers = None
+    while time.time() < end and p.poll() is None:
+        body = lobby_get("/v1/servers?protocol=0", cert)
+        servers = body.get("servers") if isinstance(body, dict) else None
+        if servers and any(sv.get("name") == SERVERNAME for sv in servers if isinstance(sv, dict)):
+            break
+        time.sleep(1)
+    mine = [sv for sv in servers or [] if isinstance(sv, dict) and sv.get("name") == SERVERNAME]
+    if not mine:
+        fail("the game didn't announce itself on the local HTTPS lobby (listed: %s)" % servers)
+        return
+    print("lobby (HTTPS): listed, identity %s" % (mine[0].get("identity") or "none"))
+    if gns:
+        want = "gns: listening for P2P connections as"
+        while time.time() < end and p.poll() is None:
+            with open(log, errors="replace") as f:
+                if want in f.read():
+                    break
+            time.sleep(0.5)
+        with open(log, errors="replace") as f:
+            if want not in f.read():
+                fail("no '%s' (lobby session over HTTPS)" % want)
+        if not mine[0].get("identity"):
+            fail("the lobby lists the game without its P2P identity")
 
 
 def main():
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    gns = "--gns" in sys.argv
+    argv = sys.argv[1:]
+    lobby = None
+    if "--lobby" in argv:
+        i = argv.index("--lobby")
+        lobby = os.path.abspath(argv[i + 1])
+        del argv[i:i + 2]
+    args = [a for a in argv if not a.startswith("--")]
+    gns = "--gns" in argv
     if len(args) != 1:
         sys.exit(__doc__)
     archive = os.path.abspath(args[0])
@@ -247,7 +344,7 @@ def main():
         check_contents(top, gns)
         exe = {"Darwin": check_macos, "Linux": check_linux, "Windows": check_windows}[SYSTEM](top, gns)
         if "--no-run" not in sys.argv:
-            run_game(exe, gns, tmp)
+            run_game(exe, gns, tmp, lobby)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     if errors:

@@ -1,5 +1,5 @@
 //The line protocol of edifice-lobby's signaling relay (server/signaling.go, roadmap
-//M7d), as GnsLink's signaling client speaks it: the protocol of Valve's
+//M7d; over TCP or, below, WebSocket), as GnsLink's signaling client speaks it: the protocol of Valve's
 //trivial_signaling example (GameNetworkingSockets examples/), plus authentication.
 //  first line, to the relay:   IDENTITY TOKEN        (a lobby session)
 //  then, to the relay:         DESTINATION HEXPAYLOAD
@@ -60,6 +60,47 @@ private:
 	std::string buf;
 	int linelen;    //characters of the line not complete yet
 	int skipping;   //inside an overlong line: dropping up to its '\n'
+};
+
+//---- the same relay over WebSocket (RFC 6455) ----
+//GET /v1/signal on the lobby's HTTP API (server/websocket.go), so that it goes
+//through the lobby's HTTPS (wss://, the token never in clear text) without another
+//port. The lines above, one per text frame, without their '\n'.
+#define SIGNAL_WS_TEXT 1
+#define SIGNAL_WS_BINARY 2
+#define SIGNAL_WS_CLOSE 8
+#define SIGNAL_WS_PING 9
+#define SIGNAL_WS_PONG 10
+#define SIGNAL_WS_MAXRESPONSE 4096   //the server's answer to the upgrade, headers included
+
+//"wss://host[:port][/path]" (or ws://, plain text; host a name or IPv4, as in
+//SignalParseAddress): 1 and its parts if valid (port 443 or 80 by default, path
+//"/" by default, printable without spaces)
+int SignalParseURL(const char *url,char *host,int hostsize,int *port,char *path,int pathsize,int *tls);
+//the upgrade request for host:port/path; key: 16 random bytes
+std::string SignalWsRequest(const char *host,int port,int tls,const char *path,const unsigned char key[16]);
+//the server's answer to it in data (len bytes received so far): its length when
+//complete and "101 Switching Protocols" to a WebSocket, 0 while incomplete, -1 if
+//refused or malformed
+int SignalWsResponse(const char *data,int len);
+//a client frame (masked with mask, as RFC 6455 wants of clients) appended to out
+void SignalWsFrame(int opcode,const char *payload,int size,const unsigned char mask[4],std::string *out);
+
+//cuts what the server sends into frames (unmasked, unfragmented: a server frame
+//that isn't is a protocol error); a text or binary frame longer than
+//SIGNAL_MAXLINE is skipped whole, like an overlong line
+class SignalWsReader
+{
+public:
+	SignalWsReader() : skipping(0) {}
+	void Add(const char *data,int size);
+	//1 and the next frame (text, binary, ping, pong or close: opcode and payload),
+	//0 if none is complete yet, -1 on a protocol error (then close)
+	int Next(int *opcode,std::string *payload);
+	void Clear() { buf.clear(); skipping=0; }
+private:
+	std::string buf;
+	unsigned long long skipping;   //bytes of an overlong frame still to drop
 };
 
 //signaling relay address, "host:port" (host name or IPv4; port 1-65535): 1 and its

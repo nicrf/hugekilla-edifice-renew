@@ -13,9 +13,16 @@ services:
       EDIFICE_TURN_RELAY_PORTS: ${EDIFICE_TURN_RELAY_PORTS:-49160-49200}
       EDIFICE_TURN_SECRET: ${EDIFICE_TURN_SECRET:?set EDIFICE_TURN_SECRET in .env}
       EDIFICE_TRUST_PROXY: ${EDIFICE_TRUST_PROXY:-0}
+      EDIFICE_TRUSTED_PROXIES: ${EDIFICE_TRUSTED_PROXIES:-}
+      EDIFICE_PUBLIC_URL: ${EDIFICE_PUBLIC_URL:-}
+      EDIFICE_SIGNAL: ${EDIFICE_SIGNAL:-:10000}
     ports:
-      - "8080:8080/tcp"            # HTTP API (put a TLS reverse proxy in front for HTTPS)
-      - "10000:10000/tcp"          # signaling
+      # HTTP API and the WebSocket signaling relay (GET /v1/signal): put a TLS
+      # reverse proxy in front (Caddy's reverse_proxy passes WebSockets as is)
+      - "8080:8080/tcp"
+      # signaling over plain TCP, for older games: remove it (and EDIFICE_SIGNAL=off)
+      # once every player has a game that uses the WebSocket relay
+      - "10000:10000/tcp"
       - "3478:3478/udp"            # STUN/TURN
       - "49160-49200:49160-49200/udp"   # TURN relayed traffic, same range as EDIFICE_TURN_RELAY_PORTS
     healthcheck:

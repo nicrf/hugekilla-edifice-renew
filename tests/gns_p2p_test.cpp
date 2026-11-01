@@ -59,8 +59,8 @@ static int Session(const char *url,int relay,GnsP2PConfig *config)
 	std::string reply;
 	for(int i=0;i<1000&&!LobbyPoll(r,&status,&reply);i++) Wait(10);
 	if(status!=201||!LobbyParseSession(reply.data(),(int)reply.size(),&session)) return 0;
-	int port;
-	if(!SignalParseAddress(session.signaling,relayhost,sizeof(relayhost),&port)) return 0;
+	int port=0;
+	if(!SignalParseAddress(session.signaling,relayhost,sizeof(relayhost),&port)&&!session.signalurl[0]) return 0;
 	char server[300];
 	for(int i=0;i<session.numstun;i++)
 		if(SignalIceServer(session.stun[i],"stun",server,sizeof(server))) stun+=(stun.empty()?"":",")+std::string(server);
@@ -71,9 +71,11 @@ static int Session(const char *url,int relay,GnsP2PConfig *config)
 			users+=(users.empty()?"":",")+std::string(session.turn[i].username);
 			passes+=(passes.empty()?"":",")+std::string(session.turn[i].credential);
 		}
-	GnsP2PConfig c={session.identity,session.token,relayhost,port,stun.c_str(),turn.c_str(),users.c_str(),passes.c_str(),relay};
+	GnsP2PConfig c={session.identity,session.token,relayhost,port,stun.c_str(),turn.c_str(),users.c_str(),passes.c_str(),relay,
+		session.signalurl};
 	*config=c;
-	printf("session %s, signaling %s:%d, STUN %s, TURN %s\n",session.identity,relayhost,port,stun.c_str(),turn.c_str());
+	printf("session %s, signaling %s / %s:%d, STUN %s, TURN %s\n",session.identity,session.signalurl,relayhost,port,
+		stun.c_str(),turn.c_str());
 	return 1;
 }
 

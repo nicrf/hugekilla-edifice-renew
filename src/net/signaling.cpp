@@ -244,3 +244,210 @@ int SignalIceServer(const char *url,const char *scheme,char *out,int size)
 	if(!HostPort(s,n,host,sizeof(host),&port)) return 0;
 	return snprintf(out,size,"%s:%d",host,port)<size;
 }
+
+//---- WebSocket ----
+
+static int HostChar(int c)
+{
+	return (c>='0'&&c<='9')||(c>='a'&&c<='z')||(c>='A'&&c<='Z')||c=='.'||c=='-';
+}
+
+int SignalParseURL(const char *url,char *host,int hostsize,int *port,char *path,int pathsize,int *tls)
+{
+	if(!url) return 0;
+	int n=(int)strnlen(url,300);
+	if(n>=300) return 0;
+	const char *s;
+	int defport;
+	if(!strncmp(url,"wss://",6)) { s=url+6; *tls=1; defport=443; }
+	else if(!strncmp(url,"ws://",5)) { s=url+5; *tls=0; defport=80; }
+	else return 0;
+	const char *end=url+n;
+	const char *slash=(const char *)memchr(s,'/',end-s);
+	const char *hostend=slash?slash:end;
+	const char *p=s;
+	while(p<hostend&&*p!=':') p++;
+	int hl=(int)(p-s);
+	if(hl<1||hl>=hostsize||hl>253) return 0;
+	for(int i=0;i<hl;i++)
+		if(!HostChar((unsigned char)s[i])) return 0;
+	int v=defport;
+	if(p<hostend)
+	{
+		int digits=(int)(hostend-p-1);
+		if(digits<1||digits>5) return 0;
+		v=0;
+		for(int i=0;i<digits;i++)
+		{
+			int c=(unsigned char)p[1+i];
+			if(c<'0'||c>'9') return 0;
+			v=v*10+c-'0';
+		}
+		if(v<1||v>65535) return 0;
+	}
+	const char *pth=slash?slash:"/";
+	int pl=(int)(slash?end-slash:1);
+	if(pl>=pathsize) return 0;
+	for(int i=0;i<pl;i++)
+		if((unsigned char)pth[i]<33||(unsigned char)pth[i]>126) return 0;
+	memcpy(host,s,hl);
+	host[hl]=0;
+	memcpy(path,pth,pl);
+	path[pl]=0;
+	*port=v;
+	return 1;
+}
+
+static void Base64(const unsigned char *in,int n,std::string *out)
+{
+	static const char digits[]="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+	for(int i=0;i<n;i+=3)
+	{
+		unsigned v=(unsigned)in[i]<<16|(i+1<n?(unsigned)in[i+1]<<8:0)|(i+2<n?in[i+2]:0);
+		*out+=digits[v>>18&63];
+		*out+=digits[v>>12&63];
+		*out+=i+1<n?digits[v>>6&63]:'=';
+		*out+=i+2<n?digits[v&63]:'=';
+	}
+}
+
+std::string SignalWsRequest(const char *host,int port,int tls,const char *path,const unsigned char key[16])
+{
+	char where[300];
+	if(port==(tls?443:80)) snprintf(where,sizeof(where),"%s",host);
+	else snprintf(where,sizeof(where),"%s:%d",host,port);
+	std::string r="GET ";
+	r+=path;
+	r+=" HTTP/1.1\r\nHost: ";
+	r+=where;
+	r+="\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: ";
+	Base64(key,16,&r);
+	r+="\r\n\r\n";
+	return r;
+}
+
+static int Lower(int c)
+{
+	return c>='A'&&c<='Z'?c-'A'+'a':c;
+}
+
+//the n characters at s are text, ignoring case
+static int Is(const char *s,int n,const char *text)
+{
+	if((int)strlen(text)!=n) return 0;
+	for(int i=0;i<n;i++)
+		if(Lower((unsigned char)s[i])!=Lower((unsigned char)text[i])) return 0;
+	return 1;
+}
+
+//Sec-WebSocket-Accept isn't checked: it only shows that the server speaks
+//WebSocket (against caches and confused servers); who the server is, the TLS of
+//wss:// says.
+int SignalWsResponse(const char *data,int len)
+{
+	if(!data||len<0) return -1;
+	int end=-1;
+	for(int i=0;i+4<=len&&i+4<=SIGNAL_WS_MAXRESPONSE;i++)
+		if(!memcmp(data+i,"\r\n\r\n",4)) { end=i+4; break; }
+	if(end<0) return len>=SIGNAL_WS_MAXRESPONSE?-1:0;
+	if(end<16||memcmp(data,"HTTP/1.1 101 ",13)) return -1;
+	int upgrade=0;
+	const char *p=(const char *)memchr(data,'\n',end)+1;   //end: there is one
+	while(p<data+end-2)
+	{
+		const char *eol=(const char *)memchr(p,'\r',data+end-p);
+		if(!eol) return -1;
+		const char *colon=(const char *)memchr(p,':',eol-p);
+		if(colon)
+		{
+			const char *v=colon+1,*ve=eol;
+			while(v<ve&&(*v==' '||*v=='\t')) v++;
+			while(ve>v&&(ve[-1]==' '||ve[-1]=='\t')) ve--;
+			if(Is(p,(int)(colon-p),"upgrade")&&Is(v,(int)(ve-v),"websocket")) upgrade=1;
+		}
+		p=eol+2;
+	}
+	return upgrade?end:-1;
+}
+
+void SignalWsFrame(int opcode,const char *payload,int size,const unsigned char mask[4],std::string *out)
+{
+	if(size<0) size=0;
+	out->push_back((char)(0x80|(opcode&15)));
+	if(size<126) out->push_back((char)(0x80|size));
+	else if(size<=0xFFFF)
+	{
+		out->push_back((char)(0x80|126));
+		out->push_back((char)(size>>8));
+		out->push_back((char)size);
+	}
+	else
+	{
+		out->push_back((char)(0x80|127));
+		for(int i=7;i>=0;i--) out->push_back((char)(i>=4?0:(unsigned)size>>(8*i)));
+	}
+	out->append((const char *)mask,4);
+	for(int i=0;i<size;i++) out->push_back((char)(payload[i]^mask[i&3]));
+}
+
+void SignalWsReader::Add(const char *data,int size)
+{
+	if(skipping&&size>0)
+	{
+		int drop=skipping<(unsigned long long)size?(int)skipping:size;
+		skipping-=drop;
+		data+=drop;
+		size-=drop;
+	}
+	if(size>0) buf.append(data,size);
+}
+
+int SignalWsReader::Next(int *opcode,std::string *payload)
+{
+	while(1)
+	{
+		if(skipping)
+		{
+			size_t drop=skipping<buf.size()?(size_t)skipping:buf.size();
+			buf.erase(0,drop);
+			skipping-=drop;
+			if(skipping) return 0;
+		}
+		if(buf.size()<2) return 0;
+		const unsigned char *b=(const unsigned char *)buf.data();
+		int op=b[0]&15;
+		if(b[0]&0x70||b[1]&0x80) return -1;   //extensions, or masked: not from a server
+		if(op!=SIGNAL_WS_TEXT&&op!=SIGNAL_WS_BINARY&&op!=SIGNAL_WS_CLOSE&&op!=SIGNAL_WS_PING&&op!=SIGNAL_WS_PONG)
+			return -1;   //continuations (nobody fragments here) and reserved opcodes
+		if(!(b[0]&0x80)) return -1;
+		unsigned long long n=b[1]&127;
+		size_t head=2;
+		if(n==126)
+		{
+			if(buf.size()<4) return 0;
+			n=(unsigned long long)b[2]<<8|b[3];
+			head=4;
+		}
+		else if(n==127)
+		{
+			if(buf.size()<10) return 0;
+			n=0;
+			for(int i=0;i<8;i++) n=n<<8|b[2+i];
+			if(n>>63) return -1;
+			head=10;
+		}
+		if(op>=SIGNAL_WS_CLOSE&&n>125) return -1;
+		if(n>=SIGNAL_MAXLINE)
+		{
+			//too long to be one of ours: dropped whole
+			buf.erase(0,head);
+			skipping=n;
+			continue;
+		}
+		if(buf.size()<head+n) return 0;
+		*opcode=op;
+		payload->assign(buf,head,(size_t)n);
+		buf.erase(0,head+(size_t)n);
+		return 1;
+	}
+}
