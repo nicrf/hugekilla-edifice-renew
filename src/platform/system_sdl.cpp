@@ -21,6 +21,13 @@ int64_t HKPerfFrequency()
 	return (int64_t)SDL_GetPerformanceFrequency();
 }
 
+//the counter starts at boot: after 49.7 days its milliseconds no longer fit in 32
+//bits, and the double -> DWORD conversion the game did was undefined from then on
+uint32_t HKPerfMillis()
+{
+	return (uint32_t)(uint64_t)((double)HKPerfCounter() / (double)HKPerfFrequency() * 1000);
+}
+
 void HKSleep(uint32_t ms)
 {
 	SDL_Delay(ms);

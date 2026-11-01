@@ -87,7 +87,6 @@ inline void SetLandLight(int x, int y)
 		xs&=1024-1;
 		ys&=1024-1;
 		float nf;
-		if(clouds)
 		nf=((float)*((BYTE*)&clouds[xs*1024+ys]))/256;
 		l*=nf;
 		if(l<.3)l=.3;
@@ -529,7 +528,7 @@ static inline void BlockColor(float c,char red)
 
 //draws an individual block (the wireframe of the build preview)
 
-void DrawBlock(int x,int y,int z,char ds,char type,int &px,int &py,int &pz,char red)
+void DrawBlock(int x,int y,int z,unsigned char ds,char type,int &px,int &py,int &pz,char red)
 {
 	x*=BLOCKSIZE;
 	y*=BLOCKSIZE;
@@ -1293,7 +1292,7 @@ void Redraw()
 	}
 	static int64_t lasttime;
 	int64_t tmptime=HKPerfCounter();
-	framefps=HKPerfFrequency()/(tmptime-lasttime);
+	if(tmptime>lasttime) framefps=HKPerfFrequency()/(tmptime-lasttime);   //never a division by 0
 	curfps=(curfps*5+framefps)/6;
 	lasttime=tmptime;
 	char tmptext[40];

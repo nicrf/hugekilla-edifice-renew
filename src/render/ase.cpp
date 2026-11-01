@@ -171,7 +171,7 @@ int ReadFaces(char *buf,asemesh *obj)
 		buf+=1;
 		memcpy(&numvertex,buf,2);
 		buf+=2;
-		if(flag&&F_HOLE)
+		if(flag)   //was flag&&F_HOLE, always that: flag&F_HOLE would change the models
 		{
 			short mat;
 			memcpy(&mat,buf,2);

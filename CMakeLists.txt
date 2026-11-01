@@ -229,23 +229,25 @@ target_compile_definitions(Edifice PRIVATE GL_SILENCE_DEPRECATION
   EDIFICE_VERSION_STRING="${PROJECT_VERSION}"
   "$<$<CONFIG:Debug>:HK_SOURCE_DATA_DIR=\"${DATA_DIR}\">")
 
-# 2000-era code: keep the noise down, and keep its signed char / wrapping assumptions.
+# 2000-era code: keep the noise down, and its signed char assumption. No -fwrapv,
+# -fno-strict-aliasing nor -Wno-return-type any more: the code they covered is fixed
+# (roadmap M12.6), and the sanitizers check it (BUILD.md).
 if(MSVC)
   # MSVC's default permissive mode is what the VC6-era code needs: never add /permissive-.
   target_compile_definitions(Edifice PRIVATE WIN32 _WINDOWS _MBCS _USE_MATH_DEFINES NOMINMAX
     _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS _WINSOCK_DEPRECATED_NO_WARNINGS)
   target_compile_options(Edifice PRIVATE /W1)
 else()
-  target_compile_options(Edifice PRIVATE -fsigned-char -fwrapv -fno-strict-aliasing
+  target_compile_options(Edifice PRIVATE -fsigned-char
     -Wno-write-strings -Wno-deprecated-declarations -Wno-parentheses
-    -Wno-return-type -Wno-format-security)
+    -Wno-format-security)
   if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     target_compile_options(Edifice PRIVATE -Wno-dangling-else -Wno-nonportable-include-path
       -Wno-c++11-narrowing -Wno-pragma-once-outside-header -Wno-address-of-temporary
       -Wno-implicit-const-int-float-conversion)
   elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     # GCC turns some VC6-isms into errors that clang only warns about.
-    target_compile_options(Edifice PRIVATE -fpermissive -Wno-narrowing -w)
+    target_compile_options(Edifice PRIVATE -fpermissive -Wno-narrowing)
   endif()
   if(WIN32)   # MinGW
     target_compile_definitions(Edifice PRIVATE _USE_MATH_DEFINES)
@@ -383,10 +385,27 @@ if(EDIFICE_GNS)
     target_link_libraries(gns_p2p_test PRIVATE ws2_32 opengl32)
   else()
     foreach(t gns_netplay_test gns_p2p_test)
-      target_compile_options(${t} PRIVATE -fsigned-char -fwrapv -Wno-write-strings
+      target_compile_options(${t} PRIVATE -fsigned-char -Wno-write-strings
         -Wno-deprecated-declarations $<$<CXX_COMPILER_ID:GNU>:-fpermissive>)
     endforeach()
   endif()
+endif()
+
+# ---- Warnings as errors --------------------------------------------------------
+# The CI builds with EDIFICE_WERROR=ON (.github/workflows/release.yml): a warning in
+# the game or its tests fails the build. Third-party code (SDL, opus, curl, GNS) is in
+# its own targets and keeps its warnings. Off by default: a newer compiler at home may
+# warn about more, which shouldn't stop a build.
+option(EDIFICE_WERROR "Treat warnings in the game code as errors" OFF)
+if(EDIFICE_WERROR)
+  set(HK_WERROR_TARGETS Edifice worldrandom_test wire_test voice_test anticheat_test hmac_test
+    fileio_test map_test lobby_test signaling_test)
+  if(EDIFICE_GNS)
+    list(APPEND HK_WERROR_TARGETS gns_loopback_test gns_netplay_test gns_p2p_test)
+  endif()
+  foreach(t ${HK_WERROR_TARGETS})
+    target_compile_options(${t} PRIVATE $<IF:$<CXX_COMPILER_ID:MSVC>,/WX,-Werror>)
+  endforeach()
 endif()
 
 # ---- Fuzzing -----------------------------------------------------------------
@@ -425,8 +444,8 @@ if(EDIFICE_FUZZ)
     add_executable(fuzz_${name} ${source} ${HK_FUZZ_MAIN} ${ARGN})
     target_include_directories(fuzz_${name} PRIVATE ${INCLUDE_DIRS})
     target_compile_definitions(fuzz_${name} PRIVATE FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION)
-    target_compile_options(fuzz_${name} PRIVATE -g -O1 ${HK_FUZZ_FLAGS} -fsigned-char -fwrapv
-      -fno-strict-aliasing -Wno-write-strings -Wno-deprecated-declarations -Wno-parentheses)
+    target_compile_options(fuzz_${name} PRIVATE -g -O1 ${HK_FUZZ_FLAGS} -fsigned-char
+      -Wno-write-strings -Wno-deprecated-declarations -Wno-parentheses)
     target_link_options(fuzz_${name} PRIVATE ${HK_FUZZ_FLAGS})
     add_dependencies(fuzz fuzz_${name})
     # every seed once (libFuzzer: -runs=0 only runs the corpus)
@@ -458,5 +477,5 @@ if(EDIFICE_FUZZ)
   add_executable(fuzz_make_seeds tests/fuzz/make_seeds.cpp src/net/sock.cpp src/net/version.cpp
     src/game/mapfile.cpp src/game/Vector.cpp)
   target_include_directories(fuzz_make_seeds PRIVATE ${INCLUDE_DIRS})
-  target_compile_options(fuzz_make_seeds PRIVATE -fsigned-char -fwrapv -Wno-write-strings -Wno-deprecated-declarations)
+  target_compile_options(fuzz_make_seeds PRIVATE -fsigned-char -Wno-write-strings -Wno-deprecated-declarations)
 endif()

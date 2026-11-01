@@ -63,7 +63,7 @@ int GetAmmoHold(int num)
 	case 6:
 		return sv.sr1000ammohold;
 	}
-
+	return 0;   //not a gun: fell off the end (undefined) in the original
 }
 
 int GetReloadTime(int num)
@@ -85,7 +85,7 @@ int GetReloadTime(int num)
 	case 6:
 		return sv.sr1000reloadtime;
 	}
-
+	return 0;   //not a gun: fell off the end (undefined) in the original
 }
 
 
@@ -391,7 +391,7 @@ void TickObjects(float sf)
 					i2=0;
 					for(int i3=0;i3<200;i3++)
 					{
-						for(i2;i2<MAXPARTICLES;i2++)
+						for(;i2<MAXPARTICLES;i2++)
 						{
 							if(particle[i2].type==0)
 							{
@@ -415,7 +415,7 @@ void TickObjects(float sf)
 					i2=0;
 					for(int i3=0;i3<20;i3++)
 					{
-						for(i2;i2<MAXPARTICLES;i2++)
+						for(;i2<MAXPARTICLES;i2++)
 						{
 							if(particle[i2].type==0)
 							{
@@ -502,7 +502,7 @@ void Playloop()
 	DWORD targtime;
 	static DWORD targlasttime=0;
 
-	targtime=((double)HKPerfCounter())/(double)HKPerfFrequency()*1000;
+	targtime=HKPerfMillis();
 	//first call (leaving the menu to join a game) or a long pause: start from now.
 	//Interpolating from 0 set curtime to 0 for a frame, and a join request answered
 	//within that frame got a timeout based on it, then "server timed out" at once.
@@ -1207,11 +1207,11 @@ char* l33tify(char *msg)
 {
 	int len=strlen(msg);
 	
-	char newtext[2000];
-	char basel33t='~'+2;
+	static char newtext[2000];   //returned: was a local, read after it was gone
+	char basel33t=(char)('~'+2);   //the font's extra glyphs after '~' (0x80, 0x81)
 
 	int newtextpos=0;
-	for(int i=0;i<len;i)
+	for(int i=0;i<len;)
 	{
 		if(strncmp("w00t",&msg[i],4)==0)
 		{

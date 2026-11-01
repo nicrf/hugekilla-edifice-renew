@@ -102,7 +102,7 @@ SimpleBuf MakeSimple(char type,DWORD msg,DWORD msg2)
 
 //used to convert an ip address into a sockaddr
 
-SOCKADDR_IN MakeSockAddr(char a1,char a2,char a3,char a4,WORD port)
+SOCKADDR_IN MakeSockAddr(unsigned char a1,unsigned char a2,unsigned char a3,unsigned char a4,WORD port)
 {
 	SOCKADDR_IN addr;
 	//memset(&addr,0,sizeof(addr));
@@ -2251,7 +2251,8 @@ void SendLandInfo(int num)
 }
 
 
-#define pi 3.14159265
+//the angles on the wire are computed with this pi, not redrawing.h's longer one
+static const double WIREPI=3.14159265;
 
 
 //converts the angle made by x and y to a byte
@@ -2259,8 +2260,8 @@ void SendLandInfo(int num)
 unsigned char GetAng(float x,float y)
 {
 	float a=atan(y/x);
-	if(x<0)a-=pi;
-	a/=pi;
+	if(x<0)a-=WIREPI;
+	a/=WIREPI;
 	a+=.5;
 	a*=127;
 	a+=1;
@@ -2288,10 +2289,10 @@ void ReceivePosition(const char *msg,int msglen,int sender)
 	src->pos.x=(float)pos->posx/65536*LANDGRIDSIZE;
 	src->pos.y=(float)pos->posy/65536*LANDGRIDSIZE;
 	src->pos.z=(float)pos->posz/65536*LANDGRIDSIZE;
-	src->fwd.x=sin(((float)pos->fwd/255-.5)*pi*2);
-	src->fwd.z=cos(((float)pos->fwd/255-.5)*pi*2);
-	src->tilt.x=sin(((float)pos->tilt/255-.5)*pi*2);
-	src->tilt.y=cos(((float)pos->tilt/255-.5)*pi*2);
+	src->fwd.x=sin(((float)pos->fwd/255-.5)*WIREPI*2);
+	src->fwd.z=cos(((float)pos->fwd/255-.5)*WIREPI*2);
+	src->tilt.x=sin(((float)pos->tilt/255-.5)*WIREPI*2);
+	src->tilt.y=cos(((float)pos->tilt/255-.5)*WIREPI*2);
 	src->vel.x=(float)pos->velx/64;
 	src->vel.y=(float)pos->vely/64;
 	src->vel.z=(float)pos->velz/64;

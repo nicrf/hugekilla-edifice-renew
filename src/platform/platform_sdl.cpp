@@ -659,7 +659,7 @@ int main(int argc, char **argv)
 				fprintf(stderr, "HK_JOIN: %s\n", reason);
 		}
 
-		curtime = ((double)HKPerfCounter()) / (double)HKPerfFrequency() * 1000;
+		curtime = HKPerfMillis();
 
 		// Was a 200ms WM_TIMER: scrolls the status lines.
 		if (curtime >= nexttimertick)
