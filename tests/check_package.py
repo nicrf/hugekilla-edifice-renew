@@ -269,10 +269,10 @@ def run_game(exe, gns, tmp, lobby=None):
                     fail("no '%s' within 90 s" % want)
                     ok = False
         if ok:
-            # The Windows runners have no GPU, only Windows' own OpenGL 1.1 (GDI),
-            # and the game exits soon after starting there. The run then proves that
-            # every DLL loads and GameNetworkingSockets starts; the handshake is
-            # informative only.
+            # On the Windows runners (no GPU, Windows' own OpenGL 1.1) the game dies
+            # of a stack overflow (0xC00000FD) right after creating the land, the
+            # v0.4.1 release too. The run still proves that every DLL loads and
+            # GameNetworkingSockets starts; the handshake is informative only.
             report = warn if SYSTEM == "Windows" else fail
             r = subprocess.run([sys.executable, os.path.join(HERE, "net_handshake.py")], timeout=120)
             if r.returncode:

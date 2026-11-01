@@ -114,16 +114,6 @@ jobs:
             python tests/check_package.py dist/Edifice-*.zip --gns
           fi
 
-      - name: TEMP compare with the v0.4.1 release (Windows)
-        if: matrix.name == 'windows'
-        continue-on-error: true
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          mkdir -p old && gh release download v0.4.1 -p '*windows.zip' -D old
-          python tests/check_package.py old/Edifice-0.4.1-windows.zip
-
       - uses: actions/upload-artifact@v4
         with:
           name: edifice-${{ matrix.name }}
