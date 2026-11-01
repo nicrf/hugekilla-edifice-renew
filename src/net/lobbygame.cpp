@@ -4,6 +4,8 @@
 //(sooner when the player count changes) and removes it when the server stops; the
 //join screen lists the public games and looks up game codes, and gets a session of
 //its own to join a game P2P.
+//The host also announces its LAN addresses: the lobby gives them only to players
+//from its own public address (behind the same router), who join it there.
 
 #include "StdAfx.h"
 #include "cfgfile.h"
@@ -15,6 +17,10 @@
 #include "netlink.h"
 #include <stdio.h>
 #include <string.h>
+#ifndef _WIN32
+#include <ifaddrs.h>
+#include <net/if.h>
+#endif
 
 extern NetSettings netsettings;
 extern ServerVars sv;
@@ -127,6 +133,62 @@ static int hostp2p;             //listening for P2P connections: identity announ
 static char hostvisibility[8];
 static char hostid[LOBBY_CODELEN+1];
 static char hosttoken[65];
+static char hostlan[LOBBY_MAXLAN][16]; //our LAN addresses, announced
+static int hostnumlan;
+
+static void AddLan(char addr[][16],int *n,int max,in_addr a)
+{
+	char text[16];
+	snprintf(text,sizeof(text),"%s",inet_ntoa(a));
+	if(*n>=max||!LobbyLANAddress(text)) return;
+	for(int i=0;i<*n;i++)
+		if(!strcmp(addr[i],text)) return;
+	strcpy(addr[(*n)++],text);
+}
+
+//the private IPv4 addresses of this machine: first the one of the interface that
+//routes out (a UDP socket "connected" to a public address: nothing is sent), then
+//the other interfaces' (up, not loopback)
+static int LanAddresses(char addr[][16],int max)
+{
+	int n=0;
+	SOCKET s=socket(AF_INET,SOCK_DGRAM,0);
+	if(s!=INVALID_SOCKET)
+	{
+		SOCKADDR_IN to;
+		memset(&to,0,sizeof(to));
+		to.sin_family=AF_INET;
+		to.sin_port=htons(53);
+		to.sin_addr.s_addr=inet_addr("8.8.8.8");
+		SOCKADDR_IN self;
+		socklen_t len=sizeof(self);
+		if(connect(s,(SOCKADDR *)&to,sizeof(to))==0&&getsockname(s,(SOCKADDR *)&self,&len)==0)
+			AddLan(addr,&n,max,self.sin_addr);
+		closesocket(s);
+	}
+#ifdef _WIN32
+	char name[256];
+	addrinfo hints,*res=0;
+	memset(&hints,0,sizeof(hints));
+	hints.ai_family=AF_INET;
+	if(gethostname(name,sizeof(name))==0&&getaddrinfo(name,0,&hints,&res)==0)
+	{
+		for(addrinfo *i=res;i;i=i->ai_next)
+			AddLan(addr,&n,max,((sockaddr_in *)i->ai_addr)->sin_addr);
+		freeaddrinfo(res);
+	}
+#else
+	ifaddrs *list=0;
+	if(getifaddrs(&list)==0)
+	{
+		for(ifaddrs *i=list;i;i=i->ifa_next)
+			if(i->ifa_addr&&i->ifa_addr->sa_family==AF_INET&&(i->ifa_flags&IFF_UP)&&!(i->ifa_flags&IFF_LOOPBACK))
+				AddLan(addr,&n,max,((sockaddr_in *)i->ifa_addr)->sin_addr);
+		freeifaddrs(list);
+	}
+#endif
+	return n;
+}
 
 static void Say(const char *text)
 {
@@ -168,11 +230,13 @@ void LobbyHostStart()
 	hoststate=NetP2PMode()&&LobbySessionStart()>=0?HOST_SESSION:HOST_ANNOUNCE;
 	hostnext=GetTickCount();
 	hostplayers=-1;
+	hostnumlan=LanAddresses(hostlan,LOBBY_MAXLAN);
+	for(int i=0;i<hostnumlan;i++) fprintf(stderr,"lobby: LAN address %s\n",hostlan[i]);
 }
 
 static void HostSend(int players)
 {
-	char body[600],path[64];
+	char body[800],path[64];
 	const LobbySession *s=LobbySessionGet();
 	LobbyAnnouncement a;
 	a.name=netsettings.servername;
@@ -185,6 +249,8 @@ static void HostSend(int players)
 	a.visibility=hostvisibility;
 	a.identity=hostp2p&&s?s->identity:"";   //the lobby lists it with its token only
 	a.session=hostp2p&&s?s->token:"";
+	a.numlan=hostnumlan;
+	for(int i=0;i<hostnumlan;i++) a.lan[i]=hostlan[i];
 	if(LobbyAnnouncementJSON(&a,body,sizeof(body)))
 	{
 		if(hoststate==HOST_ANNOUNCE)
@@ -303,7 +369,8 @@ int LobbyListRequest()
 	if(!LobbyReady()) return 0;
 	if(listrequest) LobbyDrop(listrequest);
 	//every protocol: the others are shown as incompatible, like on the LAN
-	listrequest=LobbySend("GET","/v1/servers?protocol=0",0,0);
+	listrequest=LobbySend("GET","/v1/servers?protocol=0",0,0,1);   //IPv4, as the host announces: the
+	//lobby gives the LAN addresses of a game to the players from its public address
 	return listrequest!=0;
 }
 
@@ -335,7 +402,7 @@ int LobbyLookupRequest(const char *code)
 	if(!LobbyNormalizeCode(code,id,sizeof(id))||!LobbyReady()) return 0;
 	if(lookuprequest) LobbyDrop(lookuprequest);
 	snprintf(path,sizeof(path),"/v1/servers/%s",id);
-	lookuprequest=LobbySend("GET",path,0,0);
+	lookuprequest=LobbySend("GET",path,0,0,1);   //IPv4: as for the list
 	return lookuprequest!=0;
 }
 

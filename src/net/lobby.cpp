@@ -249,6 +249,31 @@ static int IPv4(const char *s)
 	return *s==0;
 }
 
+int LobbyLANAddress(const char *s)
+{
+	if(!s||!IPv4(s)) return 0;
+	int a=atoi(s),b=atoi(strchr(s,'.')+1);
+	return a==10||(a==172&&b>=16&&b<=31)||(a==192&&b==168);
+}
+
+//"lan":[...] of a game: its valid LAN addresses, up to LOBBY_MAXLAN; anything else
+//is skipped (never makes the game invalid: an extra the game can do without)
+static void LanList(JsonIn &j,LobbyGame *g,int depth)
+{
+	if(Peek(j)!='[') { Skip(j,depth); return; }
+	j.p++;
+	int first=1;
+	while(ArrayNext(j,first))
+	{
+		if(Peek(j)!='"') { Skip(j,depth+1); continue; }
+		char addr[16];
+		if(String(j,addr,sizeof(addr))||!LobbyLANAddress(addr)||g->numlan>=LOBBY_MAXLAN) continue;
+		int dup=0;
+		for(int i=0;i<g->numlan;i++) dup|=!strcmp(g->lan[i],addr);
+		if(!dup) strcpy(g->lan[g->numlan++],addr);
+	}
+}
+
 //the fields of one game object; 1 if it is a game we can show and join
 static int GameObject(JsonIn &j,LobbyGame *g,int depth)
 {
@@ -266,6 +291,7 @@ static int GameObject(JsonIn &j,LobbyGame *g,int depth)
 		else if(!strcmp(key,"version")) StrValue(j,g->version,sizeof(g->version),&valid);
 		else if(!strcmp(key,"visibility")) StrValue(j,g->visibility,sizeof(g->visibility),&valid,1);
 		else if(!strcmp(key,"identity")) StrValue(j,g->identity,sizeof(g->identity),&valid,1);
+		else if(!strcmp(key,"lan")) LanList(j,g,depth+1);
 		else if(!strcmp(key,"port"))
 		{
 			v=IntValue(j,&valid);
@@ -540,6 +566,15 @@ int LobbyAnnouncementJSON(const LobbyAnnouncement *a,char *out,int size)
 		Put(out,size,pos,",\"visibility\":")&&PutString(out,size,pos,a->visibility)&&
 		Put(out,size,pos,",\"identity\":")&&PutString(out,size,pos,a->identity)&&
 		Put(out,size,pos,",\"session\":")&&PutString(out,size,pos,a->session);
+	if(ok&&a->numlan>0)
+	{
+		//only private IPv4 (the lobby drops anything else too); old lobbies ignore it
+		ok=Put(out,size,pos,",\"lan\":[");
+		for(int i=0,n=0;ok&&i<a->numlan&&i<LOBBY_MAXLAN;i++)
+			if(LobbyLANAddress(a->lan[i]))
+				ok=(!n++||Put(out,size,pos,","))&&PutString(out,size,pos,a->lan[i]);
+		ok=ok&&Put(out,size,pos,"]");
+	}
 	snprintf(num,sizeof(num),",\"port\":%d,\"protocol\":%d,\"players\":%d,\"maxplayers\":%d,\"mode\":%d}",
 		a->port,a->protocol,a->players,a->maxplayers,a->mode);
 	return ok&&Put(out,size,pos,num);

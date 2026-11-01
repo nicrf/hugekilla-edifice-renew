@@ -14,6 +14,7 @@
 #define LOBBY_MAXGAMES 128           //games kept from a list (MAXLOCALLIST in multiplay.cpp)
 #define LOBBY_MAXREPLY (512*1024)    //longer answers are dropped
 #define LOBBY_CODELEN 16             //game codes are 6 characters; up to 16 accepted
+#define LOBBY_MAXLAN 4               //LAN addresses of a host
 
 //a game as the lobby lists it
 struct LobbyGame
@@ -29,6 +30,11 @@ struct LobbyGame
 	int mode;                   //sv.gamemode
 	char visibility[8];         //public, friends, private
 	char identity[65];          //GameNetworkingSockets identity (P2P, M7d), may be empty
+	//the host's private IPv4 addresses (10/8, 172.16/12, 192.168/16), dotted: the
+	//lobby gives them only to players from the host's own public address, who are
+	//on its network and reach it there (routers seldom loop back to their LAN)
+	int numlan;
+	char lan[LOBBY_MAXLAN][16];
 };
 
 //what a host announces (POST and PUT /v1/servers)
@@ -45,6 +51,8 @@ struct LobbyAnnouncement
 	const char *identity;
 	const char *session;        //token of identity's session: the lobby lists the
 	                            //identity only with it (0 or "": no identity)
+	int numlan;                 //the host's LAN addresses (private IPv4, dotted)
+	const char *lan[LOBBY_MAXLAN];
 };
 
 #define LOBBY_MAXICE 4              //STUN and TURN servers kept from a session
@@ -111,5 +119,7 @@ int LobbyParseError(const char *json,int len,char *msg,int size);
 int LobbyNormalizeCode(const char *in,char *out,int size);
 //JSON body of an announcement; 0 if it doesn't fit
 int LobbyAnnouncementJSON(const LobbyAnnouncement *a,char *out,int size);
+//1 if s is a dotted IPv4 address of a private range (10/8, 172.16/12, 192.168/16)
+int LobbyLANAddress(const char *s);
 
 #endif
