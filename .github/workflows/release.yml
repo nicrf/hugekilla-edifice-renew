@@ -211,7 +211,7 @@ jobs:
           files: dist/*
           generate_release_notes: true
           body: |
-            Builds for macOS (universal, 10.13+), Linux (x86_64) and Windows (x64, 10+). No dependency to install.
+            Builds for macOS (universal, 10.15+), Linux (x86_64) and Windows (x64, 10+). No dependency to install.
             Internet games (Join → Internet, or a game code) connect peer to peer, encrypted, through the
             lobby's relay when needed: nothing to open on your router.
 

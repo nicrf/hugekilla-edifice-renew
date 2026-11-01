@@ -67,23 +67,15 @@ static int CompareNames(const void *a,const void *b)
 //lists the entries of a folder: directories or files only
 static int ListFolder(const char *folder,int wantdirs,char out[][NAMELEN])
 {
-	char filter[300];
-	sprintf(filter,"%s\\*",folder);
-	WIN32_FIND_DATA fd;
-	HANDLE find=FindFirstFile(filter,&fd);
-	if(find==INVALID_HANDLE_VALUE) return 0;
+	std::vector<HKDirEntry> entries=HKListDir(folder);
 	int n=0;
-	do
+	for(size_t i=0;i<entries.size()&&n<MAXENTRIES;i++)
 	{
-		if(fd.cFileName[0]=='.') continue;
-		int isdir=(fd.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)!=0;
-		if(isdir!=wantdirs||n>=MAXENTRIES) continue;
-		strncpy(out[n],fd.cFileName,NAMELEN-1);
+		if(entries[i].name[0]=='.'||entries[i].isdir!=wantdirs) continue;
+		strncpy(out[n],entries[i].name.c_str(),NAMELEN-1);
 		out[n][NAMELEN-1]=0;
 		n++;
 	}
-	while(FindNextFile(find,&fd));
-	FindClose(find);
 	qsort(out,n,NAMELEN,CompareNames);
 	return n;
 }
@@ -95,7 +87,7 @@ static void SelectCategory(int c)
 	numitems=0;
 	if(c<0||c>=numcategories) return;
 	char folder[200];
-	sprintf(folder,"structures\\%s",categories[c]);
+	sprintf(folder,"structures/%s",categories[c]);
 	numitems=ListFolder(folder,0,items);
 }
 
@@ -125,7 +117,7 @@ static void PickItem(int i)
 {
 	if(i<0||i>=numitems) return;
 	char path[300];
-	sprintf(path,"structures\\%s\\%s",categories[curcategory],items[i]);
+	sprintf(path,"structures/%s/%s",categories[curcategory],items[i]);
 	CloseBuildMenu();
 	if(!LoadStructure(path))
 	{

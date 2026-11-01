@@ -1257,10 +1257,12 @@ void ScreenShot()
 		strcpy(filename,"screenshot-");
 		itoa(RND*1000,&filename[strlen(filename)],16);
 		strcat(filename,".bmp");
-		HANDLE file=CreateFile(UserFile(filename),GENERIC_WRITE,0,0,OPEN_ALWAYS,0,0);
-		DWORD byteswritten;
-		WriteFile(file,filebuf,bufsize,&byteswritten,0);
-		CloseHandle(file);
+		FILE *file=HKFileOpen(UserFile(filename),"wb");
+		if(file)
+		{
+			fwrite(filebuf,1,bufsize,file);
+			fclose(file);
+		}
 		delete []filebuf;
 		GetLocalPlayer()->takescreenshot=0;
 	}

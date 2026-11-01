@@ -98,14 +98,8 @@ static void LoadSkyNames()
 	for(int i=0;i<numskies;i++)
 		sprintf(skynames[i],"Sky %d",i+1);
 
-	HANDLE file=CreateFile("skies.ini",GENERIC_READ,0,0,OPEN_EXISTING,0,0);
-	if(file==INVALID_HANDLE_VALUE) return;
-	DWORD len=GetFileSize(file,0);
-	char *data=new char[len+1];
-	DWORD read;
-	ReadFile(file,data,len,&read,0);
-	CloseHandle(file);
-	data[read]=0;
+	char *data=HKReadFile("skies.ini",0);
+	if(!data) return;
 	char label[40]="";
 	for(char *line=data;*line;)
 	{

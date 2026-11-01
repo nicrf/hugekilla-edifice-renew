@@ -86,43 +86,19 @@ static int BuildAim(Vector *aim)
 
 char *GetStructureFilename(int number)
 {
-	WIN32_FIND_DATA fd;
-	char filter[500];
-	strcpy(filter,curstructurepath);
-	strcat(filter,"\\*.*");
-	HANDLE findhand=FindFirstFile(filter,&fd);
-	if(findhand==INVALID_HANDLE_VALUE) return 0;
-	int found;
-	int curstruct=0;
-	do
+	static char fullfilename[400];   //returned: was a local array
+	std::vector<HKDirEntry> entries=HKListDir(curstructurepath);
+	if(number<1||number>(int)entries.size()) return 0;
+	const HKDirEntry &e=entries[number-1];
+	if(!e.isdir)
 	{
-		if(!(strcmp(fd.cFileName,".")==0||strcmp(fd.cFileName,"..")==0))
-		{
-			curstruct++;
-			if(curstruct==number) 
-			{
-				if(!(fd.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY))
-				{		
-					char fullfilename[400];
-					strcpy(fullfilename,curstructurepath);
-					strcat(fullfilename,"\\");
-					strcat(fullfilename,fd.cFileName);
-					return fullfilename;
-				}
-				else
-				{
-					char fullfilename[400];
-					strcat(curstructurepath,"\\");
-					strcat(curstructurepath,fd.cFileName);
-					fullfilename[0]=0;
-					return fullfilename;
-				}
-			}
-		}
-		found=FindNextFile(findhand,&fd);
+		snprintf(fullfilename,sizeof(fullfilename),"%s/%s",curstructurepath,e.name.c_str());
+		return fullfilename;
 	}
-	while (found);
-	return 0;
+	strcat(curstructurepath,"/");
+	strcat(curstructurepath,e.name.c_str());
+	fullfilename[0]=0;
+	return fullfilename;
 }
 
 //reads a structure
@@ -141,13 +117,9 @@ int LoadStructure(char *filename)
 		}
 	}
 	if(!filename) return 0;
-	HANDLE file=CreateFile(filename,GENERIC_READ,0,0,OPEN_EXISTING,0,0);
-	int filelen=GetFileSize(file,0);
-	if(filelen==-1) return 0;
-	char *filecontent=new char[filelen];
-	DWORD read;
-	ReadFile(file,filecontent,filelen,&read,0);
-	CloseHandle(file);
+	long filelen;
+	char *filecontent=HKReadFile(filename,&filelen);
+	if(!filecontent) return 0;
 	x=y=z=0;
 	for(int i=0;i<filelen;i++)
 	{
@@ -167,6 +139,7 @@ int LoadStructure(char *filename)
 		curstructure[x][y][z]=filecontent[i];
 		x++;
 	}
+	delete []filecontent;
 	return 1;
 }
 
@@ -382,33 +355,20 @@ void DisplayBuildingType(char *path)
 {
 	strcpy(menutext,"Select structure or type:\r\r");
 	if(path) strcpy(curstructurepath,path);
-	WIN32_FIND_DATA fd;
-	char filter[500];
-	strcpy(filter,curstructurepath);
-	strcat(filter,"\\*.*");
-	HANDLE findhand=FindFirstFile(filter,&fd);
-	if(findhand==INVALID_HANDLE_VALUE) return;
-	int found;
-	int curstruct=0;
-	do
+	std::vector<HKDirEntry> entries=HKListDir(curstructurepath);
+	for(int i=0;i<(int)entries.size()&&i<9;i++)
 	{
-		if(!(strcmp(fd.cFileName,".")==0||strcmp(fd.cFileName,"..")==0))
-		{
-			curstruct++;
-			for(int i=0;i<strlen(fd.cFileName);i++)
-			{
-				if(fd.cFileName[i]=='.') fd.cFileName[i]=0;
-			}
-			itoa(curstruct,&menutext[strlen(menutext)],10);
-			strcat(menutext,". ");
-			strcat(menutext,fd.cFileName);
-			if(fd.dwFileAttributes==FILE_ATTRIBUTE_DIRECTORY)
-				strcat(menutext," (Dir)");
-			strcat(menutext,"\r");
-		}
-		found=FindNextFile(findhand,&fd);
+		char name[300];
+		snprintf(name,sizeof(name),"%s",entries[i].name.c_str());
+		char *dot=strchr(name,'.');
+		if(dot) *dot=0;
+		itoa(i+1,&menutext[strlen(menutext)],10);
+		strcat(menutext,". ");
+		strcat(menutext,name);
+		if(entries[i].isdir)
+			strcat(menutext," (Dir)");
+		strcat(menutext,"\r");
 	}
-	while (found&&curstruct<9);
 }
 
 

@@ -319,7 +319,7 @@ void LoadSky()
 	LoadSkyVal(cloudheight,"cloudheight");
 	strcpy(subtitle,"cloudtex");
 	char fullfilename[300];
-	strcpy(fullfilename,"textures\\clouds\\");
+	strcpy(fullfilename,"textures/clouds/");
 	strcat(fullfilename,skysets.GetValues(title));
 	strcpy(skysettings.cloudtex,skysets.GetValues(title));
 	LoadTexture(fullfilename,TEX_CLOUDS);
@@ -328,7 +328,7 @@ void LoadSky()
 	if(tmp)
 	{
 		strcpy(skysettings.misttex,tmp);
-		strcpy(fullfilename,"textures\\clouds\\");
+		strcpy(fullfilename,"textures/clouds/");
 		strcat(fullfilename,tmp);
 		LoadRaw(fullfilename,TEX_CLOUDMIST);
 		skysettings.usemist=1;
@@ -338,7 +338,7 @@ void LoadSky()
 	if(sound)
 	{
 		strcpy(skysettings.sound,sound);
-		strcpy(fullfilename,"sound\\");
+		strcpy(fullfilename,"sound/");
 		strcat(fullfilename,sound);
 		LoadSound(fullfilename,0,0);
 		PlaySound(0,1);
@@ -629,28 +629,31 @@ void CreateLand(LandDefs &ldfs)
 	char fullfilename[400];
 	for(i=0;i<ldfs.numgroundtex;i++)
 	{
-		strcpy(fullfilename,"textures\\ground\\");
+		strcpy(fullfilename,"textures/ground/");
 		strcat(fullfilename,ldfs.groundtex[i]);
 		LoadTexture(fullfilename,TEX_GROUND0+i);
 	}
 	CalculateWater();
 	
-	void *himage=LoadImage(NULL,"textures\\clouds\\landcloud.bmp",IMAGE_BITMAP,0,0,LR_CREATEDIBSECTION|LR_LOADFROMFILE);
-	
-	BITMAP jonx;
-	if(!GetObject(himage,sizeof(jonx),&jonx)) 
+	//cloud shadows on the ground: the gray levels of an 8-bit bitmap (its palette is
+	//the identity, so stb_image's gray conversion gives the indices back)
+	int cloudw,cloudh;
+	unsigned char *cloudpixels=LoadImagePixels("textures/clouds/landcloud.bmp",&cloudw,&cloudh,1);
+	if(!cloudpixels)
 	{
-		MessageBox(GetHWND(),"textures\\clouds\\landcloud.bmp","Texture not found",MB_OK);
+		MessageBox(GetHWND(),"textures/clouds/landcloud.bmp","Texture not found",MB_OK);
 		return;
 	}
-	if(jonx.bmPlanes!=1)
+	if(cloudw!=cloudh||(size_t)cloudw*cloudh>sizeof(clouds))
 	{
-		MessageBox(GetHWND(),"Ground clouds not grayscale","Texture error",MB_OK);
+		FreeImagePixels(cloudpixels);
+		MessageBox(GetHWND(),"Ground clouds must be square, 1024x1024 at most","Texture error",MB_OK);
 		return;
 	}
-	cloudsize=jonx.bmWidth;
-	CopyMemory(clouds,jonx.bmBits,jonx.bmWidth*jonx.bmHeight);
-	DeleteObject(himage);
+	cloudsize=cloudw;
+	for(int row=0;row<cloudh;row++)   //bottom row first, as the DIB section was
+		CopyMemory(&clouds[row*cloudw],&cloudpixels[(cloudh-1-row)*cloudw],cloudw);
+	FreeImagePixels(cloudpixels);
 	numsceneries=ldfs.numscenery;
 	int numscenery=GetNumScenery();
 	int clumpsize=0;

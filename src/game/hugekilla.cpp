@@ -544,7 +544,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 					ofn.lStructSize=sizeof(ofn);
 					ofn.hwndOwner=hWnd;
 					ofn.lpstrFilter="Edifice files (*.ef)\0*.ef\0All files (*.*)\0*.*\0\0";
-					//ofn.lpstrInitialDir="objects\\";
+					//ofn.lpstrInitialDir="objects/";
 					ofn.lpstrFile=fn;
 					ofn.nMaxFile=1000;
 					ofn.lpstrDefExt="ef";
@@ -566,7 +566,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 					ofn.lStructSize=sizeof(ofn);
 					ofn.hwndOwner=hWnd;
 					ofn.lpstrFilter="Text files (*.ef)\0*.ef\0All files (*.*)\0*.*\0\0";
-					//ofn.lpstrInitialDir="objects\\";
+					//ofn.lpstrInitialDir="objects/";
 					ofn.lpstrFile=fn;
 					ofn.nMaxFile=1000;
 					ofn.Flags=OFN_FILEMUSTEXIST|OFN_NONETWORKBUTTON|OFN_NOREADONLYRETURN|OFN_NOCHANGEDIR;
@@ -598,7 +598,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 						EnableMenuItem(menu,ID_MULTIPLAY_JOINGAME,MF_ENABLED);
 						EnableMenuItem(menu,ID_MULTIPLAY_STARTSERVER,MF_ENABLED);
 						EnableMenuItem(menu,ID_MULTIPLAY_DISCONNECT,MF_GRAYED);
-						LoadTexture("textures\\startup.bmp",TEX_LAND);   //legacy Win32 menu: the land slot, not TEX_SPLASH (see CreateLand)
+						LoadTexture("textures/startup.bmp",TEX_LAND);   //legacy Win32 menu: the land slot, not TEX_SPLASH (see CreateLand)
 					}
 					break;
 				case ID_MULTIPLAY_JOINGAME:
@@ -771,16 +771,15 @@ const char *MapPath(const char *name)
 //names (without .map) of the maps in the user maps folder, sorted
 int ListSavedMaps(char (*names)[MAXMAPNAME+1],int max)
 {
-	static char files[256][64];
-	int numfiles=HKListDir(UserFile("maps"),files,256);
+	std::vector<HKDirEntry> files=HKListDir(UserFile("maps"));
 	int n=0;
-	for(int i=0;i<numfiles&&n<max;i++)
+	for(size_t i=0;i<files.size()&&n<max;i++)
 	{
-		int len=strlen(files[i]);
-		if(len<5||stricmp(&files[i][len-4],".map")) continue;
-		files[i][len-4]=0;
-		if(!ValidMapName(files[i])) continue;
-		strcpy(names[n++],files[i]);
+		std::string name=files[i].name;
+		if(files[i].isdir||name.size()<5||!HKHasExt(name.c_str(),".map")) continue;
+		name.resize(name.size()-4);
+		if(!ValidMapName(name.c_str())) continue;
+		strcpy(names[n++],name.c_str());
 	}
 	for(int i=1;i<n;i++)   //few files: insertion sort
 		for(int j=i;j>0&&stricmp(names[j-1],names[j])>0;j--)

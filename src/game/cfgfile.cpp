@@ -14,17 +14,13 @@ CfgFile::~CfgFile()
 }
 int CfgFile::Load(LPCTSTR filename)
 {
-	HANDLE file=CreateFile(filename,GENERIC_READ,0,0,OPEN_EXISTING,0,0);
-	if(file==INVALID_HANDLE_VALUE) return 0;
+	long size;
+	char *file=HKReadFile(filename,&size);
+	if(!file) return 0;
 	
 	if(data)delete []data;
-	data=0;
-	datalen=GetFileSize(file,0)+1;
-	if(datalen==-1) return 0;
-	data=new char[datalen];
-	DWORD read=0;
-	ReadFile(file,data,datalen-1,&read,NULL);
-	CloseHandle(file);
+	data=file;
+	datalen=size+1;
 
 	for(int i=0;i<datalen-1;i++)
 	{
