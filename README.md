@@ -19,7 +19,8 @@ Merci, Nelson et John.
 
 - **Multiplateforme** : SDL2 (fenêtre, entrées, audio) compilée en statique, rendu par sokol_gfx sur l'API de chaque système (Metal sous macOS, Direct3D 11 sous Windows, OpenGL 4.1 sous Linux), au même rendu que l'OpenGL 2.1 d'origine, qui reste disponible le temps d'une release (`build.py --gl`). Plus aucune dépendance à installer pour jouer.
 - **Corrections** : plantages et erreurs 64 bits (textures des armes, portée des boucles VC6, casse des fichiers sous Linux…).
-- **Nouveaux écrans** : configuration du serveur (ciel, relief, décor, captures, temps, avec choix aléatoire), multijoueur en jeu (IP ou LAN), options (touches, vidéo, audio, nom du joueur), crédits.
+- **Nouveaux écrans** : configuration du serveur (ciel, relief, décor, captures, temps, avec choix aléatoire), multijoueur en jeu (IP ou LAN), options (touches, vidéo, audio, nom du joueur, manette), crédits.
+- **Manettes** : toute manette que SDL connaît (Xbox, PlayStation, Switch Pro, la plupart des manettes USB/Bluetooth), branchée à chaud, en jeu comme dans les menus.
 - **Builds** : un seul `build.py` pour les trois OS. Les releases sont générées automatiquement par GitHub Actions à chaque tag `v*`.
 
 La suite est décrite dans la [feuille de route](docs/ROADMAP.md) : netplay sécurisé et versionné, restructuration du code, « Rejoindre via Steam ».
@@ -35,6 +36,8 @@ Téléchargez l'archive de votre système dans les [Releases](https://github.com
 **Jouer par Internet** : l'hôte choisit une visibilité « Internet » dans *Server Setup* (publique, ou amis/privée avec un code de partie à partager), les autres ouvrent l'onglet *Internet* de l'écran *Join* (ou tapent le code). La connexion est directe et chiffrée entre joueurs, ou passe par le relais du serveur de parties quand rien d'autre ne passe : aucun port à ouvrir sur la box.
 
 `F6` plein écran · `` ` `` console · `Échap` libérer/capturer la souris. En mode bac à sable, la console permet de construire sans limite : tapez `gamemode 1`.
+
+**Manette** (réglages et boutons dans *Options → Gamepad*) : stick gauche se déplacer, stick droit regarder, `RT` tirer, `LT` jetpack/planeur, `A` sauter, `B` prendre/poser un objet (station, drapeau), `X` recharger, `Y` construire, `LB`/`RB` arme précédente/suivante (en posant une structure : la tourner), `R3` zoom, `Back` scores, croix haut/gauche/bas parler/parler à l'équipe/push-to-talk, `Start` menu. Dans les menus : croix ou stick gauche pour choisir, `A` valider, `B` retour. Une manette inconnue de SDL se déclare dans un `gamecontrollerdb.txt` du dossier des réglages (voir BUILD.md).
 
 ## Compiler
 

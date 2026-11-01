@@ -63,6 +63,19 @@ void UIArrow(float x1,float y1,float x2,float y2,const char *label);
 int UIButton(float x1,float y1,float x2,float y2,const char *label,int enabled,int strong=0);
 void UIField(float x1,float y1,float x2,float y2,const char *text,int focused,const char *placeholder=0);
 
+//focus of the menus, for the gamepad (ui.cpp): what can be clicked registers its area
+//as it is drawn (UIButton does it itself), the pad moves the focus between them and
+//clicks the focused one where the mouse would (mousepos). stepleft/stepright: where
+//Left and Right click on a row that steps a value (its "<" and ">"), UINOSTEP when
+//they move the focus instead
+#define UINOSTEP -9.f
+void UIFocusable(float x1,float y1,float x2,float y2,float stepleft=UINOSTEP,float stepright=UINOSTEP);
+int UIFocusMove(int dir);      //IN_LEFT... (inputlogic.h); 0 when nothing is that way
+void UIFocusActivate();        //A: clicks the focused area (focuses one first if none is)
+int UIFocusCount();            //clickable areas on the last frame (0: no menu up)
+void UIFocusShow(int on);      //draw the focus (the pad is in use) or not (the mouse moved)
+void UIFrameEnd();             //end of a 2D frame: draws the focus, starts the next list
+
 struct Button
 {
 	int handler;

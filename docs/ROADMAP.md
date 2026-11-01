@@ -243,6 +243,14 @@ Le rendu ne pose pas de difficulté après M13 : SDL2 et sokol_gfx sont support�
   5. Build **WebGPU optionnelle** : même code, shaders WGSL générés par `sokol-shdc`. La page charge la build WebGPU si `navigator.gpu` est disponible, sinon la build WebGL2. Le job CI produit les deux. À ne faire que si un effet le justifie (compute, nombreux draw calls).
 - **Fait quand :** une partie solo tourne depuis GitHub Pages dans Chrome, Firefox et Safari, puis un joueur web rejoint une partie hébergée par un client natif via le lobby public.
 
+### M15 - Manettes et commandes tactiles (M)
+Jouer sans clavier ni souris : manette sur les trois systèmes et le web, écran tactile (surtout la version web sur téléphone et tablette). Aucun changement de protocole.
+- **Tâches :**
+  1. Manettes (`SDL_GameController`) : branchement à chaud, base de SDL plus un `gamecontrollerdb.txt` facultatif, stick gauche en marche analogique, stick droit pour regarder (zone morte, courbe, sensibilité, inversion), boutons liés aux actions (`pad_*` de `control.ini`, onglet Gamepad d'Options), vibration quand on est touché ; menus au focus (croix/stick, `A`, `B`) par un registre des zones cliquables dessinées (`ui.cpp`).
+
+     *Fait :* `src/platform/gamepad.cpp`, logique pure dans `src/ui/inputlogic.h` (`tests/input_test.cpp`), aide `HK_PADTEST` (manette virtuelle de SDL) et `tests/input_smoke.py` ; détails dans BUILD.md, « Manettes ». Non vérifié : de vraies manettes (Xbox, PlayStation, Switch) et la vibration, l'API Gamepad des navigateurs.
+  2. Commandes tactiles : manette à l'écran (stick gauche, zone de regard à droite, boutons), affichée au premier toucher, menus au doigt ; page web sans défilement ni zoom, bouton plein écran, indication de passer en paysage.
+
 ## 4. Sécurité : vulnérabilités classées
 
 Toutes sont déclenchables à distance. L'obstacle du checksum XOR (sock.cpp:350-364) est trivial à calculer.

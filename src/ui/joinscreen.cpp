@@ -618,6 +618,7 @@ void HandleJoinScreenText(const char *text)
 //a tab of the title bar
 static void Tab(float x1,float y1,float x2,float y2,const char *label,int active)
 {
+	UIFocusable(x1,y1,x2,y2);
 	int over=!active&&Inside(x1,y1,x2,y2);
 	UIRect(x1,y1,x2,y2,1,1,active?.5f:1,active?.2f:over?.14f:.06f);
 	if(active) UIRect(x1,y1,x2,y1+.006f,1,1,.5f,.9f);
@@ -648,6 +649,8 @@ void DrawJoinScreen()
 	RColor3f(.6f,.6f,.6f);
 	UIText(.47f-UITextWidth("Name"),UITextY(.795f,.875f),"Name");
 	UIField(FIELD_NAME,playername,focus==FOCUS_NAME,"Player");
+	UIFocusable(FIELD_NAME);
+	UIFocusable(FIELD_ADDRESS);   //for the pad: what can be clicked (ui.cpp)
 
 	RColor3f(.7f,.7f,.7f);
 	float labely=UITextY(.63f,.72f);
@@ -679,6 +682,7 @@ void DrawJoinScreen()
 		if(active) RColor3f(1,1,.5f);
 		else if(ColSort(c)!=SORT_FOUND&&Inside(colx[c]-.01f,HEADY1,x2,HEADY2)) RColor3f(1,1,1);
 		else RColor3f(.6f,.6f,.6f);
+		if(ColSort(c)!=SORT_FOUND) UIFocusable(colx[c]-.01f,HEADY1,x2,HEADY2);
 		float end=UIText(colx[c],UITextY(HEADY1,HEADY2,.045f),ColName(c),.045f);
 		if(active) UIRect(colx[c],HEADY1+.008f,end,HEADY1+.013f,1,1,.5f,.8f);
 	}
@@ -697,6 +701,7 @@ void DrawJoinScreen()
 		JoinGame *g=GameAt(order[r]);
 		float y1=ROWTOP-(r+1)*ROWH,y=UITextY(y1,y1+ROWH);
 		int hover=Inside(ROWRECT(r));
+		UIFocusable(ROWRECT(r));
 		if(order[r]==selected)
 		{
 			UIRect(ROWRECT(r),1,1,.5f,.2f);
@@ -766,6 +771,7 @@ void DrawJoinScreen()
 
 	//show incompatible servers: a check box
 	int overbox=Inside(CHECKBOX);
+	UIFocusable(CHECKBOX);
 	UIRect(-.9f,-.605f,-.86f,-.555f,1,1,1,overbox?.5f:.3f);
 	UIRect(-.895f,-.6f,-.865f,-.56f,0,0,0,1);
 	if(showincompatible) UIRect(-.888f,-.593f,-.872f,-.567f,1,1,.5f,1);

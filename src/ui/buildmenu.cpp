@@ -191,6 +191,7 @@ void DrawBuildMenu()
 	{
 		float y1=RowY(c),y2=y1+ROWH;
 		int hover=Inside(CATX1,y1,CATX2,y2);
+		UIFocusable(CATX1,y1,CATX2,y2);
 		if(c==curcategory) UIRect(CATX1,y1,CATX2,y2,1,1,.5f,.15f);
 		else if(hover) UIRect(CATX1,y1,CATX2,y2,1,1,1,.06f);
 		if(c==curcategory) RColor3f(1,1,.5f);
@@ -202,6 +203,7 @@ void DrawBuildMenu()
 	{
 		float y1=RowY(r),y2=y1+ROWH;
 		int hover=Inside(ITEMX1,y1,ITEMX2,y2);
+		UIFocusable(ITEMX1,y1,ITEMX2,y2);
 		if(hover) UIRect(ITEMX1,y1,ITEMX2,y2,1,1,1,.08f);
 		RColor3f(hover?1:.85f,hover?1:.85f,hover?1:.85f);
 		DisplayName(items[scroll+r],name,NAMELEN);

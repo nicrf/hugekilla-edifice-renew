@@ -17,6 +17,7 @@
 #include "hkkeys.h"
 #include "hktime.h"
 #include "effects.h"
+#include "gamepad.h"
 
 
 char menutext[5000];
@@ -41,6 +42,37 @@ Controls controls;
 DWORD lasttime;
 DWORD curtime;
 float sf;
+
+//a gamepad's stick (SetPadMove): how far it is pushed, in any direction, instead of
+//the keys' all or nothing; the key flags still go on the wire
+static struct
+{
+	int active;
+	float fwd,strafe;
+} padmove;
+
+void SetPadMove(int active,float fwd,float strafe,int up,int down,int left,int right)
+{
+	Player *me=GetLocalPlayer();
+	if(active)
+	{
+		me->up=up;
+		me->down=down;
+		me->lstrafe=left;
+		me->rstrafe=right;
+	}
+	else if(padmove.active)
+	{
+		//let go: what the keyboard holds
+		me->up=HKKeyDown(controls.forward);
+		me->down=HKKeyDown(controls.back);
+		me->lstrafe=HKKeyDown(controls.lstrafe);
+		me->rstrafe=HKKeyDown(controls.rstrafe);
+	}
+	padmove.active=active;
+	padmove.fwd=fwd;
+	padmove.strafe=strafe;
+}
 	
 
 //returns maximum capacity for this gun  (should have used an array)
@@ -727,9 +759,14 @@ void Play()
 		{
 			cur->vel.y-=.01*sf;
 			cur->vel/=powf(2.3,sf);
-			cur->vel+=((cur->up*cur->dir-cur->down*cur->dir)*sv.walkaccelerate)*sf;
 			Vector right=Normalize(CrossProduct(cur->dir,Vector(0,1,0)));
-			cur->vel+=((cur->rstrafe-cur->lstrafe)*right*sv.strafeaccelerate)*sf;
+			if(cur==GetLocalPlayer()&&padmove.active)
+				cur->vel+=(padmove.fwd*cur->dir*sv.walkaccelerate+padmove.strafe*right*sv.strafeaccelerate)*sf;
+			else
+			{
+				cur->vel+=((cur->up*cur->dir-cur->down*cur->dir)*sv.walkaccelerate)*sf;
+				cur->vel+=((cur->rstrafe-cur->lstrafe)*right*sv.strafeaccelerate)*sf;
+			}
 		}
 		else
 		{
@@ -881,6 +918,8 @@ void Play()
 			Vector right=Normalize(CrossProduct(cur->dir,Vector(0,1,0)));
 			Vector targ=((float)cur->up*cur->fwd-(float)cur->down*cur->fwd)*sv.walkaccelerate+
 				((cur->rstrafe-cur->lstrafe)*right*sv.strafeaccelerate);
+			if(cur==GetLocalPlayer()&&padmove.active)
+				targ=padmove.fwd*cur->fwd*sv.walkaccelerate+padmove.strafe*right*sv.strafeaccelerate;
 			if(cur->up||cur->down||cur->lstrafe||cur->rstrafe)
 			{
 				cur->runtime+=sf;
@@ -1407,6 +1446,7 @@ void LoadControls()
 	controls.seemoney=TextToKey(controlini.GetValues("seemoney"));
 	controls.pushtotalk=TextToKey(controlini.GetValues("pushtotalk"));
 	if(!controls.pushtotalk) controls.pushtotalk='T';   //control.ini from before voice chat
+	PadLoadConfig();   //pad_* (src/platform/gamepad.cpp)
 }
 
 //general keyboard input handler

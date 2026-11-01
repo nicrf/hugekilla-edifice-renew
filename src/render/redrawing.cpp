@@ -1223,6 +1223,7 @@ void DrawConsole()
 	RClearColor(0,0,0,0);
 	RClear(1,0);
 	DrawConsolePanel(1);
+	UIFrameEnd();
 	HKSwapWindow();
 }
 
@@ -1568,6 +1569,7 @@ void Redraw()
 	DrawSpawnScreen();
 	if(consolevisible) DrawConsolePanel(0);
 	ScreenShot();	
+	UIFrameEnd();   //the pad's focus (build menu, spawn screen), not in screenshots
 }
 
 

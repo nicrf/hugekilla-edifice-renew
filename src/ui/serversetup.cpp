@@ -371,6 +371,9 @@ void DrawServerSetup()
 	{
 		float y1=RowY(i)+.008f,y2=RowY(i)+ROWHEIGHT-.008f;
 		int enabled=RowText(i,text);
+		//the pad's Left and Right click "<" and ">", like the keys change the row
+		if(i&&enabled) UIFocusable(LABELX-.04f,RowY(i),PANELX2-.04f,RowY(i)+ROWHEIGHT,VALUEX+ARROWW/2,VALUEX2-ARROWW/2);
+		else UIFocusable(LABELX-.04f,RowY(i),PANELX2-.04f,RowY(i)+ROWHEIGHT);
 		if(i==hoverrow) UIRect(LABELX-.04f,RowY(i),PANELX2-.04f,RowY(i)+ROWHEIGHT,1,1,1,.06f);
 		if(i==keyrow) UIRect(LABELX-.04f,y1,LABELX-.032f,y2,1,1,.5f,.9f);
 		RColor3f(i==hoverrow||i==keyrow?1:.75f,i==hoverrow||i==keyrow?1:.75f,i==hoverrow||i==keyrow?1:.75f);
