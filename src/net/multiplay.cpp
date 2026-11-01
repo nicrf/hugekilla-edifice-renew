@@ -124,12 +124,12 @@ static void SendRequestEnter()
 	int len=2+nl+1;
 	len+=WriteVersionTrailer(&buf[len]);
 	int cookie=haveentercookie&&entercookieip==infosock.dest.sin_addr.s_addr;
-	len+=WriteHelloCaps(&buf[len],HELLOCAP_COOKIE,cookie?entercookie:0);
+	len+=WriteHelloCaps(&buf[len],HELLOCAP_COOKIE|HELLOCAP_SERVERHITS,cookie?entercookie:0);
 	infosock.Send(buf,len);
 	infosock.Flush();
 }
 
-extern int ac_enable,ac_requirecookie;
+extern int ac_enable,ac_requirecookie,ac_serverhits;
 
 //server answers an info request, with its version
 static void SendInfo(SOCKADDR_IN dest)
@@ -148,8 +148,9 @@ static void SendInfo(SOCKADDR_IN dest)
 	buf[len++]=(char)MAXPLAYERS;
 	buf[len++]=(char)sv.gamemode;
 	buf[len++]=(char)sv.capturelimit;
-	//capabilities (M11 phase 2, version.h; ignored by older clients)
-	buf[len++]=(char)(ac_enable?HELLOCAP_COOKIE|(ac_requirecookie?HELLOCAP_REQUIRECOOKIE:0):0);
+	//capabilities (M11 phases 2 and 3a, version.h; ignored by older clients)
+	buf[len++]=(char)(ac_enable?HELLOCAP_COOKIE|(ac_requirecookie?HELLOCAP_REQUIRECOOKIE:0)|
+		(ac_serverhits?HELLOCAP_SERVERHITS:0):0);
 	infosock.dest=dest;
 	infosock.Send(buf,len);
 	infosock.Flush();
@@ -229,6 +230,9 @@ int ac_ipenter=30;          //join requests per minute and IP
 int ac_ippackets=50;        //messages per second and IP on the info port
 int ac_requirecookie=0;     //1: refuse clients that can't answer a join cookie (0.5.x and older)
 int ac_cookietime=30000;    //ms of a join cookie time bucket (valid one to two buckets)
+int ac_serverhits=1;        //1: the server decides hits and deaths (phase 3a); 0: phase-1 bounds
+float ac_hittolerance=.5f;  //units added around a player's hitbox when the server tests a bullet
+int ac_lagcomp=300;         //ms of a shooter's ping the server rewinds, at most
 
 #define AC_KILL 0
 #define AC_DEATH 1
@@ -252,6 +256,12 @@ struct AcPlayer
 	AcBucket fire;
 	AcAmmo ammo;
 	AcMove move;
+	//phase 3a: the server decides hits
+	float life;          //as the server counts it (remote players; the host has its own)
+	int lastattacker;    //who hit it last, and when: who a reported death is credited to
+	DWORD lasthit;
+	AcHistory hist;      //where it was, for the shooters' lag
+	int caps;            //HELLOCAP_* of its REQUESTENTER (kept by AcJoin)
 };
 static AcPlayer acplayer[MAXPLAYERS];
 #define ACIPTABLE 64
@@ -310,6 +320,7 @@ static void AcInitVars()
 		{0,&ac_maxspeed,"ac_maxspeed"},{&ac_firedist,0,"ac_firedist"},{&ac_builddist,0,"ac_builddist"},
 		{&ac_ipinfo,0,"ac_ipinfo"},{&ac_ipenter,0,"ac_ipenter"},{&ac_ippackets,0,"ac_ippackets"},
 		{&ac_requirecookie,0,"ac_requirecookie"},{&ac_cookietime,0,"ac_cookietime"},
+		{&ac_serverhits,0,"ac_serverhits"},{0,&ac_hittolerance,"ac_hittolerance"},{&ac_lagcomp,0,"ac_lagcomp"},
 	};
 	//debug (tests): HK_AC_VARS="ac_requirecookie=1 ac_cookietime=1000" wins over sv.ini
 	const char *env=getenv("HK_AC_VARS");
@@ -358,14 +369,61 @@ static void AcNewLife(int i)
 	AcAmmoFill(&a->ammo,hold);
 	a->ammo.weapon=GetPlayer(i)->weapon;
 	a->move.valid=0;
+	a->life=100;
+	a->hist.count=0;   //respawned somewhere else: no rewind across the teleport
 }
 
 //a client gets slot i: it arrives dead (its first 11 -> 10 is a respawn)
 static void AcJoin(int i)
 {
+	int caps=acplayer[i].caps;   //set at REQUESTENTER, before the second AcJoin
 	ZeroMemory(&acplayer[i],sizeof(AcPlayer));
 	AcNewLife(i);
 	acplayer[i].deathcounted=1;
+	acplayer[i].caps=caps;
+}
+
+//phase 3a: the server decides hits and deaths (else phase 1: it only bounds them)
+static int AcServerHits()
+{
+	return server&&ac_enable&&ac_serverhits;
+}
+
+//does this side count its own player's damage (playing.cpp): not when the server
+//decides it, here (host) or on a server that said so (HITMODE)
+static int clientserverhits;
+int ServerDecidesHits()
+{
+	if(server) return AcServerHits();
+	return connected&&clientserverhits;
+}
+
+//who a death reported by client i (KILLED, KILLEDPOSITION: "killed by claimed")
+//is credited to, now that the server decides hits: -1 to ignore it
+#define AC_KILLCREDIT 10000   //ms after a hit the server saw that it may still kill
+static int AcKiller(int i,int claimed)
+{
+	if(!AcServerHits()||claimed==i) return claimed;   //a suicide (console "kill") is always one
+	AcPlayer *a=&acplayer[i];
+	int recent=a->lasthit&&(int)(curtime-a->lasthit)<AC_KILLCREDIT&&ValidPlayer(a->lastattacker)&&
+		a->lastattacker<numplayers;
+	if(a->caps&HELLOCAP_SERVERHITS)
+	{
+		//it doesn't count its own damage: only the server can kill it
+		AcLog(AC_DEATH,"%.31s (%d) reported being killed by %d, ignored: the server decides",GetPlayer(i)->name,i,claimed);
+		return -1;
+	}
+	//an older client still counts its own damage and dies on its own: its death
+	//stands (it only harms itself), but not who it blames
+	if(recent&&a->lastattacker==claimed) return claimed;
+	return recent?a->lastattacker:i;
+}
+
+//the death of client i (claiming killer claimed) was counted, credited to killer
+static void AcCredited(int i,int claimed,int killer)
+{
+	if(killer!=claimed)
+		AcLog(AC_DEATH,"%.31s (%d) reported being killed by %d, credited to %d",GetPlayer(i)->name,i,claimed,killer);
 }
 
 //client i reports its own death (KILLED, KILLEDPOSITION): 0 if it is ignored
@@ -386,6 +444,13 @@ static int AcDeath(int i)
 	a->lastdeath=curtime?curtime:1;
 	a->damage=0;
 	a->deathcounted=1;
+	if(AcServerHits())
+	{
+		//dead for the server too: not hit, no shot, relayed dead until its respawn
+		//(its own 5 s delay started up to a ping earlier, hence the 3/4)
+		a->deaduntil=curtime+ac_deadtime*3/4;
+		if(!a->deaduntil) a->deaduntil=1;
+	}
 	return 1;
 }
 
@@ -394,7 +459,9 @@ static void AcServerKill(int v,int killer)
 {
 	AcPlayer *a=&acplayer[v];
 	if(!ValidPlayer(killer)||killer>=numplayers) killer=v;
-	AcLog(AC_KILL,"%.31s (%d) took %.0f damage without dying: killed by the server",GetPlayer(v)->name,v,a->damage);
+	//phase 3a: the normal way to die, not an event
+	if(!AcServerHits())
+		AcLog(AC_KILL,"%.31s (%d) took %.0f damage without dying: killed by the server",GetPlayer(v)->name,v,a->damage);
 	ReceiveKillMessage(v,killer);
 	SimpleBuf killed=MakeSimple(KILLED,v,killer);
 	for(int i=1;i<numplayers;i++)
@@ -407,12 +474,57 @@ static void AcServerKill(int v,int killer)
 	a->damage=0;
 }
 
-//can the server count damage on remote player v: alive, or shooting
+//can the server count damage on remote player v: alive, or shooting. Phase 3a:
+//also a player that says it is dead (11) when the server counted no death.
+//v 0, the host: its own state.
 static int AcCanBeHit(int v)
 {
+	if(v==0) return GetPlayer(0)->playstate==10&&GetPlayer(0)->life>0;
 	AcPlayer *a=&acplayer[v];
 	if(AcDead(a)) return 0;
+	if(AcServerHits()&&!a->deathcounted) return 1;
 	return GetPlayer(v)->playstate==10||(a->lastfire&&(int)(curtime-a->lastfire)<1500);
+}
+
+//the pain sound of player v, for everyone but v (it plays its own), as a PAIN
+//from v would be (HandleSimpleServer)
+static void AcPainOthers(int v,int sound)
+{
+	for(int i=1;i<numplayers;i++)
+		if(i!=v) SendSimple(i,PAIN,v,sound);
+	if(v!=GetLocalNum())
+	{
+		SetSoundPosition(sound+1,GetPlayer(v)->pos);
+		PlaySound(sound+1,0);
+	}
+}
+
+//phase 3a: the server hits player v (the host too) with damage from attacker
+static void AcHit(int v,int attacker,float damage)
+{
+	if(v==0)
+	{
+		//the host: what TickObjects did when the host counted its own damage
+		Player *host=GetPlayer(0);
+		host->life=(short)(host->life-damage);
+		HavePain(150);
+		if(host->life<=0) Killed(attacker);
+		return;
+	}
+	AcPlayer *a=&acplayer[v];
+	a->life-=damage;
+	a->lastattacker=attacker;
+	a->lasthit=curtime?curtime:1;
+	if(a->caps&HELLOCAP_SERVERHITS)
+	{
+		//its new life (it no longer counts it), and its pain for the others
+		int life=a->life>0?(int)ceilf(a->life):0;
+		SimpleBuf hit=MakeSimple(SERVERHIT,attacker,life);
+		clientsock[v].SendReliable(hit.b,sizeof(hit.b),0);
+		AcPainOthers(v,150);
+	}
+	//(an older client counts its own damage, sends its own PAIN and KILLED)
+	if(a->life<=0) AcServerKill(v,attacker);
 }
 
 static void AcDamage(int v,int attacker,float damage)
@@ -428,13 +540,45 @@ static int AcCountsDamage()
 	return server&&ac_enable&&ac_killdamage>0;
 }
 
-//called by TickObjects for every step of a bullet: the hits the server sees on
-//remote players (each client still decides its own, playing.cpp)
-void AcBulletTick(Object *o)
+//phase 3a, a step of a bullet from prev to o->pos: the server's bullet is the one
+//that hits. Each player is where the shooter saw it, rewound by its ping (at most
+//ac_lagcomp), with ac_hittolerance around its hitbox; the bullet stopped at the
+//land and the blocks already (TickObjects: line of sight). One player per bullet.
+static void AcServerBullet(Object *o,Vector prev,int shooter)
 {
-	if(!AcCountsDamage()||(o->type!=1&&o->type!=3)) return;
+	int rewind=shooter==GetLocalNum()?0:AcRewind(GetPlayer(shooter)->ping,ac_lagcomp);
+	for(int v=0;v<numplayers;v++)
+	{
+		if(v==shooter||(o->achit&(1u<<v))) continue;
+		Player *pl=GetPlayer(v);
+		if(GetPlayer(shooter)->team==pl->team&&pl->team!=0) continue;
+		if(!AcCanBeHit(v)) continue;
+		float at[3];
+		AcHistoryAt(&acplayer[v].hist,curtime-rewind,pl->pos.x,pl->pos.y,pl->pos.z,curtime,at,LANDGRIDSIZE);
+		if(!AcSegmentHits(prev.x,prev.y,prev.z,o->pos.x,o->pos.y,o->pos.z,at[0],at[1],at[2],
+			ac_hittolerance>0?ac_hittolerance:0,LANDGRIDSIZE)) continue;
+		o->achit=~0u;   //spent: no one else (the copies on the clients only show it)
+		//the victim's roll of before, damage*(1+RND)
+		float base=o->type==1?sv.highbulletdamage:sv.lowbulletdamage;
+		AcHit(v,shooter,(base+RND*base)*Magnitude(o->vel));
+		return;
+	}
+}
+
+//called by TickObjects for every step of a bullet, from prev to o->pos. Phase 1:
+//the hits the server sees on remote players, to bound what each client decides
+//for itself (playing.cpp); phase 3a: the hits (AcServerBullet).
+void AcBulletTick(Object *o,Vector prev)
+{
+	if(o->type!=1&&o->type!=3) return;
 	int shooter=o->pnum;
 	if(!ValidPlayer(shooter)||shooter>=numplayers) return;
+	if(AcServerHits())
+	{
+		AcServerBullet(o,prev,shooter);
+		return;
+	}
+	if(!AcCountsDamage()) return;
 	for(int v=1;v<numplayers;v++)
 	{
 		if(v==shooter||v==GetLocalNum()||(o->achit&(1u<<v))) continue;
@@ -449,9 +593,23 @@ void AcBulletTick(Object *o)
 	}
 }
 
-//called by TickObjects when a grenade explodes
+//called by TickObjects when a grenade explodes. Phase 3a: the damage, from where
+//the server's grenade is and where each player is now (it has bounced for
+//seconds on the server's land: no rewind), everyone in reach, the thrower too.
 void AcGrenade(Object *o)
 {
+	if(AcServerHits())
+	{
+		int thrower=ValidPlayer(o->pnum)&&o->pnum<numplayers?o->pnum:-1;
+		for(int v=0;v<numplayers;v++)
+		{
+			if(!AcCanBeHit(v)) continue;
+			Vector p=GetPlayer(v)->pos+Vector(0,-1,0);
+			float mag=AcDistance(o->pos.x,o->pos.y,o->pos.z,p.x,p.y,p.z,LANDGRIDSIZE);
+			if(mag<8) AcHit(v,thrower>=0?thrower:v,AcGrenadeDamage(mag,sv.grenadedamage));
+		}
+		return;
+	}
 	if(!AcCountsDamage()) return;
 	for(int v=1;v<numplayers;v++)
 	{
@@ -482,6 +640,19 @@ static int AcFire(int i,FireGunDirection *f)
 		AcLog(AC_FIRE,"%.31s (%d) fired while dead, refused",GetPlayer(i)->name,i);
 		return 0;
 	}
+	Vector p=GetPlayer(i)->pos;
+	float dist=AcDistance(f->pos.x,f->pos.y,f->pos.z,p.x,p.y,p.z,LANDGRIDSIZE);
+	if(!f->reload&&ac_firedist>0&&dist>ac_firedist)
+	{
+		//phase 3a: a shot from somewhere else (next to its victim) is refused; the
+		//shooter's own position comes as often as its shots, over the same path
+		if(AcServerHits())
+		{
+			AcLog(AC_ORIGIN,"%.31s (%d) fired %.0f units away from where it is, refused",GetPlayer(i)->name,i,dist);
+			return 0;
+		}
+		AcLog(AC_ORIGIN,"%.31s (%d) fired %.0f units away from where it is",GetPlayer(i)->name,i,dist);
+	}
 	int w=GetPlayer(i)->weapon;
 	int hold[ACWEAPONS];
 	AcHolds(hold);
@@ -503,10 +674,6 @@ static int AcFire(int i,FireGunDirection *f)
 		return 0;
 	}
 	a->lastfire=curtime?curtime:1;
-	Vector p=GetPlayer(i)->pos;
-	float dist=AcDistance(f->pos.x,f->pos.y,f->pos.z,p.x,p.y,p.z,LANDGRIDSIZE);
-	if(ac_firedist>0&&dist>ac_firedist)
-		AcLog(AC_ORIGIN,"%.31s (%d) fired %.0f units away from where it is",GetPlayer(i)->name,i,dist);
 	return 1;
 }
 
@@ -534,6 +701,36 @@ static int AcPosition(int i,int state,Vector pos,int weapon)
 	}
 	else a->move.valid=0;
 	return state;
+}
+
+//phase 3a: who decides client i's hits (HITMODE), if it understands it
+static void AcSendHitMode(int i)
+{
+	if(!(acplayer[i].caps&HELLOCAP_SERVERHITS)) return;
+	SimpleBuf mode=MakeSimple(HITMODE,AcServerHits(),0);
+	clientsock[i].SendReliable(mode.b,sizeof(mode.b),0);
+}
+
+//every server frame: where each player is (the shooters' lag), and the hit mode
+//again to the clients when ac_serverhits or ac_enable change on the console
+static void AcServerFrame()
+{
+	static int lastmode=-1;
+	int mode=AcServerHits();
+	if(mode!=lastmode&&lastmode>=0)
+		for(int i=1;i<numplayers;i++)
+			if(GetPlayer(i)->playstate>=10) AcSendHitMode(i);
+	lastmode=mode;
+	for(int i=0;i<numplayers;i++)
+	{
+		Player *pl=GetPlayer(i);
+		if(pl->playstate!=10)
+		{
+			acplayer[i].hist.count=0;   //dead: it comes back elsewhere
+			continue;
+		}
+		AcHistoryAdd(&acplayer[i].hist,pl->pos.x,pl->pos.y,pl->pos.z,curtime,20);
+	}
 }
 
 //the blocks client pnum sends: all near it (1), else none
@@ -677,6 +874,7 @@ void StartServer()
 	Disconnect();
 	server=1;
 	joinsecretset=0;   //a new join cookie secret for each game hosted (M11 phase 2)
+	ZeroMemory(acplayer,sizeof(acplayer));   //the host's position history of a previous game
 	LoadNetSettings();
 	numplayers=1;
 	
@@ -744,6 +942,7 @@ void Disconnect()
 		clientsock[i].Close();
 	server=0;
 	connected=0;
+	clientserverhits=0;
 	numplayers=0;
 	VoiceReset();
 }
@@ -864,6 +1063,7 @@ void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pn
 				ResetPlayer(pnum);
 				GetPlayer(pnum)->playstate=10;
 				AcJoin(pnum);
+				AcSendHitMode(pnum);
 				
 				ConsoleDisplayText("received blockinfo acknowledgement, sending objects and join game");
 				break;
@@ -899,7 +1099,14 @@ void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pn
 		case KILLED:
 			{
 				if(!ValidPlayer(msg2)) break;
-				if(pnum>0&&!AcDeath(pnum)) break;   //rate limited (M11)
+				if(pnum>0)
+				{
+					int killer=AcKiller(pnum,msg2);   //who the server saw hit it (M11 phase 3a)
+					if(killer<0) break;
+					if(!AcDeath(pnum)) break;   //rate limited (M11)
+					AcCredited(pnum,msg2,killer);
+					msg2=killer;
+				}
 				ReceiveKillMessage(pnum,msg2);
 				SimpleBuf killed=MakeSimple(KILLED,pnum,msg2);
 				if(server)
@@ -929,6 +1136,7 @@ void ServerLoop()
 {
 	GTick();
 	LobbyHostLoop(numplayers);
+	AcServerFrame();
 	static Message msg;
 	SOCKADDR_IN source;
 	infosock.CheckReliableResend();
@@ -1038,6 +1246,7 @@ void ServerLoop()
 				strcat(message," has connected");
 				ConsoleDisplayText(message);
 				GetPlayer(addplayer)->playstate=1;
+				acplayer[addplayer].caps=caps.caps;
 				AcJoin(addplayer);
 				GetPlayer(addplayer)->kills=0;
 				GetPlayer(addplayer)->deaths=0;
@@ -1137,7 +1346,11 @@ void ServerLoop()
 					KilledPosition kp;
 					if(!ReadKilledPosition(&msg,clen,&kp)) break;
 					if(!ValidPlayer(kp.killer)) break;
+					int killer=AcKiller(i,kp.killer);   //who the server saw hit it (M11 phase 3a)
+					if(killer<0) break;
 					if(!AcDeath(i)) break;   //rate limited (M11)
+					AcCredited(i,kp.killer,killer);
+					kp.killer=killer;
 					kp.killed=i;
 					GetPlayer(i)->pos=kp.pos;
 					ReceiveKillMessage(i,kp.killer);
@@ -1262,6 +1475,7 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 				{
 					connected=1;
 					SetLocalNum(msg2);
+					clientserverhits=0;   //until this server says otherwise (HITMODE)
 					GetLocalPlayer()->playstate=1;
 					GetLocalPlayer()->timeout=curtime+PEERTIMEOUT;
 					numplayers=msg2+1;
@@ -1318,6 +1532,24 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 				SetSoundPosition(msg2+1,GetPlayer(msg)->pos);
 				if(msg2<500) PlaySound(msg2+1,0);
 				else PlaySound(msg2,0);
+				break;
+			}
+		case HITMODE:
+			{
+				//the server decides our hits (M11 phase 3a), or no longer does
+				if(!connected) break;
+				clientserverhits=msg!=0;
+				ConsoleDisplayText((char *)(clientserverhits?"the server decides hits":"the server lets us count our own hits"));
+				break;
+			}
+		case SERVERHIT:
+			{
+				//the server hit us: our life is what it says. Pain here, at once (the
+				//server plays it for the others); 0: its KILLED follows and kills us.
+				if(!connected||!clientserverhits||!ValidPlayer(msg)) break;
+				if(GetLocalPlayer()->life<=0||GetLocalPlayer()->playstate!=10) break;
+				if((int)msg2>0) GetLocalPlayer()->life=(short)(msg2<100?msg2:100);
+				PlaySound(150,0);
 				break;
 			}
 		case KILLED:

@@ -1,6 +1,7 @@
-// Unit test of src/net/anticheat.h (roadmap M11 phase 1): rate limits, wrapped
-// distances, position speed, build distance, the server's magazine count and
-// fire rate, and the damage rules the server copies from TickObjects.
+// Unit test of src/net/anticheat.h (roadmap M11 phases 1 and 3a): rate limits,
+// wrapped distances, position speed, build distance, the server's magazine count
+// and fire rate, the damage rules the server copies from TickObjects, and (3a) a
+// bullet's step against a player's hitbox and the lag-compensated positions.
 #include "anticheat.h"
 #include <stdio.h>
 #include <string.h>
@@ -127,6 +128,51 @@ int main()
 	CHECK(!AcBulletHits(100,47.9f,100,100,50,100,512));   // 2.1 below
 	CHECK(!AcBulletHits(100,49.8f,100,100.6f,50,100,512));
 	CHECK(AcBulletHits(511.8f,49.8f,100,.1f,50,100,512)); // across the edge
+
+	// M11 phase 3a: a bullet's step against a player's hitbox (.5 around on x
+	// and z, from 2 below its position to its position), with a tolerance
+	CHECK(AcSegmentHits(90,49,100,110,49,100,100,50,100,0,512));     // straight through
+	CHECK(!AcSegmentHits(90,49,101,110,49,101,100,50,100,0,512));    // 1 unit beside
+	CHECK(AcSegmentHits(90,49,100.9f,110,49,100.9f,100,50,100,.5f,512));  // within the tolerance
+	CHECK(!AcSegmentHits(90,49,101.1f,110,49,101.1f,100,50,100,.5f,512));
+	CHECK(!AcSegmentHits(90,50.2f,100,110,50.2f,100,100,50,100,0,512));   // over its head
+	CHECK(AcSegmentHits(90,50.2f,100,110,50.2f,100,100,50,100,.5f,512));
+	CHECK(!AcSegmentHits(90,47.9f,100,110,47.9f,100,100,50,100,0,512));   // under its feet
+	CHECK(!AcSegmentHits(90,49,100,99,49,100,100,50,100,0,512));     // stops short of it
+	CHECK(AcSegmentHits(90,49,100,99.6f,49,100,100,50,100,0,512));   // ends inside it
+	CHECK(!AcSegmentHits(101,49,100,110,49,100,100,50,100,0,512));   // starts past it
+	CHECK(AcSegmentHits(100,60,100,100,40,100,100,50,100,0,512));    // from above, through
+	CHECK(AcSegmentHits(100.2f,49,100,100.2f,49,100,100,50,100,0,512));   // no length, inside
+	CHECK(!AcSegmentHits(100.7f,49,100,100.7f,49,100,100,50,100,0,512));
+	CHECK(AcSegmentHits(505,49,100,515,49,100,.5f,50,100,0,512));    // across the edge (512 = 0)
+	CHECK(AcSegmentHits(508,49,100,509,49,100,509+512.f,50,100,0,512));   // re-wrapped player
+	CHECK(!AcSegmentHits(90,49,100,110,49,110,100,50,100,0,512));    // diagonal, passes 5 off
+	CHECK(AcSegmentHits(90,49,95,110,49,105,100,50,100,0,512));      // diagonal, through
+
+	// lag compensation: where the server had a player some time ago
+	AcHistory h;
+	memset(&h,0,sizeof(h));
+	float at[3];
+	AcHistoryAt(&h,1000,10,50,10,2000,at,512);                       // no history: the current one
+	CHECK(at[0]==10&&at[1]==50&&at[2]==10);
+	for(int t=0;t<=1000;t+=10) AcHistoryAdd(&h,100+t/100.f,50,100,1000+t,20);   // 10 units/s on x
+	CHECK(h.count==ACHISTORY);                                       // 1 every 20 ms, 32 kept
+	AcHistoryAt(&h,2050,111,50,100,2100,at,512);                    // after the last entry: towards the current one
+	CHECK(fabsf(at[0]-110.5f)<.01f);
+	AcHistoryAt(&h,1850,111,50,100,2100,at,512);
+	CHECK(fabsf(at[0]-108.5f)<.01f);                                 // between two entries
+	AcHistoryAt(&h,1810,111,50,100,2100,at,512);
+	CHECK(fabsf(at[0]-108.1f)<.01f);
+	AcHistoryAt(&h,2100,111,50,100,2100,at,512);
+	CHECK(fabsf(at[0]-111)<.01f);                                    // now: the current one
+	AcHistoryAt(&h,100,111,50,100,2100,at,512);
+	CHECK(fabsf(at[0]-103.8f)<.01f);                                 // older than kept: the oldest (1380 ms)
+	memset(&h,0,sizeof(h));
+	AcHistoryAdd(&h,510,50,100,1000,20);
+	AcHistoryAdd(&h,2+512,50,100,1100,20);                           // the same 4 units, re-wrapped
+	AcHistoryAt(&h,1050,2+512,50,100,1100,at,512);
+	CHECK(fabsf(AcWrap(at[0]-512,512))<.01f);                        // half way: on the edge, not 256 off
+	CHECK(AcRewind(80,300)==80&&AcRewind(900,300)==300&&AcRewind(-5,300)==0);
 
 	if(failures) printf("%d failure(s)\n",failures);
 	else printf("anticheat: all checks passed\n");

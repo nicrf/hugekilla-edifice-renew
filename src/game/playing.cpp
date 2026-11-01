@@ -380,7 +380,8 @@ void TickObjects(float sf)
 						if(mag<8)
 						{
 							cur->vel+=Normalize(cmppos-object[i].pos)*(1/(mag+2))*4;
-							if(cur==GetLocalPlayer()&&cur->life>0)
+							//the server's grenade does the damage when it decides hits (M11)
+							if(cur==GetLocalPlayer()&&cur->life>0&&!ServerDecidesHits())
 							{
 								cur->life-=(.5/(mag*mag+4))*sv.grenadedamage;
 								if(cur->life<=0)
@@ -435,8 +436,9 @@ void TickObjects(float sf)
 					object[i].type=0;
 				}
 				
+				Vector prev=object[i].pos;
 				object[i].pos+=Normalize(object[i].vel)*20*mysf;
-				AcBulletTick(&object[i]);   //server: remote players hit (M11)
+				AcBulletTick(&object[i],prev);   //server: the players it hits (M11)
 				if((GetPlayer(object[i].pnum)->team!=GetLocalPlayer()->team)||GetPlayer(object[i].pnum)->team==0)
 				if(object[i].pnum!=GetLocalNum())
 				{
@@ -447,21 +449,27 @@ void TickObjects(float sf)
 					vdiff=cur->pos.y-object[i].pos.y;
 					if(Magnitude(hdiff)<.5&&vdiff<2&&vdiff>0&&cur->life>0)
 					{
+						//the push stays here and at once; the damage is the server's when
+						//it decides hits (M11 phase 3a: SERVERHIT, KILLED)
+						int counted=!ServerDecidesHits();
 						if(object[i].type==1)
 						{
 							cur->vel+=Normalize(object[i].vel)*.3;
-							cur->life-=(sv.highbulletdamage+RND*sv.highbulletdamage)*Magnitude(object[i].vel);
+							if(counted) cur->life-=(sv.highbulletdamage+RND*sv.highbulletdamage)*Magnitude(object[i].vel);
 						}
 						if(object[i].type==3)
 						{
 							cur->vel+=Normalize(object[i].vel)*0.1;
-							cur->life-=(sv.lowbulletdamage+RND*sv.lowbulletdamage)*Magnitude(object[i].vel);
+							if(counted) cur->life-=(sv.lowbulletdamage+RND*sv.lowbulletdamage)*Magnitude(object[i].vel);
 						}
 						object[i].type=0;
-						HavePain(150);
-						if(cur->life<=0)
+						if(counted)
 						{
-							Killed(object[i].pnum);
+							HavePain(150);
+							if(cur->life<=0)
+							{
+								Killed(object[i].pnum);
+							}
 						}
 					}
 				}

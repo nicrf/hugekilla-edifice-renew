@@ -77,7 +77,8 @@ void GiveCredit(int player, int credit, int number);
 void SendRGD(int player);
 void SendVoiceFrame(int seq,const unsigned char *data,int len);
 //server anti-cheat (M11): the hits it sees on remote players (TickObjects)
-void AcBulletTick(Object *o);
+void AcBulletTick(Object *o,Vector prev);
+int ServerDecidesHits();   //1: don't count the local player's damage (M11 phase 3a)
 void AcGrenade(Object *o);
 
 #define CMSG_BROADCAST 0

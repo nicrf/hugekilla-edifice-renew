@@ -1,21 +1,30 @@
-"""Anti-cheat checks of the server (roadmap M11 phase 1, docs/M11.md):
+"""Anti-cheat checks of the server (roadmap M11 phases 1 and 3a, docs/M11.md):
     HK_ANTICHEAT_LOG=1 HK_AUTOSTART=1 <Edifice binary> 2>server.log &
     python3 tests/net_anticheat.py server.log
-Three clients join a local server like net_voice.py.
+Three clients join a local server like net_voice.py, as builds before phase 3a
+(they count their own damage); a fourth announces HELLOCAP_SERVERHITS.
  - A victim of the other team is shot at point blank and never sends KILLED:
    the server kills it itself (KILLED to everyone, the victim too), keeps it
    dead (state 11 relayed, its shots dropped) whatever it reports.
- - A flood of KILLED / KILLEDPOSITION from one client: one death counted.
+ - A flood of KILLED / KILLEDPOSITION from one client: one death counted, not
+   credited to the player it blames (the server never saw it hit).
  - Shots faster than the gat allows, or more than its magazine: not relayed.
  - Blocks far from their builder: refused; near it: relayed.
  - A teleport is logged; info requests from one IP are rate limited.
+ - Phase 3a, against the new client: the server tells it it decides hits
+   (HITMODE); a shot from far from its shooter is refused; shots that miss it
+   (aimed away, or beside it) and its own KILLED blaming someone do nothing; a
+   real shot from the shooter's place hurts it (SERVERHIT, PAIN for the others)
+   until the server kills it.
 The server log (its stderr) must show each event."""
-import os, socket, struct, sys, time
+import math, os, socket, struct, sys, time
 
 SERVER = ("127.0.0.1", 27020)
 REQUESTENTER, INFO, PLAYERPOSITION, BLOCKS, SIMPLE, FIREGUN, KILLEDPOSITION = 1, 2, 3, 7, 5, 10, 14
 REQUESTINFO, ENTER, PORTACK, JOINGAME, PING, PINGREPLY = 1, 2, 4, 8, 12, 13
 KILLED, CHANGETEAM, CREDITS = 19, 20, 24
+SERVERHIT, HITMODE, PAIN = 28, 29, 18
+HELLOCAP_SERVERHITS = 8
 RELIABLE, LASTRELIABLE, ACK = 0xFF, 0xFE, 0xFD
 LANDGRIDSIZE, BLOCKSIZE = 512, 2
 LOG = sys.argv[1] if len(sys.argv) > 1 else None
@@ -297,11 +306,15 @@ pump(0.8)
 kills = count(shooter, lambda m: is_simple(m, KILLED, flooder.slot), mark[clients.index(shooter)])
 kps = count(shooter, lambda m: m[0] == KILLEDPOSITION and len(m) >= 15 and m[1] == flooder.slot, mark[clients.index(shooter)])
 check(kills + kps == 1, "a flood of 20 deaths counted once (%d KILLED, %d KILLEDPOSITION)" % (kills, kps))
-pump(2.1)
+blamed = count(shooter, lambda m: is_simple(m, KILLED, flooder.slot, shooter.slot), mark[clients.index(shooter)])
+blamedkp = count(shooter, lambda m: m[0] == KILLEDPOSITION and len(m) >= 15 and m[1] == flooder.slot and
+                 m[2] == shooter.slot, mark[clients.index(shooter)])
+check(blamed + blamedkp == 0, "the forged deaths credit no kill to %d (the server never saw it hit)" % shooter.slot)
+pump(4.0)   # dead for the server 3/4 of ac_deadtime, then ac_killinterval
 mark = len(shooter.got)
 flooder.send(simple(KILLED, 0, shooter.slot))
 pump(0.5)
-check(count(shooter, lambda m: is_simple(m, KILLED, flooder.slot), mark) == 1, "a death 2 s later is counted")
+check(count(shooter, lambda m: is_simple(m, KILLED, flooder.slot), mark) == 1, "a death 4 s later is counted")
 
 # ---- fire rate and magazine (gat: 100 ms, 50 rounds), shooting at the sky ----
 sp = third.pos.get(shooter.slot, (101, 60, 100, 10))
@@ -386,10 +399,102 @@ except socket.timeout:
     alive = False
 check(alive, "answered again a moment later")
 
+# ---- phase 3a: the server decides the hits of a client that knows it ----
+newcl = Client(b"Dave")
+if not newcl.join(trailer + bytes([HELLOCAP_SERVERHITS]), clients):
+    print("FAIL: Dave could not join"); sys.exit(1)
+clients.append(newcl)
+pump(1.0)
+for cl in clients:
+    teams.update(cl.teams)
+print("Dave joined as slot %d (team %d)" % (newcl.slot, teams.get(newcl.slot, 0)))
+check(count(newcl, lambda m: is_simple(m, HITMODE, 1)) >= 1, "the new client is told the server decides hits (HITMODE 1)")
+check(all(count(c, lambda m: is_simple(m, HITMODE)) == 0 for c in clients[:3]), "the older clients never get HITMODE")
+# a shooter of another team (free for all: anyone), and a watcher
+gunner = next(c for c in clients[:3] if teams.get(c.slot, 0) != teams.get(newcl.slot, 0) or teams.get(c.slot, 0) == 0)
+eye = next(c for c in clients[:3] if c is not gunner)
+print("new victim %d, shooter %d, watcher %d" % (newcl.slot, gunner.slot, eye.slot))
+hits = lambda since: [struct.unpack_from("<II", m, 4) for m in newcl.got[since:] if is_simple(m, SERVERHIT)]
+died = lambda since: count(eye, lambda m: is_simple(m, KILLED, newcl.slot), since)
+
+def place(vp, sp, wait=1.5):
+    """victim at vp, shooter at sp, watcher away; they land; returns where the server has them"""
+    for _ in range(4):
+        newcl.send(position(*vp))
+        gunner.send(position(*sp))
+        eye.send(position(320, 60, 320))
+        pump(0.05)
+    pump(wait)
+    return eye.pos.get(newcl.slot), eye.pos.get(gunner.slot)
+
+v, g = place((150, 60, 150), (150, 60, 210))   # 60 units apart
+if not v or not g:
+    print("FAIL: no positions for the new victim or its shooter"); sys.exit(1)
+gunner.send(firegun(g[:3], (0, 1, 0), reload=1))   # a full magazine
+pump(2.6)
+
+# a shot fired from next to the victim while its shooter is 60 units away: refused
+mark, markv = len(eye.got), len(newcl.got)
+for k in range(5):
+    gunner.send(firegun((v[0] - 0.3, v[1], v[2]), (1, 0, 0)))
+    pump(0.15)
+pump(0.5)
+check(count(eye, fires_from(gunner.slot), mark) == 0, "shots from 60 units away from their shooter are not relayed")
+check(not hits(markv), "and do no damage (%d SERVERHIT)" % len(hits(markv)))
+
+# the shooter next to the victim (2 units on x), level with it
+v, g = place((150, 60, 150), (148, 60, 150))
+if not v or not g:
+    print("FAIL: no positions for the new victim or its shooter"); sys.exit(1)
+print("victim at %.1f %.1f %.1f, shooter at %.1f %.1f %.1f" % (v[0], v[1], v[2], g[0], g[1], g[2]))
+origin = (g[0], g[1], g[2])
+
+def aim(tx, ty, tz):
+    # the bullet starts .2 below the shot's position (HandleFireGun)
+    d = (tx - origin[0], ty - (origin[1] - 0.2), tz - origin[2])
+    n = math.sqrt(sum(c * c for c in d))
+    return tuple(c / n for c in d)
+
+# shots that don't aim at it: away from it, and 3 units beside it
+mark, markv = len(eye.got), len(newcl.got)
+for d in [(-1, 0, 0)] * 4 + [aim(v[0], v[1] - 1, v[2] + 3)] * 4:
+    gunner.send(firegun(origin, d))
+    pump(0.15)
+pump(0.6)
+check(count(eye, fires_from(gunner.slot), mark) == 8, "the shots that miss are relayed (%d/8)" % count(eye, fires_from(gunner.slot), mark))
+check(not hits(markv) and not died(mark), "a shooter not aiming at the victim does no damage (%d SERVERHIT)" % len(hits(markv)))
+
+# its own KILLED blaming the shooter: the server decides, nothing happens
+mark = len(eye.got)
+newcl.send(simple(KILLED, 0, gunner.slot))
+pump(0.5)
+check(not died(mark), "a KILLED from the new client blaming %d is ignored" % gunner.slot)
+
+# real shots, from where the shooter is, at the victim's body
+mark, markv = len(eye.got), len(newcl.got)
+shots = 0
+for k in range(40):
+    gunner.send(firegun(origin, aim(v[0], v[1] - 1, v[2])))
+    shots += 1
+    pump(0.15)
+    if died(mark):
+        break
+pump(0.5)
+got = hits(markv)
+print("%d shots, SERVERHIT (by, life): %s" % (shots, got))
+check(got and all(by == gunner.slot for by, life in got), "aimed shots hurt the victim (%d SERVERHIT from %d)" % (len(got), gunner.slot))
+check(all(got[i][1] >= got[i + 1][1] for i in range(len(got) - 1)) and got and got[-1][1] == 0,
+      "its life only goes down, to 0")
+check(count(eye, lambda m: is_simple(m, PAIN, newcl.slot), mark) >= 1, "the others hear its pain (PAIN from the server)")
+check(died(mark) == 1 and count(eye, lambda m: is_simple(m, KILLED, newcl.slot, gunner.slot), mark) == 1,
+      "the server killed it, credited to %d" % gunner.slot)
+check(count(newcl, lambda m: is_simple(m, KILLED, newcl.slot, gunner.slot), markv) == 1, "the victim was told")
+
 if LOG:
     time.sleep(0.3)
     log = open(LOG, errors="replace").read()
-    for kind in ("kill", "death", "fire", "ammo", "build", "move", "ip"):
+    # (no "kill" line: in phase 3a a death the server decides is no event)
+    for kind in ("death", "fire", "ammo", "build", "move", "ip", "origin"):
         check("anticheat: %s:" % kind in log, "server log has 'anticheat: %s:'" % kind)
 else:
     print("no server log given: log lines not checked")
