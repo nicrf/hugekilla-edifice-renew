@@ -370,21 +370,89 @@ int LobbyParseAnnounced(const char *json,int len,char *id,int idsize,char *token
 	return End(j)&&valid&&have==3&&Alnum(id,LOBBY_CODELEN)&&Alnum(token,tokensize-1);
 }
 
-int LobbyParseSession(const char *json,int len,char *identity,int identitysize,char *token,int tokensize)
+//a text that can go in GameNetworkingSockets' comma-separated server lists
+static int ListItem(const char *s)
 {
+	return s[0]&&!strchr(s,' ')&&!strchr(s,',');
+}
+
+//"stun":[...] of a session: the valid URLs, up to LOBBY_MAXICE
+static void StunList(JsonIn &j,LobbySession *s)
+{
+	if(Peek(j)!='[') { Skip(j,2); return; }
+	j.p++;
+	int first=1;
+	while(ArrayNext(j,first))
+	{
+		int valid=1;
+		char url[128];
+		StrValue(j,url,sizeof(url),&valid,1);
+		if(valid&&ListItem(url)&&s->numstun<LOBBY_MAXICE)
+			strcpy(s->stun[s->numstun++],url);
+	}
+}
+
+//"turn":[{url, username, credential}...]
+static void TurnList(JsonIn &j,LobbySession *s)
+{
+	if(Peek(j)!='[') { Skip(j,2); return; }
+	j.p++;
+	int item=1;
+	while(ArrayNext(j,item))
+	{
+		if(Peek(j)!='{') { Skip(j,3); continue; }
+		j.p++;
+		LobbyIceServer t;
+		memset(&t,0,sizeof(t));
+		int valid=1,first=1,have=0;
+		char key[16];
+		while(ObjectNext(j,first,key,sizeof(key)))
+		{
+			if(!strcmp(key,"url")) { StrValue(j,t.url,sizeof(t.url),&valid,1); have|=1; }
+			else if(!strcmp(key,"username")) { StrValue(j,t.username,sizeof(t.username),&valid,1); have|=2; }
+			else if(!strcmp(key,"credential")) { StrValue(j,t.credential,sizeof(t.credential),&valid,1); have|=4; }
+			else Skip(j,4);
+		}
+		if(valid&&have==7&&ListItem(t.url)&&ListItem(t.username)&&ListItem(t.credential)&&s->numturn<LOBBY_MAXICE)
+			s->turn[s->numturn++]=t;
+	}
+}
+
+int LobbyParseSession(const char *json,int len,LobbySession *s)
+{
+	memset(s,0,sizeof(*s));
 	if(!json||len<0) return 0;
 	JsonIn j={json,json+len,1};
 	int valid=1,first=1,have=0;
 	char key[16];
-	identity[0]=token[0]=0;
 	if(!Expect(j,'{')) return 0;
 	while(ObjectNext(j,first,key,sizeof(key)))
 	{
-		if(!strcmp(key,"identity")) { StrValue(j,identity,identitysize,&valid,1); have|=1; }
-		else if(!strcmp(key,"token")) { StrValue(j,token,tokensize,&valid,1); have|=2; }
+		if(!strcmp(key,"identity")) { StrValue(j,s->identity,sizeof(s->identity),&valid,1); have|=1; }
+		else if(!strcmp(key,"token")) { StrValue(j,s->token,sizeof(s->token),&valid,1); have|=2; }
+		else if(!strcmp(key,"signaling"))
+		{
+			int ok=1;
+			StrValue(j,s->signaling,sizeof(s->signaling),&ok,1);
+			if(!ok||!ListItem(s->signaling)) s->signaling[0]=0;
+		}
+		else if(!strcmp(key,"ice")&&Peek(j)=='{')
+		{
+			j.p++;
+			int ifirst=1;
+			char ikey[8];
+			while(ObjectNext(j,ifirst,ikey,sizeof(ikey)))
+			{
+				if(!strcmp(ikey,"stun")) StunList(j,s);
+				else if(!strcmp(ikey,"turn")) TurnList(j,s);
+				else Skip(j,2);
+			}
+		}
 		else Skip(j,1);
 	}
-	return End(j)&&valid&&have==3&&identity[0]&&!strchr(identity,' ')&&Alnum(token,tokensize-1);
+	int ok=End(j)&&valid&&have==3&&s->identity[0]&&!strchr(s->identity,' ')&&Alnum(s->token,sizeof(s->token)-1);
+	if(!ok) memset(s,0,sizeof(*s));
+	return ok;
 }
 
 int LobbyParseError(const char *json,int len,char *msg,int size)
@@ -462,7 +530,8 @@ int LobbyAnnouncementJSON(const LobbyAnnouncement *a,char *out,int size)
 	int ok=Put(out,size,pos,"{\"name\":")&&PutString(out,size,pos,a->name)&&
 		Put(out,size,pos,",\"version\":")&&PutString(out,size,pos,a->version)&&
 		Put(out,size,pos,",\"visibility\":")&&PutString(out,size,pos,a->visibility)&&
-		Put(out,size,pos,",\"identity\":")&&PutString(out,size,pos,a->identity);
+		Put(out,size,pos,",\"identity\":")&&PutString(out,size,pos,a->identity)&&
+		Put(out,size,pos,",\"session\":")&&PutString(out,size,pos,a->session);
 	snprintf(num,sizeof(num),",\"port\":%d,\"protocol\":%d,\"players\":%d,\"maxplayers\":%d,\"mode\":%d}",
 		a->port,a->protocol,a->players,a->maxplayers,a->mode);
 	return ok&&Put(out,size,pos,num);

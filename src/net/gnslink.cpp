@@ -8,6 +8,7 @@
 #include <steam/isteamnetworkingutils.h>
 #include "gnslink.h"
 #include "udplink.h"
+#include "gnssignal.h"
 
 #define GNSMAXQUEUE 512      //messages waiting per connection and channel: then the oldest go
 #define GNSMAXPENDING 64     //messages sent before the connection is up, sent once it is
@@ -23,6 +24,7 @@ struct GnsConn
 	GnsLink *owner;             //its info link, 0 once that one is closed
 	int refs;                   //data links using it
 	int up;                     //connected: messages go out right away
+	int p2p;                    //a P2P connection (named by an identity)
 	std::deque<std::string> queue[2];   //received, per channel
 	std::vector<std::string> pending;   //sent while connecting
 };
@@ -31,7 +33,10 @@ static int initialized;
 static std::vector<GnsConn *> conns;
 static std::vector<GnsLink *> infolinks;   //open info links, the last one is CurrentInfo
 static std::vector<HSteamListenSocket> listensockets;   //...and the listen socket of each (or invalid)
+static std::vector<HSteamListenSocket> p2psockets;      //...and its P2P one (or invalid)
 static unsigned int nextpseudo;
+static int p2pready;                 //StartP2P done: our identity is p2pidentity
+static std::string p2pidentity;
 
 static ISteamNetworkingSockets *Net()
 {
@@ -85,13 +90,14 @@ static void Forget(GnsConn *c)
 	delete c;
 }
 
-//the pseudo-address of an accepted connection: its IPv4 address, else 0.0.x.y
-static SOCKADDR_IN PseudoAddress(const SteamNetworkingIPAddr &remote)
+//the pseudo-address of an accepted connection: its IPv4 address, else (and for P2P)
+//0.0.x.y
+static SOCKADDR_IN PseudoAddress(const SteamNetworkingIPAddr &remote,int p2p)
 {
 	SOCKADDR_IN addr;
 	ZeroMemory(&addr,sizeof(addr));
 	addr.sin_family=AF_INET;
-	if(remote.IsIPv4())
+	if(remote.IsIPv4()&&!p2p)
 	{
 		addr.sin_addr.s_addr=htonl(remote.GetIPv4());
 		addr.sin_port=htons(remote.m_port);
@@ -128,16 +134,23 @@ static void OnStatusChanged(SteamNetConnectionStatusChangedCallback_t *info)
 {
 	ISteamNetworkingSockets *net=Net();
 	GnsConn *c=FindHandle(info->m_hConn);
-	char remote[SteamNetworkingIPAddr::k_cchMaxString];
-	info->m_info.m_addrRemote.ToString(remote,sizeof(remote),true);
+	//who: its address, or for P2P its identity (vouched for by the signaling relay)
+	char remote[SteamNetworkingIdentity::k_cchMaxString];
+	int p2p=info->m_info.m_identityRemote.m_eType==k_ESteamNetworkingIdentityType_GenericString;
+	if(p2p) info->m_info.m_identityRemote.ToString(remote,sizeof(remote));
+	else info->m_info.m_addrRemote.ToString(remote,sizeof(remote),true);
 	switch(info->m_info.m_eState)
 	{
 	case k_ESteamNetworkingConnectionState_Connecting:
 		if(!c&&info->m_info.m_hListenSocket!=k_HSteamListenSocket_Invalid)
 		{
 			GnsLink *owner=0;
+			int byp2p=0;
 			for(size_t i=0;i<listensockets.size();i++)
+			{
 				if(listensockets[i]==info->m_info.m_hListenSocket) owner=infolinks[i];
+				if(p2psockets[i]==info->m_info.m_hListenSocket) owner=infolinks[i],byp2p=1;
+			}
 			if(!owner||net->AcceptConnection(info->m_hConn)!=k_EResultOK)
 			{
 				net->CloseConnection(info->m_hConn,0,"not accepted",false);
@@ -145,19 +158,21 @@ static void OnStatusChanged(SteamNetConnectionStatusChangedCallback_t *info)
 			}
 			c=new GnsConn;
 			c->h=info->m_hConn;
-			c->addr=PseudoAddress(info->m_info.m_addrRemote);
+			c->addr=PseudoAddress(info->m_info.m_addrRemote,byp2p);
 			c->owner=owner;
 			c->refs=0;
 			c->up=0;
+			c->p2p=byp2p;
 			conns.push_back(c);
-			fprintf(stderr,"gns: connection from %s (as %s)\n",remote,AddrText(&c->addr));
+			fprintf(stderr,"gns: %sconnection from %s (as %s)\n",byp2p?"P2P ":"",remote,AddrText(&c->addr));
 		}
 		break;
 	case k_ESteamNetworkingConnectionState_Connected:
 		if(!c) break;
 		c->up=1;
-		fprintf(stderr,"gns: connected with %s, %s\n",remote,
-			(info->m_info.m_nFlags&k_nSteamNetworkConnectionInfoFlags_Unencrypted)?"NOT encrypted":"encrypted");
+		fprintf(stderr,"gns: connected with %s, %s%s\n",remote,
+			(info->m_info.m_nFlags&k_nSteamNetworkConnectionInfoFlags_Unencrypted)?"NOT encrypted":"encrypted",
+			!c->p2p?"":(info->m_info.m_nFlags&k_nSteamNetworkConnectionInfoFlags_Relayed)?", P2P relayed (TURN)":", P2P direct");
 		for(size_t i=0;i<c->pending.size();i++)
 			net->SendMessageToConnection(c->h,c->pending[i].data(),c->pending[i].size(),k_nSteamNetworkingSend_UnreliableNoNagle,0);
 		c->pending.clear();
@@ -191,7 +206,15 @@ static int Init()
 		fprintf(stderr,"gns: GameNetworkingSockets_Init failed: %s\n",err);
 		return 0;
 	}
-	SteamNetworkingUtils()->SetDebugOutputFunction(k_ESteamNetworkingSocketsDebugOutputType_Warning,DebugOutput);
+	//HK_GNS_DEBUG=1: GameNetworkingSockets' own messages, ICE included (debugging)
+	ESteamNetworkingSocketsDebugOutputType level=k_ESteamNetworkingSocketsDebugOutputType_Warning;
+	if(getenv("HK_GNS_DEBUG"))
+	{
+		level=k_ESteamNetworkingSocketsDebugOutputType_Verbose;
+		SteamNetworkingUtils()->SetGlobalConfigValueInt32(k_ESteamNetworkingConfig_LogLevel_P2PRendezvous,
+			k_ESteamNetworkingSocketsDebugOutputType_Verbose);
+	}
+	SteamNetworkingUtils()->SetDebugOutputFunction(level,DebugOutput);
 	SteamNetworkingUtils()->SetGlobalCallback_SteamNetConnectionStatusChanged(OnStatusChanged);
 	initialized=1;
 	return 1;
@@ -245,17 +268,27 @@ GnsLink::GnsLink()
 	channel=GNSCHANNEL_INFO;
 	udp=0;
 	host=0;
+	ip=0;
 	gnsport=0;
 	listen=k_HSteamListenSocket_Invalid;
 	conn=0;
 	nextconn=0;
 }
 
-GnsLink *GnsLink::OpenInfo(UdpLink *udp,int host,int gnsport)
+//P2P listen sockets open: connection requests are taken while there is one
+static void CountP2PListen()
+{
+	int n=0;
+	for(size_t i=0;i<p2psockets.size();i++)
+		n+=p2psockets[i]!=k_HSteamListenSocket_Invalid;
+	GnsSignalListen(n);
+}
+
+GnsLink *GnsLink::OpenInfo(UdpLink *udp,int host,int gnsport,int ip)
 {
 	if(!Init()) return 0;
-	HSteamListenSocket listen=k_HSteamListenSocket_Invalid;
-	if(host)
+	HSteamListenSocket listen=k_HSteamListenSocket_Invalid,p2p=k_HSteamListenSocket_Invalid;
+	if(host&&ip)
 	{
 		SteamNetworkingIPAddr any;
 		any.Clear();
@@ -268,13 +301,22 @@ GnsLink *GnsLink::OpenInfo(UdpLink *udp,int host,int gnsport)
 		}
 		fprintf(stderr,"gns: listening on port %d\n",gnsport);
 	}
+	if(host&&p2pready)
+	{
+		p2p=Net()->CreateListenSocketP2P(0,0,0);
+		if(p2p!=k_HSteamListenSocket_Invalid)
+			fprintf(stderr,"gns: listening for P2P connections as %s\n",p2pidentity.c_str());
+	}
 	GnsLink *link=new GnsLink;
 	link->udp=udp;
 	link->host=host;
+	link->ip=ip;
 	link->gnsport=gnsport;
 	link->listen=listen;
 	infolinks.push_back(link);
 	listensockets.push_back(listen);
+	p2psockets.push_back(p2p);
+	CountP2PListen();
 	return link;
 }
 
@@ -300,20 +342,94 @@ void GnsLink::Shutdown()
 	if(!initialized) return;
 	while(!conns.empty()) Forget(conns.back());
 	for(size_t i=0;i<listensockets.size();i++)
+	{
 		if(listensockets[i]!=k_HSteamListenSocket_Invalid) Net()->CloseListenSocket(listensockets[i]);
+		if(p2psockets[i]!=k_HSteamListenSocket_Invalid) Net()->CloseListenSocket(p2psockets[i]);
+	}
 	listensockets.clear();
+	p2psockets.clear();
 	infolinks.clear();
 	GameNetworkingSockets_Kill();
+	GnsSignalStop();   //after: closing connections may still have signals to send
 	initialized=0;
+	p2pready=0;
+	p2pidentity.clear();
+}
+
+int GnsLink::StartP2P(const GnsP2PConfig *config)
+{
+	if(!Init()) return 0;
+	SteamNetworkingIdentity me;
+	if(!me.ParseString(config->identity)||me.m_eType!=k_ESteamNetworkingIdentityType_GenericString)
+	{
+		fprintf(stderr,"gns: not a P2P identity: %s\n",config->identity);
+		return 0;
+	}
+	ISteamNetworkingSockets *net=Net();
+	if(p2pidentity!=config->identity)
+	{
+		//a new identity: GameNetworkingSockets closes every connection and listen
+		//socket (ResetIdentity), the IP listen sockets are opened again
+		if(!conns.empty()) fprintf(stderr,"gns: new identity, open connections closed\n");
+		net->ResetIdentity(&me);
+		for(size_t i=conns.size();i-->0;)
+		{
+			GnsConn *c=conns[i];
+			c->h=k_HSteamNetConnection_Invalid;
+			c->up=0;
+			c->pending.clear();
+			if(!c->refs&&!c->owner) Forget(c);
+		}
+		for(size_t i=0;i<infolinks.size();i++)
+		{
+			p2psockets[i]=k_HSteamListenSocket_Invalid;
+			if(listensockets[i]==k_HSteamListenSocket_Invalid) continue;
+			SteamNetworkingIPAddr any;
+			any.Clear();
+			any.m_port=(uint16)infolinks[i]->gnsport;
+			listensockets[i]=net->CreateListenSocketIP(any,0,0);
+			if(listensockets[i]==k_HSteamListenSocket_Invalid)
+				fprintf(stderr,"gns: can't listen on port %d again\n",infolinks[i]->gnsport);
+		}
+		p2pidentity=config->identity;
+	}
+	//STUN/TURN servers and the candidates we share: global defaults, which the P2P
+	//listen sockets and connections take when they are created
+	ISteamNetworkingUtils *utils=SteamNetworkingUtils();
+	utils->SetGlobalConfigValueString(k_ESteamNetworkingConfig_P2P_STUN_ServerList,config->stun);
+	utils->SetGlobalConfigValueString(k_ESteamNetworkingConfig_P2P_TURN_ServerList,config->turn);
+	utils->SetGlobalConfigValueString(k_ESteamNetworkingConfig_P2P_TURN_UserList,config->turnusers);
+	utils->SetGlobalConfigValueString(k_ESteamNetworkingConfig_P2P_TURN_PassList,config->turnpasses);
+	utils->SetGlobalConfigValueInt32(k_ESteamNetworkingConfig_P2P_Transport_ICE_Enable,config->relayonly?
+		k_nSteamNetworkingConfig_P2P_Transport_ICE_Enable_Relay:k_nSteamNetworkingConfig_P2P_Transport_ICE_Enable_All);
+	GnsSignalStart(config->signalhost,config->signalport,config->identity,config->token);
+	p2pready=1;
+	fprintf(stderr,"gns: P2P as %s, signaling %s:%d, STUN %s, TURN %s%s\n",config->identity,
+		config->signalhost,config->signalport,config->stun[0]?config->stun:"none",
+		config->turn[0]?config->turn:"none",config->relayonly?" (relay only)":"");
+	int ok=1;
+	for(size_t i=0;i<infolinks.size();i++)
+	{
+		if(!infolinks[i]->host||p2psockets[i]!=k_HSteamListenSocket_Invalid) continue;
+		p2psockets[i]=net->CreateListenSocketP2P(0,0,0);
+		if(p2psockets[i]==k_HSteamListenSocket_Invalid)
+		{
+			fprintf(stderr,"gns: can't listen for P2P connections\n");
+			ok=0;
+		}
+		else fprintf(stderr,"gns: listening for P2P connections as %s\n",config->identity);
+	}
+	CountP2PListen();
+	return ok;
 }
 
 void GnsLink::Connect(const SOCKADDR_IN *addr)
 {
-	if(channel!=GNSCHANNEL_INFO||host||FindAddr(addr,this)) return;
-	SteamNetworkingIPAddr ip;
-	ip.Clear();
-	ip.SetIPv4(ntohl(addr->sin_addr.s_addr),(uint16)gnsport);
-	HSteamNetConnection h=Net()->ConnectByIPAddress(ip,0,0);
+	if(channel!=GNSCHANNEL_INFO||host||!ip||FindAddr(addr,this)) return;
+	SteamNetworkingIPAddr ipaddr;
+	ipaddr.Clear();
+	ipaddr.SetIPv4(ntohl(addr->sin_addr.s_addr),(uint16)gnsport);
+	HSteamNetConnection h=Net()->ConnectByIPAddress(ipaddr,0,0);
 	if(h==k_HSteamNetConnection_Invalid)
 	{
 		fprintf(stderr,"gns: can't connect to %s\n",AddrText(addr));
@@ -325,10 +441,41 @@ void GnsLink::Connect(const SOCKADDR_IN *addr)
 	c->owner=this;
 	c->refs=0;
 	c->up=0;
+	c->p2p=0;
 	conns.push_back(c);
 	char text[SteamNetworkingIPAddr::k_cchMaxString];
-	ip.ToString(text,sizeof(text),true);
+	ipaddr.ToString(text,sizeof(text),true);
 	fprintf(stderr,"gns: connecting to %s\n",text);
+}
+
+int GnsLink::ConnectP2P(const SOCKADDR_IN *addr,const char *identity)
+{
+	if(channel!=GNSCHANNEL_INFO||host||!p2pready) return 0;
+	if(FindAddr(addr,this)) return 1;
+	SteamNetworkingIdentity peer;
+	if(!peer.ParseString(identity)||peer.m_eType!=k_ESteamNetworkingIdentityType_GenericString||
+		p2pidentity==identity)
+	{
+		fprintf(stderr,"gns: can't connect P2P to %s\n",identity);
+		return 0;
+	}
+	GnsSignalExpect(identity);
+	HSteamNetConnection h=Net()->ConnectP2PCustomSignaling(GnsSignalFor(identity),&peer,0,0,0);
+	if(h==k_HSteamNetConnection_Invalid)
+	{
+		fprintf(stderr,"gns: can't connect P2P to %s\n",identity);
+		return 0;
+	}
+	GnsConn *c=new GnsConn;
+	c->h=h;
+	c->addr=*addr;
+	c->owner=this;
+	c->refs=0;
+	c->up=0;
+	c->p2p=1;
+	conns.push_back(c);
+	fprintf(stderr,"gns: connecting P2P to %s (the game at %s)\n",identity,AddrText(addr));
+	return 1;
 }
 
 unsigned int GnsLink::Connection()
@@ -355,10 +502,13 @@ GnsLink::~GnsLink()
 			if(infolinks[i]==this)
 			{
 				if(listensockets[i]!=k_HSteamListenSocket_Invalid) Net()->CloseListenSocket(listensockets[i]);
+				if(p2psockets[i]!=k_HSteamListenSocket_Invalid) Net()->CloseListenSocket(p2psockets[i]);
 				infolinks.erase(infolinks.begin()+i);
 				listensockets.erase(listensockets.begin()+i);
+				p2psockets.erase(p2psockets.begin()+i);
 				break;
 			}
+		CountP2PListen();
 	}
 	delete udp;
 }

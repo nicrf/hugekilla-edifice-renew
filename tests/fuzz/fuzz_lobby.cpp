@@ -48,7 +48,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data,size_t size)
 	LobbyGame g;
 	if(LobbyParseGame(json,len,&g)) CheckGame(g);
 
-	char id[LOBBY_CODELEN+1],token[65],identity[65],msg[100];
+	char id[LOBBY_CODELEN+1],token[65],msg[100];
 	int refresh;
 	if(LobbyParseAnnounced(json,len,id,sizeof(id),token,sizeof(token),&refresh))
 	{
@@ -56,10 +56,29 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data,size_t size)
 		Printable(token,sizeof(token));
 		FUZZ_CHECK(id[0]&&token[0]&&refresh>=2&&refresh<=300);
 	}
-	if(LobbyParseSession(json,len,identity,sizeof(identity),token,sizeof(token)))
+	LobbySession s;
+	if(LobbyParseSession(json,len,&s))
 	{
-		Printable(identity,sizeof(identity));
-		Printable(token,sizeof(token));
+		Printable(s.identity,sizeof(s.identity));
+		Printable(s.token,sizeof(s.token));
+		FUZZ_CHECK(s.identity[0]&&s.token[0]&&!strchr(s.identity,' '));
+		// what goes into GameNetworkingSockets' comma-separated lists
+		Printable(s.signaling,sizeof(s.signaling));
+		FUZZ_CHECK(s.numstun>=0&&s.numstun<=LOBBY_MAXICE&&s.numturn>=0&&s.numturn<=LOBBY_MAXICE);
+		for(int i=0;i<s.numstun;i++)
+		{
+			Printable(s.stun[i],sizeof(s.stun[i]));
+			FUZZ_CHECK(s.stun[i][0]&&!strchr(s.stun[i],',')&&!strchr(s.stun[i],' '));
+		}
+		for(int i=0;i<s.numturn;i++)
+		{
+			const char *t[3]={s.turn[i].url,s.turn[i].username,s.turn[i].credential};
+			for(int k=0;k<3;k++)
+			{
+				Printable(t[k],128);
+				FUZZ_CHECK(t[k][0]&&!strchr(t[k],',')&&!strchr(t[k],' '));
+			}
+		}
 	}
 	LobbyParseError(json,len,msg,sizeof(msg));
 	Printable(msg,sizeof(msg));

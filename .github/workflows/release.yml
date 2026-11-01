@@ -119,7 +119,8 @@ jobs:
   gns:
     # Experimental (roadmap M7): GameNetworkingSockets built through vcpkg, an
     # encrypted loopback connection test, and the game built with EDIFICE_GNS=ON.
-    # On Linux, netplay through GameNetworkingSockets (tests/run_gns_netplay_test.sh).
+    # On Linux, netplay through GameNetworkingSockets (tests/run_gns_netplay_test.sh),
+    # and Internet games joined P2P through edifice-lobby (tests/net_p2p.py).
     # Not required for releases yet.
     strategy:
       fail-fast: false
@@ -137,7 +138,7 @@ jobs:
         run: |
           .github/scripts/apt-install.sh build-essential cmake ninja-build pkg-config libglu1-mesa-dev \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev \
-            libxkbcommon-dev libwayland-dev libasound2-dev libpulse-dev
+            libxkbcommon-dev libwayland-dev libasound2-dev libpulse-dev libcurl4-openssl-dev
 
       - name: Virtual display and software OpenGL (Linux)
         if: runner.os == 'Linux'
@@ -179,6 +180,20 @@ jobs:
         if: runner.os == 'Linux'
         timeout-minutes: 15
         run: tests/run_gns_netplay_test.sh build/gns/Edifice build/gns/gns_netplay_test gns-logs
+
+      - uses: actions/setup-go@v5
+        if: runner.os == 'Linux'
+        with:
+          go-version: '1.23'
+          cache-dependency-path: server/go.sum
+
+      - name: P2P through the lobby, direct then TURN relay only (Linux)
+        if: runner.os == 'Linux'
+        timeout-minutes: 15
+        run: |
+          (cd server && go build -o ../build/edifice-lobby .)
+          NET_P2P_LOGS=gns-logs/p2p xvfb-run -a python3 tests/net_p2p.py build/gns/Edifice \
+            build/edifice-lobby build/gns/gns_p2p_test
 
       - uses: actions/upload-artifact@v4
         if: failure() && runner.os == 'Linux'

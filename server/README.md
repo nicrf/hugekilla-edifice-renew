@@ -61,15 +61,15 @@ Pour le relais TURN, les ports UDP des allocations doivent aussi être joignable
 
 | Requête | Réponse |
 |---|---|
-| `POST /v1/sessions` | `identity`, `token`, serveurs STUN/TURN avec identifiants temporaires (12 h) |
-| `POST /v1/servers` `{name, port, version, protocol, players, maxplayers, mode, visibility, identity}` | `id`, `token`, `refresh_seconds` |
+| `POST /v1/sessions` | `identity`, `token`, serveurs STUN/TURN avec identifiants temporaires (12 h), `signaling` (`hôte:port` du relais de signalisation, avec `-public-host`) |
+| `POST /v1/servers` `{name, port, version, protocol, players, maxplayers, mode, visibility, identity, session}` | `id`, `token`, `refresh_seconds` |
 | `PUT /v1/servers/{id}` (même corps, `Authorization: Bearer <token>`) | 204 : partie renouvelée |
 | `DELETE /v1/servers/{id}` (`Authorization: Bearer <token>`) | 204 |
 | `GET /v1/servers?protocol=N` | `{"servers": [...]}` : parties publiques, les plus peuplées d'abord |
 | `GET /v1/servers/{id}` | une partie, même privée (partagée par son id : le **code de partie**) |
 | `GET /healthz` | `ok` |
 
-L'adresse d'une partie est **l'IP vue par le serveur**, jamais celle déclarée par l'hôte. `visibility` vaut `public` (listée), `friends` ou `private` (non listées, joignables par leur id). L'id est le **code de partie** : 6 caractères (chiffres et majuscules, sans 0/O ni 1/I) à se transmettre ; la recherche ignore la casse, les tirets et les espaces, et compte dans la limite de requêtes par IP pour qu'on ne puisse pas énumérer les parties privées. Limites : 4 parties par IP, requêtes d'écriture limitées par IP, corps de 4 Ko maximum, textes réduits à l'ASCII imprimable.
+L'adresse d'une partie est **l'IP vue par le serveur**, jamais celle déclarée par l'hôte. De même, `identity` (à laquelle les joueurs se connectent en P2P) n'est listée que si `session` est le jeton de la session de cette identité : personne ne peut annoncer une partie sous l'identité d'un autre (sans preuve, la partie est listée sans identité ; le jeton n'est jamais renvoyé). `visibility` vaut `public` (listée), `friends` ou `private` (non listées, joignables par leur id). L'id est le **code de partie** : 6 caractères (chiffres et majuscules, sans 0/O ni 1/I) à se transmettre ; la recherche ignore la casse, les tirets et les espaces, et compte dans la limite de requêtes par IP pour qu'on ne puisse pas énumérer les parties privées. Limites : 4 parties par IP, requêtes d'écriture limitées par IP, corps de 4 Ko maximum, textes réduits à l'ASCII imprimable.
 
 ## Signalisation
 
@@ -78,7 +78,7 @@ TCP, une ligne par message, le protocole de l'exemple de Valve (`examples/trivia
 1. première ligne : `IDENTITÉ JETON` (d'une session `POST /v1/sessions`), sinon `ERROR unauthorized` et déconnexion ;
 2. ensuite : `DESTINATAIRE CHARGE` → relayé au destinataire sous la forme `EXPÉDITEUR CHARGE`.
 
-Lignes de 4 Ko maximum, 50 messages par seconde et par connexion (au-delà, ignorés : la signalisation ne garantit pas la livraison), déconnexion après 5 minutes d'inactivité.
+Le jeu (`src/net/gnssignal.cpp`) y envoie les signaux de GameNetworkingSockets en hexadécimal, comme l'exemple de Valve, et vérifie que chaque signal reçu se dit bien venir de l'expéditeur garanti par le serveur. Lignes de 4 Ko maximum, 50 messages par seconde et par connexion (au-delà, ignorés : la signalisation ne garantit pas la livraison), déconnexion après 5 minutes d'inactivité.
 
 ## Tests
 
