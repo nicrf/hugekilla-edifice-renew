@@ -1122,10 +1122,17 @@ void DrawGunSelection()
 	glPopAttrib();
 }
 
-//simply draws the console
+//draws the console alone on a black screen (loading, connecting); in game it is drawn
+//over the world (DrawConsolePanel, src/ui/console.cpp)
 
 void DrawConsole()
 {
+#ifndef HK_WIN32_NATIVE
+	glClearColor(0,0,0,0);
+	glClear(GL_COLOR_BUFFER_BIT);
+	DrawConsolePanel(1);
+	SwapBuffers(GetGlHDC());
+#else
 	glColor3f(1,1,1);
 	glEnable(GL_TEXTURE_2D);
 	glBlendFunc(GL_SRC_ALPHA,GL_ZERO );
@@ -1141,6 +1148,7 @@ void DrawConsole()
 	DrawText(-1+(.040*strlen(consolecommand)),-.8,"_");
 	//InvalidateRect(GetHWND(),0,0);
 	SwapBuffers(GetGlHDC());
+#endif
 }
 
 //redraw calls draw to draw the world, then it adds 2d graphics on top
@@ -1245,12 +1253,14 @@ void Redraw()
 	blockfaces=0;
 	landfaces=0;
 	
+#ifdef HK_WIN32_NATIVE
 	if(consolevisible)
 	{
 		DrawConsole();
 		return;
 	}
 	else
+#endif
 	{
 		glClear(GL_COLOR_BUFFER_BIT);
 	
@@ -1350,10 +1360,14 @@ void Redraw()
 #endif
 	itoa(curtime&999,tmptext,10);
 	int i;
+#ifdef HK_WIN32_NATIVE
 	for(i=0;i<consolepartvisible;i++)
 	{
 		DrawText(- 1,1-(consolepartvisible-i)*.1,consoletext[i]);
 	}
+#else
+	if(!consolevisible) DrawConsoleNotify();   //src/ui/console.cpp
+#endif
 #ifdef HK_WIN32_NATIVE
 	if(GetLocalPlayer()->talking)
 	{
@@ -1565,6 +1579,9 @@ void Redraw()
 		
 		glEnd();
 	}
+#ifndef HK_WIN32_NATIVE
+	if(consolevisible) DrawConsolePanel(0);
+#endif
 	ScreenShot();	
 }
 
