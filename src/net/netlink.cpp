@@ -58,6 +58,16 @@ DatagramLink *NetOpenPeerLink(const SOCKADDR_IN *source)
 #endif
 }
 
+int NetSourceIsConnection(const SOCKADDR_IN *source)
+{
+#ifdef EDIFICE_GNS
+	return GnsLink::IsConnection(source);
+#else
+	(void)source;
+	return 0;
+#endif
+}
+
 void NetQueryHost(const SOCKADDR_IN *dest)
 {
 #ifdef EDIFICE_GNS

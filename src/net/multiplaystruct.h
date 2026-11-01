@@ -47,6 +47,10 @@
 #define CREDITS 24
 #define GAMEOVER 25
 #define VERSIONMISMATCH 26   //server refused REQUESTENTER: msg = server protocol (version.h)
+//server answers a REQUESTENTER without a valid join cookie: msg, msg2 = the cookie
+//(8 bytes, little-endian), to send back in the next REQUESTENTER. Only to clients
+//whose REQUESTENTER has HELLOCAP_COOKIE (version.h; M11 phase 2, docs/M11.md).
+#define ENTERCOOKIE 27
 
 //Decoded messages. None of these structs goes onto the wire as it is: each
 //message has explicit Write/Read functions (netmsg.h, src/net/wire.h).

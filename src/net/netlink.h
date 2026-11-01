@@ -28,6 +28,9 @@ DatagramLink *NetOpenDataLink(WORD port,const SOCKADDR_IN *server);
 //server: the link of a new client whose request came from source, 0 when it is a UDP
 //client (it gets its own UDP port)
 DatagramLink *NetOpenPeerLink(const SOCKADDR_IN *source);
+//server: 1 if source is a GameNetworkingSockets connection (encrypted, its handshake
+//proved the address: no join cookie needed, M11 phase 2), 0 for plain UDP
+int NetSourceIsConnection(const SOCKADDR_IN *source);
 //client: a server is asked by IP (dest: its address and info port)
 void NetQueryHost(const SOCKADDR_IN *dest);
 //at exit, once every Sock is closed

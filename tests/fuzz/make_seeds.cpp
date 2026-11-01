@@ -182,6 +182,13 @@ int main(int argc,char **argv)
 	Seed("fuzz_hello","requestenter.bin",hello.data(),hello.size());
 	Bytes oldhello(hello.begin(),hello.begin()+9);   //original game: no trailer
 	Seed("fuzz_hello","original.bin",oldhello.data(),oldhello.size());
+	//with capabilities and an echoed join cookie (M11 phase 2)
+	char caps[HELLOCAPS_MAX];
+	const unsigned char cookie[HELLOCOOKIE_SIZE]={1,2,3,4,5,6,7,8};
+	int cn=WriteHelloCaps(caps,HELLOCAP_COOKIE,cookie);
+	Bytes cookiehello(hello);
+	cookiehello.insert(cookiehello.end(),caps,caps+cn);
+	Seed("fuzz_hello","requestenter_cookie.bin",cookiehello.data(),cookiehello.size());
 
 	//PLAYERNAMES with two players
 	Bytes names;

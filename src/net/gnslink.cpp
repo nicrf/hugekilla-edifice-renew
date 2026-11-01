@@ -332,6 +332,11 @@ GnsLink *GnsLink::OpenData(const SOCKADDR_IN *peer)
 	return link;
 }
 
+int GnsLink::IsConnection(const SOCKADDR_IN *peer)
+{
+	return initialized&&FindAddr(peer,0)!=0;
+}
+
 GnsLink *GnsLink::CurrentInfo()
 {
 	return infolinks.empty()?0:infolinks.back();
