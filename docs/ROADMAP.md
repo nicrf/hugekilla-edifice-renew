@@ -117,6 +117,7 @@ Détail complet en section 5.
   - Créer `INetTransport {Host, Connect, Send(peer,data,len,reliable,callbackId), Poll, Close, Flush, CheckResend}` et un type `NetPeer` opaque, qui remplace `SOCKADDR_IN` dans `infosock`, `datasock`, `clientsock[]` et `locallistaddr[]` (multiplay.cpp:42-51).
   - `UdpTransport` enveloppe `Sock` à l'identique : un port par client (419-448), même format sur le fil.
   - Le backend Internet sera ENet, GameNetworkingSockets ou Steam (voir les décisions en section 7).
+  - *Fait (M7a à M7e, détails dans [M7.md](M7.md)) :* `DatagramLink` sous `Sock` (`UdpLink`, `GnsLink` sur GameNetworkingSockets), client du lobby `edifice-lobby` (onglet Internet, code de partie), P2P par ICE avec signalisation authentifiée et relais TURN, et depuis M7e les trois archives de release compilées avec GameNetworkingSockets (vérifiées par la CI) : une partie Internet se rejoint sans ouvrir de port. Reste à vérifier à deux machines derrière de vrais NAT (CGNAT, NAT symétrique) avec l'instance publique.
 - **Fait quand :** une partie LAN Windows contre macOS se comporte exactement comme avant.
 
 ### M8 - Steam : SDK, initialisation, SteamTransport (L)

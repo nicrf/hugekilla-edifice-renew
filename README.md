@@ -32,6 +32,8 @@ Téléchargez l'archive de votre système dans les [Releases](https://github.com
 - **Linux** : décompressez l'archive puis lancez `./Edifice`. Le dossier `data/` doit rester à côté.
 - **Windows** : décompressez l'archive puis lancez `Edifice.exe`.
 
+**Jouer par Internet** : l'hôte choisit une visibilité « Internet » dans *Server Setup* (publique, ou amis/privée avec un code de partie à partager), les autres ouvrent l'onglet *Internet* de l'écran *Join* (ou tapent le code). La connexion est directe et chiffrée entre joueurs, ou passe par le relais du serveur de parties quand rien d'autre ne passe : aucun port à ouvrir sur la box.
+
 `F6` plein écran · `` ` `` console · `Échap` libérer/capturer la souris. En mode bac à sable, la console permet de construire sans limite : tapez `gamemode 1`.
 
 ## Compiler
@@ -45,3 +47,5 @@ Détails, prérequis et options : [BUILD.md](BUILD.md).
 ## Licence
 
 GNU LGPL v3 : voir [license.txt](license.txt) et [lgpl-3.0.txt](lgpl-3.0.txt), comme le projet d'origine. Le texte d'origine de l'auteur est dans [readme.txt](readme.txt).
+
+Bibliothèques incluses dans les archives (leurs licences sont dans le dossier `licenses/`) : [SDL2](https://libsdl.org) (zlib), [Opus](https://opus-codec.org) (BSD), [GameNetworkingSockets](https://github.com/ValveSoftware/GameNetworkingSockets) de Valve (BSD-3), [Protocol Buffers](https://protobuf.dev) (BSD-3), [Abseil](https://abseil.io) (Apache 2.0), [OpenSSL](https://www.openssl.org) (Apache 2.0), et [curl](https://curl.se) sous Windows.
