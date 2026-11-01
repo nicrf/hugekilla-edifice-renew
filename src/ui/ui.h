@@ -45,11 +45,14 @@ void DrawServerSetup();
 #define UITEXTH .05f
 float UIText(float x,float y,const char *text,float h=UITEXTH,int len=-1);   //returns the end x
 float UITextWidth(const char *text,float h=UITEXTH,int len=-1);
+float UITextAdvance(const char *text,float h=UITEXTH,int len=-1);   //x where more text goes
+float UITextLines(float x,float y,const char *text,float h=UITEXTH,float lineh=UITEXTH*1.25f);
 float UITextFit(float x,float y,const char *text,float maxw,float h=UITEXTH);  //cut with "..."
 float UITextY(float y1,float y2,float h=UITEXTH);   //y that centers a line between y1 and y2
 int UIInside(float x1,float y1,float x2,float y2);
 void UIRect(float x1,float y1,float x2,float y2,float r,float g,float b,float a);
 void UIPanel(float x1,float y1,float x2,float y2,float titleh,const char *title);
+void UIArrow(float x1,float y1,float x2,float y2,const char *label);
 int UIButton(float x1,float y1,float x2,float y2,const char *label,int enabled,int strong=0);
 void UIField(float x1,float y1,float x2,float y2,const char *text,int focused,const char *placeholder=0);
 

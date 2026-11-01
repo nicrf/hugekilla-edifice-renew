@@ -61,27 +61,36 @@ static const char *settinglabels[NUMSETTINGS]=
 	"Voice volume","Microphone"
 };
 
-//layout, in screen units (-1..1)
+//layout, in screen units (-1..1), like the server setup screen (serversetup.cpp)
 
 #define PANELX1 -.95f
 #define PANELX2 .95f
 #define PANELY1 -.92f
-#define PANELY2 .85f
-#define ROWTOP .58f
-#define ROWHEIGHT .07f
+#define PANELY2 .9f
+#define TITLEH .13f
+#define ROWTOP .72f            //top of the first row
+#define ROWHEIGHT .075f
 #define LABELX -.85f
-#define VALUEX .15f
-#define CHARW .04f
+#define VALUEX .05f
+#define VALUEX2 .85f
+#define ARROWW .08f            //"<" and ">" at both ends of a stepped value
+#define ROWX1 (LABELX-.04f)    //a row's click and hover area
+#define ROWX2 (PANELX2-.04f)
+#define TAB_CONTROLS -.5f,.79f,-.22f,.88f
+#define TAB_VIDEO -.2f,.79f,.08f,.88f
+#define TAB_PLAYER .1f,.79f,.38f,.88f
+#define BTN_CLOSE .6f,-.87f,.9f,-.76f
 
+//bottom of a row
 static float RowY(int row)
 {
-	return ROWTOP-row*ROWHEIGHT;
+	return ROWTOP-(row+1)*ROWHEIGHT;
 }
 
 static int RowAt(float y,int numrows)
 {
 	for(int i=0;i<numrows;i++)
-		if(y>=RowY(i)-.01f&&y<RowY(i)+ROWHEIGHT-.01f)
+		if(y>=RowY(i)&&y<RowY(i)+ROWHEIGHT)
 			return i;
 	return -1;
 }
@@ -337,11 +346,11 @@ static void SettingText(int row,char *text)
 	{
 	case 0: strcpy(text,HKGetFullscreen()?"On":"Off"); break;
 	case 1: strcpy(text,HKGetVSync()?"On":"Off"); break;
-	case 2: sprintf(text,"< %d >",(int)graphicsprefs.drawdistance); break;
-	case 3: sprintf(text,"< %.2f >",controls.mousesensitivity); break;
+	case 2: sprintf(text,"%d",(int)graphicsprefs.drawdistance); break;
+	case 3: sprintf(text,"%.2f",controls.mousesensitivity); break;
 	case 4: strcpy(text,controls.mousereverse?"On":"Off"); break;
-	case 5: sprintf(text,"< %d%% >",(int)(volume*100+.5f)); break;
-	case 6: sprintf(text,"< %d%% >",(int)(VoiceGetVolume()*100+.5f)); break;
+	case 5: sprintf(text,"%d%%",(int)(volume*100+.5f)); break;
+	case 6: sprintf(text,"%d%%",(int)(VoiceGetVolume()*100+.5f)); break;
 	case 7: strcpy(text,VoiceGetMic()?"On":"Off"); break;
 	}
 }
@@ -384,11 +393,11 @@ void OptionsClick()
 		return;
 	}
 	editingname=0;
-	if(Inside(-.85f,.68f,-.4f,.78f)) { optionstab=0; return; }
-	if(Inside(-.3f,.68f,.2f,.78f)) { optionstab=1; return; }
-	if(Inside(.3f,.68f,.6f,.78f)) { optionstab=2; return; }
-	if(Inside(.55f,-.88f,.9f,-.78f)) { CloseOptions(); return; }
-	if(mousepos.x<LABELX||mousepos.x>PANELX2) return;
+	if(Inside(TAB_CONTROLS)) { optionstab=0; return; }
+	if(Inside(TAB_VIDEO)) { optionstab=1; return; }
+	if(Inside(TAB_PLAYER)) { optionstab=2; return; }
+	if(Inside(BTN_CLOSE)) { CloseOptions(); return; }
+	if(mousepos.x<ROWX1||mousepos.x>ROWX2) return;
 	if(optionstab==2)
 	{
 		if(RowAt(mousepos.y,1)==0) editingname=1;
@@ -405,8 +414,8 @@ void OptionsClick()
 		if(row<0) return;
 		if(IsStepper(row))
 		{
-			//"<" decreases, anything right of the number increases
-			if(mousepos.x<VALUEX+CHARW*1.5f) ChangeSetting(row,-1);
+			//"<" (and left of it) decreases, anything else increases
+			if(mousepos.x<VALUEX+ARROWW) ChangeSetting(row,-1);
 			else ChangeSetting(row,1);
 		}
 		else
@@ -414,81 +423,87 @@ void OptionsClick()
 	}
 }
 
-static void TabText(float x,const char *text,int active)
+//a tab of the title bar (the join screen's)
+static void Tab(float x1,float y1,float x2,float y2,const char *label,int active)
 {
+	int over=!active&&Inside(x1,y1,x2,y2);
+	UIRect(x1,y1,x2,y2,1,1,active?.5f:1,active?.2f:over?.14f:.06f);
+	if(active) UIRect(x1,y1,x2,y1+.006f,1,1,.5f,.9f);
 	if(active) glColor3f(1,1,.5f);
-	else if(Inside(x-.02f,.68f,x+strlen(text)*CHARW,.78f)) glColor3f(1,1,1);
-	else glColor3f(.6f,.6f,.6f);
-	DrawText(x,.7f,text);
+	else glColor3f(over?1:.7f,over?1:.7f,over?1:.7f);
+	UIText((x1+x2-UITextWidth(label))/2,UITextY(y1,y2),label);
+}
+
+//label of a row, brighter under the mouse; returns the value's y1,y2
+static void RowLabel(int row,const char *label,float &y1,float &y2)
+{
+	y1=RowY(row)+.008f;
+	y2=RowY(row)+ROWHEIGHT-.008f;
+	int hover=Inside(ROWX1,RowY(row),ROWX2,RowY(row)+ROWHEIGHT);
+	if(hover) UIRect(ROWX1,RowY(row),ROWX2,RowY(row)+ROWHEIGHT,1,1,1,.06f);
+	glColor3f(hover?1:.75f,hover?1:.75f,hover?1:.75f);
+	UIText(LABELX,UITextY(y1,y2),label);
+}
+
+//value box with centered text
+static void Value(float y1,float y2,const char *text,int highlight)
+{
+	UIRect(VALUEX,y1,VALUEX2,y2,0,0,0,.55f);
+	if(highlight) glColor3f(1,1,.5f);
+	else glColor3f(1,1,1);
+	UIText((VALUEX+VALUEX2-UITextWidth(text))/2,UITextY(y1,y2),text);
 }
 
 void DrawOptions()
 {
 	if(!showoptions) return;
-	glDisable(GL_TEXTURE_2D);
-	glColor4f(0,0,0,.88f);
-	glBegin(GL_QUADS);
-	glVertex2f(PANELX1,PANELY1);
-	glVertex2f(PANELX2,PANELY1);
-	glVertex2f(PANELX2,PANELY2);
-	glVertex2f(PANELX1,PANELY2);
-	glEnd();
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
 	glEnable(GL_TEXTURE_2D);
-
-	TabText(-.85f,"Controls",optionstab==0);
-	TabText(-.3f,"Video/Audio",optionstab==1);
-	TabText(.3f,"Player",optionstab==2);
+	UIPanel(PANELX1,PANELY1,PANELX2,PANELY2,TITLEH,"Options");
+	Tab(TAB_CONTROLS,"Controls",optionstab==0);
+	Tab(TAB_VIDEO,"Video/Audio",optionstab==1);
+	Tab(TAB_PLAYER,"Player",optionstab==2);
 
 	char text[100];
+	float y1,y2;
+	const char *help;
 	if(optionstab==2)
 	{
-		int hover=Inside(LABELX,RowY(0)-.01f,PANELX2,RowY(0)+ROWHEIGHT-.01f);
-		glColor3f(hover?1:.8f,hover?1:.8f,hover?1:.8f);
-		DrawText(LABELX,RowY(0),"Name");
-		sprintf(text,"%s%s",playername,editingname?"_":"");
-		if(editingname) glColor3f(1,1,.5f);
-		else glColor3f(1,1,1);
-		DrawText(VALUEX,RowY(0),text);
-		glColor3f(.6f,.6f,.6f);
-		DrawText(LABELX,-.84f,"Click the name to edit it");
+		RowLabel(0,"Name",y1,y2);
+		UIField(VALUEX,y1,VALUEX2,y2,playername,editingname,"Player");
+		help="Click the name to edit it";
 	}
 	else if(optionstab==0)
 	{
 		for(int i=0;i<NUMBINDINGS;i++)
 		{
-			int hover=Inside(LABELX,RowY(i)-.01f,PANELX2,RowY(i)+ROWHEIGHT-.01f);
-			glColor3f(hover?1:.8f,hover?1:.8f,hover?1:.8f);
-			DrawText(LABELX,RowY(i),bindings[i].label);
-			if(i==capturing)
-			{
-				glColor3f(1,1,.5f);
-				DrawText(VALUEX,RowY(i),"press a key...");
-			}
-			else
-			{
-				const char *name=KeyName(*bindings[i].key);
-				glColor3f(1,1,1);
-				DrawText(VALUEX,RowY(i),name?name:"(none)");
-			}
+			RowLabel(i,bindings[i].label,y1,y2);
+			const char *name=KeyName(*bindings[i].key);
+			Value(y1,y2,i==capturing?"press a key...":name?name:"(none)",i==capturing);
 		}
-		glColor3f(.6f,.6f,.6f);
-		DrawText(LABELX,-.84f,"Click an action, then a key");
+		help="Click an action, then a key (Esc: cancel)";
 	}
 	else
 	{
 		for(int i=0;i<NUMSETTINGS;i++)
 		{
-			int hover=Inside(LABELX,RowY(i)-.01f,PANELX2,RowY(i)+ROWHEIGHT-.01f);
-			glColor3f(hover?1:.8f,hover?1:.8f,hover?1:.8f);
-			DrawText(LABELX,RowY(i),settinglabels[i]);
+			RowLabel(i,settinglabels[i],y1,y2);
 			SettingText(i,text);
-			glColor3f(1,1,1);
-			DrawText(VALUEX,RowY(i),text);
+			Value(y1,y2,text,0);
+			if(IsStepper(i))
+			{
+				UIArrow(VALUEX,y1,VALUEX+ARROWW,y2,"<");
+				UIArrow(VALUEX2-ARROWW,y1,VALUEX2,y2,">");
+			}
 		}
+		help="Click a value to change it; \"<\" lowers it";
 	}
-	if(Inside(.55f,-.88f,.9f,-.78f)) glColor3f(1,1,1);
-	else glColor3f(.7f,.7f,.7f);
-	DrawText(.6f,-.86f,"Close");
+	glColor3f(.6f,.6f,.6f);
+	UITextFit(LABELX,UITextY(-.72f,-.64f,.04f),help,PANELX2-.05f-LABELX,.04f);
+	glColor3f(.45f,.45f,.45f);
+	UIText(LABELX,UITextY(-.87f,-.76f,.04f),"Esc: close (settings are saved)",.04f);
+	UIButton(BTN_CLOSE,"Close",1);
 	glColor3f(1,1,1);
 }
 

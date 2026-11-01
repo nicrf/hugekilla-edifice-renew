@@ -16,9 +16,8 @@ extern Controls controls;
 
 #define CHATHISTORY 32
 #define CHATMAXLEN 120          //characters typed in one message
-#define CHATSCALE .7f           //chat text is smaller than the rest of the HUD
-#define CHARW (.04f*CHATSCALE)
-#define LINEH .058f
+#define CHATH .045f             //chat text is smaller than the rest of the HUD
+#define LINEH .055f
 #define CHATX -.97f
 #define CHATWIDTH .92f          //from CHATX (keeps the crosshair clear)
 #define INPUTY -.27f            //above the minimap
@@ -97,15 +96,11 @@ void ChatHandleText(const char *utf8)
 	ignorenexttext=0;
 }
 
-//draws text at the chat scale; returns the x after the last character
+//draws text at the chat size; returns the x where more text goes
 static float ChatText(float x,float y,const char *text)
 {
-	glPushMatrix();
-	glTranslatef(x,y,0);
-	glScalef(CHATSCALE,CHATSCALE,1);
-	DrawText(0,0,text);
-	glPopMatrix();
-	return x+strlen(text)*CHARW;
+	UIText(x,y,text,CHATH);
+	return x+UITextAdvance(text,CHATH);
 }
 
 static void TeamColor(int team,float alpha)
@@ -115,9 +110,9 @@ static void TeamColor(int team,float alpha)
 	else glColor4f(.85f,.85f,.85f,alpha);
 }
 
-//splits text into lines of at most width characters, at spaces when possible;
-//returns the number of lines written to lines[]
-static int Wrap(const char *text,int width,char lines[][CHATMAXLEN+80],int maxlines)
+//splits text into lines that fit in width, at spaces when possible; returns the
+//number of lines written to lines[]
+static int Wrap(const char *text,float width,char lines[][CHATMAXLEN+80],int maxlines)
 {
 	int n=0;
 	int len=strlen(text);
@@ -125,10 +120,16 @@ static int Wrap(const char *text,int width,char lines[][CHATMAXLEN+80],int maxli
 	while(pos<len&&n<maxlines)
 	{
 		int take=len-pos;
-		if(take>width)
+		if(take>CHATMAXLEN+79) take=CHATMAXLEN+79;
+		if(UITextWidth(&text[pos],CHATH,take)>width)
 		{
-			take=width;
-			for(int i=width;i>width/2;i--)
+			//width of fit+1 characters: advance of fit, plus the ink of the next
+			int fit=1;
+			float advance=UITextAdvance(&text[pos],CHATH,1);
+			while(fit<take&&advance+UITextWidth(&text[pos+fit],CHATH,1)<=width)
+				advance+=UITextAdvance(&text[pos+fit++],CHATH,1);
+			take=fit;
+			for(int i=fit;i>fit/2;i--)
 				if(text[pos+i]==' ')
 				{
 					take=i;
@@ -160,7 +161,6 @@ static void Box(float x1,float y1,float x2,float y2,float alpha)
 void DrawChat()
 {
 	int typing=GetLocalPlayer()->talking!=0;
-	int width=(int)(CHATWIDTH/CHARW);
 	int maxshown=typing?9:6;
 
 	glPushAttrib(GL_ENABLE_BIT|GL_CURRENT_BIT|GL_COLOR_BUFFER_BIT);
@@ -193,7 +193,7 @@ void DrawChat()
 		snprintf(full,sizeof(full),"%s%s: %s",line.teamonly?"[Team] ":"",line.name,line.text);
 		int prefixlen=strlen(line.name)+2+(line.teamonly?7:0);
 		char lines[8][CHATMAXLEN+80];
-		int n=Wrap(full,width,lines,8);
+		int n=Wrap(full,CHATWIDTH,lines,8);
 		//this message's lines go above the ones already collected
 		for(int l=n-1;l>=0&&count<maxshown;l--)
 		{
@@ -243,14 +243,19 @@ void DrawChat()
 		else glColor4f(1,1,.5f,1);
 		float x=ChatText(CHATX,INPUTY,label);
 		//keep the end of a long message visible
-		int room=width-strlen(label)-1;
+		float room=CHATX+CHATWIDTH-x-.02f;
 		int len=strlen(talktext);
-		char visible[CHATMAXLEN+8];
-		if(len>room) snprintf(visible,sizeof(visible),"..%s",&talktext[len-room+2]);
-		else strcpy(visible,talktext);
-		if((curtime/500)&1) strcat(visible,"_");
+		const char *visible=talktext;
+		if(UITextWidth(visible,CHATH)>room)
+		{
+			x=ChatText(x,INPUTY,"..");
+			room-=UITextAdvance("..",CHATH);
+			while(*visible&&UITextWidth(visible,CHATH)>room) visible++;
+		}
 		glColor4f(1,1,1,1);
-		ChatText(x,INPUTY,visible);
+		x=UIText(x,INPUTY,visible,CHATH);
+		if(!((curtime/500)&1))   //caret, as in the menus' text fields
+			UIRect(x+.005f,INPUTY+CHATH*.12f,x+.009f,INPUTY+CHATH*.8f,1,1,.5f,.9f);
 		char hint[80];
 		snprintf(hint,sizeof(hint),"%d/%d  Tab: %s  Enter: send  Esc: cancel",len,CHATMAXLEN,team?"all":"team");
 		glColor4f(.6f,.6f,.6f,1);

@@ -40,37 +40,63 @@ int CloseCredits()
 	return was;
 }
 
+//credits panel, two columns of sections; a click anywhere closes it (MenuMouseDown)
+#define CREDITSPX1 -.9f
+#define CREDITSPY1 -.92f
+#define CREDITSPX2 .9f
+#define CREDITSPY2 .9f
+#define CREDITSLINEH .065f
+#define BTN_CREDITSCLOSE .58f,-.87f,.84f,-.76f
+
+//a grey heading and its lines; moves y under them
+static void CreditsSection(float x,float &y,float maxw,const char *heading,const char **lines,int count)
+{
+	glColor3f(.6f,.6f,.6f);
+	UIText(x,y,heading,.045f);
+	y-=CREDITSLINEH+.005f;
+	glColor3f(1,1,1);
+	for(int i=0;i<count;i++,y-=CREDITSLINEH)
+		UITextFit(x,y,lines[i],maxw);
+	y-=.05f;
+}
+
 static void DrawCredits()
 {
-	glDisable(GL_TEXTURE_2D);
-	glColor4f(0,0,0,.85f);
-	glBegin(GL_QUADS);
-	glVertex2f(-.9f,-.85f);
-	glVertex2f(.9f,-.85f);
-	glVertex2f(.9f,.75f);
-	glVertex2f(-.9f,.75f);
-	glEnd();
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
 	glEnable(GL_TEXTURE_2D);
-	float y=.62f;
-	glColor3f(1,1,.5f);
-	DrawText(-.8f,y,"Edifice (HugeKilla) - Credits"); y-=.16f;
-	glColor3f(.7f,.7f,.7f);
-	DrawText(-.8f,y,"Original authors"); y-=.1f;
-	glColor3f(1,1,1);
-	DrawText(-.8f,y,"Programming: Nelson Planting"); y-=.08f;
-	DrawText(-.8f,y,"Models/Graphics: John Thomas"); y-=.16f;
-	glColor3f(.7f,.7f,.7f);
-	DrawText(-.8f,y,"License"); y-=.1f;
-	glColor3f(1,1,1);
-	DrawText(-.8f,y,"GNU LGPL v3 (see license.txt)"); y-=.08f;
-	DrawText(-.8f,y,"sourceforge.net/p/hugekilla"); y-=.16f;
-	glColor3f(.7f,.7f,.7f);
-	DrawText(-.8f,y,"Ports"); y-=.1f;
-	glColor3f(1,1,1);
-	DrawText(-.8f,y,"macOS/SDL2 port based on the"); y-=.08f;
-	DrawText(-.8f,y,"original source code"); y-=.16f;
-	glColor3f(.6f,.6f,.6f);
-	DrawText(-.8f,-.78f,"Click or press Esc to close");
+	UIPanel(CREDITSPX1,CREDITSPY1,CREDITSPX2,CREDITSPY2,.13f,"Edifice (HugeKilla) - Credits");
+	const float leftx=-.82f,rightx=.04f,colw=.8f;
+	float y=.64f;
+	const char *authors[]={"Programming: Nelson Planting","Models/Graphics: John Thomas"};
+	CreditsSection(leftx,y,colw,"Original authors",authors,2);
+	const char *license[]={"GNU LGPL v3 (see license.txt)","sourceforge.net/p/hugekilla"};
+	CreditsSection(leftx,y,colw,"License",license,2);
+	const char *ports[]={"macOS/SDL2 port based on the","original source code"};
+	CreditsSection(leftx,y,colw,"Ports",ports,2);
+	const char *tools[]={"CMake, vcpkg, Go (lobby server)"};
+	CreditsSection(leftx,y,colw,"Built with",tools,1);
+
+	//libraries built into the game; build.py ships their license texts in licenses/
+	y=.64f;
+	const char *libraries[]=
+	{
+		"SDL2 - zlib license",
+		"Opus - BSD 3-clause",
+		"libcurl - curl license (MIT-style)",
+		"GameNetworkingSockets (Valve) - BSD 3-clause",
+		"Protocol Buffers - BSD 3-clause",
+		"Abseil - Apache 2.0",
+		"OpenSSL - Apache 2.0",
+	};
+	CreditsSection(rightx,y,colw,"Third-party libraries",libraries,7);
+	glColor3f(.75f,.75f,.75f);
+	UITextFit(rightx,y+.03f,"Full texts: licenses/ folder of the game",colw,.045f);
+	UIRect(-.02f,-.05f,-.016f,.7f,1,1,1,.12f);   //column separator
+
+	glColor3f(.45f,.45f,.45f);
+	UIText(leftx,UITextY(-.87f,-.76f,.04f),"Click or press Esc to close",.04f);
+	UIButton(BTN_CREDITSCLOSE,"Close",1);
 	glColor3f(1,1,1);
 }
 
@@ -89,7 +115,6 @@ static int fontmeasured;
 //looks uneven ("Loade d")
 static void MeasureFont()
 {
-	fontmeasured=1;
 	for(int c=0;c<96;c++)
 	{
 		glyphleft[c]=.3f;
@@ -101,7 +126,8 @@ static void MeasureFont()
 	glBindTexture(GL_TEXTURE_2D,300);
 	glGetTexLevelParameteriv(GL_TEXTURE_2D,0,GL_TEXTURE_WIDTH,&w);
 	glGetTexLevelParameteriv(GL_TEXTURE_2D,0,GL_TEXTURE_HEIGHT,&h);
-	if(w<16||h<16||w>4096||h>4096) return;
+	if(w<16||h<16||w>4096||h>4096) return;   //not loaded yet: measured on a later call
+	fontmeasured=1;
 	unsigned char *px=new unsigned char[(size_t)w*h*4];
 	glPixelStorei(GL_PACK_ALIGNMENT,1);
 	glGetTexImage(GL_TEXTURE_2D,0,GL_RGBA,GL_UNSIGNED_BYTE,px);
@@ -131,7 +157,7 @@ static int GlyphIndex(char c)
 	return i>=0&&i<96?i:'?'-32;
 }
 
-float UITextWidth(const char *text,float h,int len)
+float UITextAdvance(const char *text,float h,int len)
 {
 	if(!fontmeasured) MeasureFont();
 	if(len<0||len>(int)strlen(text)) len=strlen(text);
@@ -141,7 +167,13 @@ float UITextWidth(const char *text,float h,int len)
 		int g=GlyphIndex(text[i]);
 		w+=glyphright[g]-glyphleft[g]+GLYPHGAP;
 	}
-	return len?(w-GLYPHGAP)*h*CELLASPECT:0;
+	return w*h*CELLASPECT;
+}
+
+float UITextWidth(const char *text,float h,int len)
+{
+	if(len<0||len>(int)strlen(text)) len=strlen(text);
+	return len?UITextAdvance(text,h,len)-GLYPHGAP*h*CELLASPECT:0;
 }
 
 float UIText(float x,float y,const char *text,float h,int len)
@@ -183,6 +215,20 @@ float UITextFit(float x,float y,const char *text,float maxw,float h)
 	while(len>0&&text[len-1]==' ') len--;
 	x=UIText(x,y,text,h,len);
 	return UIText(len?x+GLYPHGAP*h*CELLASPECT:x,y,"...",h);
+}
+
+//lines separated by '\r' or '\n' (game messages, as DrawText takes them), going down
+//by lineh from y; returns the y of the last line
+float UITextLines(float x,float y,const char *text,float h,float lineh)
+{
+	for(;;)
+	{
+		int len=strcspn(text,"\r\n");
+		UIText(x,y,text,h,len);
+		if(!text[len]) return y;
+		text+=len+1;
+		y-=lineh;
+	}
 }
 
 //the glyphs' capitals span about rows 8 to 27 of their 32
@@ -228,6 +274,15 @@ void UIPanel(float x1,float y1,float x2,float y2,float titleh,const char *title)
 	Outline(x1,y1,x2,y2,.004f,1,1,1,.15f);
 	glColor3f(1,1,.5f);
 	UIText(x1+.05f,UITextY(y2-titleh,y2,.065f),title,.065f);
+}
+
+//"<" or ">" at an end of a value that steps through choices
+void UIArrow(float x1,float y1,float x2,float y2,const char *label)
+{
+	int over=UIInside(x1,y1,x2,y2);
+	UIRect(x1,y1,x2,y2,1,1,1,over?.25f:.1f);
+	glColor3f(over?1:.8f,over?1:.8f,over?.5f:.8f);
+	UIText((x1+x2-UITextWidth(label))/2,UITextY(y1,y2),label);
 }
 
 //framed button; returns 1 when the mouse is over it. Disabled: no frame, dim text
@@ -340,11 +395,12 @@ void DrawMenu()
 	glEnable(GL_TEXTURE_2D);
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
-	//a full screen panel (join, server setup) hides the menu, which would show through
+	//a full screen panel (join, server setup, options, credits) hides the menu, which
+	//would show through
 #ifndef HK_WIN32_NATIVE
-	int covered=IsJoinScreenOpen()||IsServerSetupOpen();
+	int covered=IsJoinScreenOpen()||IsServerSetupOpen()||IsOptionsOpen()||showcredits;
 #else
-	int covered=0;
+	int covered=showcredits;
 #endif
 	for(int i=0;i<numbuttons&&!covered;i++)
 	{
@@ -366,7 +422,7 @@ void DrawMenu()
 	}
 	glColor3f(1,1,1);
 	if(GetLocalPlayer()->playstate!=0)
-		DrawText(-.8,.8,"Press escape to resume game");
+		UIText(-.8f,.8f,"Press escape to resume game");
 	{
 		char version[64];
 		sprintf(version,"v%s (protocol %d)",EDIFICE_VERSION_STRING,EDIFICE_PROTOCOL_VERSION);
@@ -374,18 +430,10 @@ void DrawMenu()
 		UIText(.97f-UITextWidth(version),.92f,version);
 		glColor3f(1,1,1);
 	}
-	if(OverCreditsButton()&&!showcredits)
-		glColor3f(1,1,1);
-	else
-		glColor3f(.7,.7,.7);
-	if(!covered) DrawText(CREDITSX1+.06f,CREDITSY1+.015f,"Credits");
-	glColor3f(1,1,1);
+	//framed on their click areas (OverCreditsButton, OverOptionsButton)
+	if(!covered) UIButton(CREDITSX1,CREDITSY1,CREDITSX2,CREDITSY2,"Credits",1);
 #ifndef HK_WIN32_NATIVE
-	if(OverOptionsButton()&&!showcredits&&!IsOptionsOpen())
-		glColor3f(1,1,1);
-	else
-		glColor3f(.7,.7,.7);
-	if(!covered) DrawText(OPTIONSX1+.06f,CREDITSY1+.015f,"Options");
+	if(!covered) UIButton(OPTIONSX1,CREDITSY1,OPTIONSX2,CREDITSY2,"Options",1);
 	glColor3f(1,1,1);
 	DrawOptions();
 	DrawServerSetup();

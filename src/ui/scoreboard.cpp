@@ -16,8 +16,9 @@ extern char curobjective[1000];
 
 #define BOARDX1 -.96f
 #define BOARDX2 .96f
-#define ROWH .075f
+#define ROWH .065f
 #define MAXROWS 16
+#define TITLEH .065f            //game mode line
 
 static const float colx[6]={-.84f,-.14f,.1f,.4f,.58f,.76f};
 
@@ -65,28 +66,16 @@ void DrawScoreboard()
 	int rows=count<MAXROWS?count:MAXROWS;
 
 	float top=.82f;
-	float bottom=top-.32f-rows*ROWH-.12f;
+	float bottom=top-.26f-rows*ROWH-.08f;
 
 	glPushAttrib(GL_ENABLE_BIT|GL_CURRENT_BIT|GL_COLOR_BUFFER_BIT);
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
-	glDisable(GL_TEXTURE_2D);
-	glColor4f(0,0,0,.72f);
-	glBegin(GL_QUADS);
-	glVertex2f(BOARDX1,bottom);
-	glVertex2f(BOARDX2,bottom);
-	glVertex2f(BOARDX2,top);
-	glVertex2f(BOARDX1,top);
-	glEnd();
-	//header separator
-	glColor4f(1,1,1,.25f);
-	glBegin(GL_QUADS);
-	glVertex2f(BOARDX1+.04f,top-.255f);
-	glVertex2f(BOARDX2-.04f,top-.255f);
-	glVertex2f(BOARDX2-.04f,top-.25f);
-	glVertex2f(BOARDX1+.04f,top-.25f);
-	glEnd();
 	glEnable(GL_TEXTURE_2D);
+	//translucent: the game goes on behind
+	UIRect(BOARDX1,bottom,BOARDX2,top,.035f,.035f,.04f,.78f);
+	UIRect(BOARDX1,top-.2f,BOARDX2,top,1,1,1,.05f);
+	UIRect(BOARDX1,top-.204f,BOARDX2,top-.2f,1,1,.5f,.5f);
 
 	char text[200];
 	glColor3f(1,1,.5f);
@@ -94,26 +83,27 @@ void DrawScoreboard()
 		sprintf(text,"Capture the flag - first to %d",sv.capturelimit);
 	else
 		strcpy(text,"Sandbox");
-	DrawText(BOARDX1+.08f,top-.1f,text);
+	float textx=BOARDX1+.08f,right=BOARDX2-.08f;
+	UIText(textx,top-.09f,text,TITLEH);
 	char line[200];
 	FirstLine(curscore,line,sizeof(line));
 	if(!line[0]) FirstLine(curobjective,line,sizeof(line));
 	glColor3f(.85f,.85f,.85f);
-	DrawText(BOARDX1+.08f,top-.18f,line);
+	UITextFit(textx,top-.165f,line,1.1f);
 	sprintf(text,"%d player%s",count,count==1?"":"s");
-	DrawText(BOARDX2-.08f-strlen(text)*.04f,top-.1f,text);
+	UIText(right-UITextWidth(text),top-.09f,text);
 	if(LobbyHostCode()[0])   //hosting on the Internet: the code to give to friends
 	{
 		sprintf(text,"Game code %s",LobbyHostCode());
 		glColor3f(1,1,.5f);
-		DrawText(BOARDX2-.08f-strlen(text)*.04f,top-.18f,text);
+		UIText(right-UITextWidth(text),top-.165f,text);
 	}
 
-	float y=top-.33f;
+	float y=top-.28f;
 	glColor3f(.6f,.6f,.6f);
 	const char *headers[6]={"Name","Kills","Deaths","K/D","Ping","Loss"};
 	for(int c=0;c<6;c++)
-		DrawText(colx[c],y,headers[c]);
+		UIText(colx[c],y,headers[c],.045f);
 
 	for(int r=0;r<rows;r++)
 	{
@@ -123,35 +113,34 @@ void DrawScoreboard()
 		int local=cur==GetLocalPlayer();
 		if(local)
 		{
+			UIRect(BOARDX1+.04f,y-.012f,BOARDX2-.04f,y+ROWH-.012f,1,1,1,.07f);
 			glColor3f(1,1,1);
-			DrawText(colx[0]-.06f,y,">");
+			UIText(colx[0]-.05f,y,">");
 		}
 		TeamColor(cur->team,local?1:.85f);
-		strncpy(line,cur->name,16);
-		line[16]=0;
-		DrawText(colx[0],y,line);
+		UITextFit(colx[0],y,cur->name,colx[1]-colx[0]-.04f);
 		if(cur->playstate>=10)
 		{
 			sprintf(text,"%d",cur->kills);
-			DrawText(colx[1],y,text);
+			UIText(colx[1],y,text);
 			sprintf(text,"%d",cur->deaths);
-			DrawText(colx[2],y,text);
+			UIText(colx[2],y,text);
 			if(cur->deaths) sprintf(text,"%.1f",(float)cur->kills/cur->deaths);
 			else sprintf(text,"%d",cur->kills);
-			DrawText(colx[3],y,text);
+			UIText(colx[3],y,text);
 		}
 		else
-			DrawText(colx[1],y,i==0?"Server":"Connecting");
+			UIText(colx[1],y,i==0?"Server":"Connecting");
 		sprintf(text,"%d",(int)cur->ping);
-		DrawText(colx[4],y,text);
+		UIText(colx[4],y,text);
 		sprintf(text,"%d%%",(int)((cur->packetloss*100)/30000));
-		DrawText(colx[5],y,text);
+		UIText(colx[5],y,text);
 	}
 	if(count>rows)
 	{
 		glColor3f(.6f,.6f,.6f);
 		sprintf(text,"+%d more",count-rows);
-		DrawText(colx[0],y-ROWH,text);
+		UIText(colx[0],y-ROWH,text);
 	}
 	glPopAttrib();
 	glColor3f(1,1,1);

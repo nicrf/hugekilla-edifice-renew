@@ -1311,12 +1311,9 @@ void Redraw()
 	itoa(curfps,tmptext,10);
 	if(!consolevisible)
 	{
-		DrawText(-.99,.85,tmptext);
-		if(menu) DrawText(-.6,.5,menutext);
+		UIText(-.97f,.88f,tmptext);
+		if(menu) UITextLines(-.6f,.5f,menutext);
 	}
-	if(GetLocalPlayer()->scores||rgd.gamestate==2)
-		DrawScoreboard();
-	DrawBuildMenu();
 #ifdef HK_WIN32_NATIVE  // original score table, replaced by DrawScoreboard (src/ui/scoreboard.cpp)
 	if(GetLocalPlayer()->scores||rgd.gamestate==2)
 	{
@@ -1381,18 +1378,18 @@ void Redraw()
 		char zoomtext[32];
 		snprintf(zoomtext,sizeof(zoomtext),"Zoom x%.1f",powf(1.1f,GetLocalPlayer()->fzoom));
 		glColor3f(0,0,0);   //shadow: readable on snow too
-		DrawText(.555f,-.905f,zoomtext);
+		UIText(.555f,-.905f,zoomtext,.06f);
 		glColor3f(1,1,.6f);
-		DrawText(.55f,-.9f,zoomtext);
+		UIText(.55f,-.9f,zoomtext,.06f);
 		glColor3f(1,1,1);
 	}
 	DrawVoiceHUD();
 #endif
 	
 	itoa(cursendrate,tmptext,10);
-	DrawText(.5,.85,tmptext);
+	UIText(.5f,.88f,tmptext);
 	itoa(currecvrate,tmptext,10);
-	DrawText(.7,.85,tmptext);
+	UIText(.7f,.88f,tmptext);
 	char faceinfo[100];
 	
 	if(datasendthisframe)
@@ -1433,14 +1430,14 @@ void Redraw()
 	datarecvthisframe=0;
 
 	itoa(GetLocalNum(),tmptext,10);
-	DrawText(.3,.85,tmptext);
+	UIText(.3f,.88f,tmptext);
 	itoa(GetLocalPlayer()->ammoreserves[GetLocalPlayer()->weapon],tmptext,10);
 	//DrawText(.3,-.95,tmptext);
 	float offset=-1.2;
 	itoa(GetLocalPlayer()->ammoingun[GetLocalPlayer()->weapon],tmptext,10);
-	DrawText(.37+offset,-.95,tmptext);
+	UIText(.37f+offset,-.94f,tmptext,.065f);
 	itoa(GetLocalPlayer()->life,tmptext,10);
-	DrawText(.57+offset,-.95,tmptext);
+	UIText(.57f+offset,-.94f,tmptext,.065f);
 	int flags[3];
 	flags[0]=flags[1]=flags[2]=0;
 	for(i=0;i<MAXSERVEROBJS;i++)
@@ -1460,8 +1457,8 @@ void Redraw()
 		DrawText(-.4,0,money);
 	}*/
 
-	DrawText(-.4,-.75,curobjective);
-	DrawText(-.4,-.95,curscore);
+	UITextLines(-.4f,-.75f,curobjective);
+	UITextLines(-.4f,-.95f,curscore);
 	
 	glBindTexture(GL_TEXTURE_2D,10);
 	float bf=(float)GetLocalPlayer()->ammoingun[GetLocalPlayer()->weapon]/GetAmmoHold(GetLocalPlayer()->weapon);
@@ -1501,7 +1498,7 @@ void Redraw()
 			{
 				char tmptxt[50];
 				itoa(credits,tmptxt,10);
-				DrawText(.36+offset,yoffset-.09,tmptxt);
+				UIText(.36f+offset,yoffset-.09f,tmptxt,.06f);
 			}
 		}
 	}
@@ -1579,6 +1576,10 @@ void Redraw()
 		
 		glEnd();
 	}
+	//over the rest of the HUD (radar, console lines), under the console only
+	if(GetLocalPlayer()->scores||rgd.gamestate==2)
+		DrawScoreboard();
+	DrawBuildMenu();
 #ifndef HK_WIN32_NATIVE
 	if(consolevisible) DrawConsolePanel(0);
 #endif
@@ -2175,9 +2176,7 @@ void RedrawSplash(int texnum,char *text,int drawlogo)
 	glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA );
 
 	if(text)
-	{
-		DrawText(-1,-1,text);
-	}
+		UIText(-.97f,-.97f,text);
 	PAINTSTRUCT ps;
 	HWND hWnd=GetHWND();
 	HDC hdc = BeginPaint(hWnd, &ps);

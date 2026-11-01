@@ -31,15 +31,26 @@ static int scroll;
 #define PANELX2 .9f
 #define PANELY1 -.75f
 #define PANELY2 .8f
-#define LISTTOP .55f
-#define ROWH .075f
+#define TITLEH .12f
+#define LISTTOP .64f           //top of the first row
+#define ROWH .065f
 #define VISIBLEROWS 16
-#define CATX -.85f
-#define ITEMX -.25f
+#define CATX -.82f
+#define ITEMX -.22f
+#define CATX1 (CATX-.04f)      //click and hover areas of the two lists
+#define CATX2 (ITEMX-.08f)
+#define ITEMX1 (ITEMX-.04f)
+#define ITEMX2 (PANELX2-.04f)
 
 static int Inside(float x1,float y1,float x2,float y2)
 {
 	return mousepos.x>x1&&mousepos.x<x2&&mousepos.y>y1&&mousepos.y<y2;
+}
+
+//bottom of a row
+static float RowY(int row)
+{
+	return LISTTOP-(row+1)*ROWH;
 }
 
 static int CompareNames(const void *a,const void *b)
@@ -135,23 +146,17 @@ void BuildMenuClick()
 		return;
 	}
 	for(int c=0;c<numcategories&&c<VISIBLEROWS;c++)
-	{
-		float y=LISTTOP-c*ROWH;
-		if(Inside(CATX-.02f,y-.01f,ITEMX-.1f,y+ROWH-.01f))
+		if(Inside(CATX1,RowY(c),CATX2,RowY(c)+ROWH))
 		{
 			SelectCategory(c);
 			return;
 		}
-	}
 	for(int r=0;r<VISIBLEROWS&&scroll+r<numitems;r++)
-	{
-		float y=LISTTOP-r*ROWH;
-		if(Inside(ITEMX-.02f,y-.01f,PANELX2,y+ROWH-.01f))
+		if(Inside(ITEMX1,RowY(r),ITEMX2,RowY(r)+ROWH))
 		{
 			PickItem(scroll+r);
 			return;
 		}
-	}
 }
 
 void BuildMenuWheel(int dir)
@@ -187,57 +192,42 @@ void DrawBuildMenu()
 	glPushAttrib(GL_ENABLE_BIT|GL_CURRENT_BIT|GL_COLOR_BUFFER_BIT);
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
-	glDisable(GL_TEXTURE_2D);
-	glColor4f(0,0,0,.8f);
-	glBegin(GL_QUADS);
-	glVertex2f(PANELX1,PANELY1);
-	glVertex2f(PANELX2,PANELY1);
-	glVertex2f(PANELX2,PANELY2);
-	glVertex2f(PANELX1,PANELY2);
-	glEnd();
-	//highlight of the selected category
-	if(curcategory<numcategories&&curcategory<VISIBLEROWS)
-	{
-		float y=LISTTOP-curcategory*ROWH;
-		glColor4f(1,1,.5f,.15f);
-		glBegin(GL_QUADS);
-		glVertex2f(CATX-.03f,y-.012f);
-		glVertex2f(ITEMX-.1f,y-.012f);
-		glVertex2f(ITEMX-.1f,y+ROWH-.012f);
-		glVertex2f(CATX-.03f,y+ROWH-.012f);
-		glEnd();
-	}
 	glEnable(GL_TEXTURE_2D);
-
-	glColor3f(1,1,.5f);
-	DrawText(CATX,.68f,"Build");
+	UIPanel(PANELX1,PANELY1,PANELX2,PANELY2,TITLEH,"Build");
 	glColor3f(.6f,.6f,.6f);
-	DrawText(ITEMX,.68f,numcategories?"Pick a structure":"No structures found");
+	const char *hint=numcategories?"Pick a structure":"No structures found";
+	UIText(PANELX2-.05f-UITextWidth(hint),UITextY(PANELY2-TITLEH,PANELY2),hint);
+	UIRect(CATX2+.02f,RowY(VISIBLEROWS-1),CATX2+.024f,LISTTOP,1,1,1,.12f);   //column separator
 
 	char name[NAMELEN];
 	for(int c=0;c<numcategories&&c<VISIBLEROWS;c++)
 	{
-		float y=LISTTOP-c*ROWH;
-		int hover=Inside(CATX-.02f,y-.01f,ITEMX-.1f,y+ROWH-.01f);
+		float y1=RowY(c),y2=y1+ROWH;
+		int hover=Inside(CATX1,y1,CATX2,y2);
+		if(c==curcategory) UIRect(CATX1,y1,CATX2,y2,1,1,.5f,.15f);
+		else if(hover) UIRect(CATX1,y1,CATX2,y2,1,1,1,.06f);
 		if(c==curcategory) glColor3f(1,1,.5f);
 		else if(hover) glColor3f(1,1,1);
 		else glColor3f(.75f,.75f,.75f);
-		strncpy(name,categories[c],13);
-		name[13]=0;
-		DrawText(CATX,y,name);
+		UITextFit(CATX,UITextY(y1,y2),categories[c],CATX2-CATX-.02f);
 	}
 	for(int r=0;r<VISIBLEROWS&&scroll+r<numitems;r++)
 	{
-		float y=LISTTOP-r*ROWH;
-		int hover=Inside(ITEMX-.02f,y-.01f,PANELX2,y+ROWH-.01f);
+		float y1=RowY(r),y2=y1+ROWH;
+		int hover=Inside(ITEMX1,y1,ITEMX2,y2);
+		if(hover) UIRect(ITEMX1,y1,ITEMX2,y2,1,1,1,.08f);
 		glColor3f(hover?1:.85f,hover?1:.85f,hover?1:.85f);
-		DisplayName(items[scroll+r],name,27);
-		DrawText(ITEMX,y,name);
+		DisplayName(items[scroll+r],name,NAMELEN);
+		UITextFit(ITEMX,UITextY(y1,y2),name,ITEMX2-ITEMX-.02f);
 	}
-	glColor3f(.6f,.6f,.6f);
+	glColor3f(.45f,.45f,.45f);
 	if(numitems>VISIBLEROWS)
-		DrawText(ITEMX,PANELY1+.1f,"Mouse wheel: more");
-	DrawText(CATX,PANELY1+.03f,"Esc or right click: close");
+	{
+		char more[64];
+		sprintf(more,"%d-%d of %d    Mouse wheel: more",scroll+1,scroll+VISIBLEROWS,numitems);
+		UIText(ITEMX,UITextY(PANELY1+.02f,PANELY1+.1f,.04f),more,.04f);
+	}
+	UIText(CATX,UITextY(PANELY1+.02f,PANELY1+.1f,.04f),"Esc or right click: close",.04f);
 	glPopAttrib();
 	glColor3f(1,1,1);
 }

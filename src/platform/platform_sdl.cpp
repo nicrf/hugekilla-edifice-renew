@@ -364,11 +364,17 @@ static char userdir[1024];
 // the signed .app intact and survives updates. Defaults come from data/.
 static void InitUserDir()
 {
-	char *pref = SDL_GetPrefPath("", "Edifice");
-	if (!pref)
-		return;                       // fall back to the data folder
-	snprintf(userdir, sizeof(userdir), "%s", pref);
-	SDL_free(pref);
+	// Debug aid: HK_USERDIR=<folder/> keeps test runs away from the real settings
+	if (const char *dir = getenv("HK_USERDIR"))
+		snprintf(userdir, sizeof(userdir), "%s", dir);
+	else
+	{
+		char *pref = SDL_GetPrefPath("", "Edifice");
+		if (!pref)
+			return;                       // fall back to the data folder
+		snprintf(userdir, sizeof(userdir), "%s", pref);
+		SDL_free(pref);
+	}
 	const char *defaults[3] = {"control.ini", "net.ini", "sv.ini"};
 	for (int i = 0; i < 3; i++)
 	{
@@ -541,6 +547,8 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	SDL_GL_MakeCurrent(window, glcontext);
+	// HK_SHOT captures: no vsync, whose swap waits forever while the display sleeps (macOS)
+	if (getenv("HK_SHOT")) vsync = 0;
 	SDL_GL_SetSwapInterval(vsync);
 	hWnd = (HWND)window;
 	hdc = (HDC)window;
@@ -628,7 +636,7 @@ int main(int argc, char **argv)
 	if (const char *m = getenv("HK_MENU"))
 	{
 		if (!strcmp(m, "options")) OpenOptions();
-		if (!strcmp(m, "options2")) { OpenOptions(); mousepos = Vector(-.2f, .72f, 0); OptionsClick(); }
+		if (!strcmp(m, "options2")) { OpenOptions(); mousepos = Vector(-.06f, .83f, 0); OptionsClick(); }
 		if (!strcmp(m, "credits")) { mousepos = Vector(0, -.92f, 0); MenuMouseDown(); }
 		if (!strcmp(m, "join")) OpenJoinScreen();
 		if (!strcmp(m, "internet")) JoinScreenJoinCode("");   // the Internet tab
@@ -656,7 +664,7 @@ int main(int argc, char **argv)
 			ChatHandleText("Ca marche, j'arrive \xc3\xa0 la tour");
 		}
 		if (!strcmp(m, "serverstart")) { OpenServerSetup(); ServerSetupHandleKey(VK_RETURN); }
-		if (!strcmp(m, "player")) { OpenOptions(); mousepos = Vector(.4f, .72f, 0); OptionsClick(); }
+		if (!strcmp(m, "player")) { OpenOptions(); mousepos = Vector(.24f, .83f, 0); OptionsClick(); }
 	}
 
 	// Debug aid: HK_CONSOLE=1 starts a local server and opens the console after a few

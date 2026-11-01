@@ -365,15 +365,6 @@ void ServerSetupHandleText(const char *text)
 		AppendText(servername,sizeof(servername),text);
 }
 
-//"<" or ">" of a value
-static void Arrow(float x1,float y1,float x2,float y2,const char *label)
-{
-	int over=Inside(x1,y1,x2,y2);
-	UIRect(x1,y1,x2,y2,1,1,1,over?.25f:.1f);
-	glColor3f(over?1:.8f,over?1:.8f,over?.5f:.8f);
-	UIText((x1+x2-UITextWidth(label))/2,UITextY(y1,y2),label);
-}
-
 void DrawServerSetup()
 {
 	if(!showsetup) return;
@@ -400,8 +391,8 @@ void DrawServerSetup()
 		UIRect(VALUEX,y1,VALUEX2,y2,0,0,0,.55f);
 		if(enabled)
 		{
-			Arrow(VALUEX,y1,VALUEX+ARROWW,y2,"<");
-			Arrow(VALUEX2-ARROWW,y1,VALUEX2,y2,">");
+			UIArrow(VALUEX,y1,VALUEX+ARROWW,y2,"<");
+			UIArrow(VALUEX2-ARROWW,y1,VALUEX2,y2,">");
 			glColor3f(1,1,1);
 		}
 		else glColor3f(.45f,.45f,.45f);
