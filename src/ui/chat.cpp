@@ -2,7 +2,7 @@
 //while), and an input bar while typing (talk / talkteam keys; Tab switches all/team).
 //Typed text comes from SDL text input, so it follows the keyboard layout.
 
-#include "gl.h"
+#include "renderer.h"
 #include "redrawing.h"
 #include "playing.h"
 #include "multiplay.h"
@@ -101,9 +101,9 @@ static float ChatText(float x,float y,const char *text)
 
 static void TeamColor(int team,float alpha)
 {
-	if(team==1) glColor4f(1,.4f,.4f,alpha);
-	else if(team==2) glColor4f(.5f,.65f,1,alpha);
-	else glColor4f(.85f,.85f,.85f,alpha);
+	if(team==1) RColor4f(1,.4f,.4f,alpha);
+	else if(team==2) RColor4f(.5f,.65f,1,alpha);
+	else RColor4f(.85f,.85f,.85f,alpha);
 }
 
 //splits text into lines that fit in width, at spaces when possible; returns the
@@ -143,15 +143,15 @@ static int Wrap(const char *text,float width,char lines[][CHATMAXLEN+80],int max
 
 static void Box(float x1,float y1,float x2,float y2,float alpha)
 {
-	glDisable(GL_TEXTURE_2D);
-	glColor4f(0,0,0,alpha);
-	glBegin(GL_QUADS);
-	glVertex2f(x1,y1);
-	glVertex2f(x2,y1);
-	glVertex2f(x2,y2);
-	glVertex2f(x1,y2);
-	glEnd();
-	glEnable(GL_TEXTURE_2D);
+	RDisable(RCAP_TEXTURE);
+	RColor4f(0,0,0,alpha);
+	RBegin(RP_QUADS);
+	RVertex2f(x1,y1);
+	RVertex2f(x2,y1);
+	RVertex2f(x2,y2);
+	RVertex2f(x1,y2);
+	REnd();
+	REnable(RCAP_TEXTURE);
 }
 
 void DrawChat()
@@ -159,10 +159,10 @@ void DrawChat()
 	int typing=GetLocalPlayer()->talking!=0;
 	int maxshown=typing?9:6;
 
-	glPushAttrib(GL_ENABLE_BIT|GL_CURRENT_BIT|GL_COLOR_BUFFER_BIT);
-	glEnable(GL_BLEND);
-	glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
-	glEnable(GL_TEXTURE_2D);
+	RPushAttrib(RATTR_ENABLE|RATTR_CURRENT|RATTR_COLOR);
+	REnable(RCAP_BLEND);
+	RBlendFunc(RBLEND_ALPHA);
+	REnable(RCAP_TEXTURE);
 
 	//wrapped lines of the recent messages, newest at the bottom
 	struct Shown
@@ -221,12 +221,12 @@ void DrawChat()
 			prefix[plen]=0;
 			TeamColor(s.team,s.alpha);
 			float x=ChatText(CHATX,y,prefix);
-			glColor4f(1,1,1,s.alpha);
+			RColor4f(1,1,1,s.alpha);
 			ChatText(x,y,&s.text[plen]);
 		}
 		else
 		{
-			glColor4f(1,1,1,s.alpha);
+			RColor4f(1,1,1,s.alpha);
 			ChatText(CHATX,y,s.text);
 		}
 	}
@@ -235,8 +235,8 @@ void DrawChat()
 	{
 		int team=GetLocalPlayer()->talking==2;
 		const char *label=team?"Team: ":"All: ";
-		if(team) glColor4f(.6f,1,.6f,1);
-		else glColor4f(1,1,.5f,1);
+		if(team) RColor4f(.6f,1,.6f,1);
+		else RColor4f(1,1,.5f,1);
 		float x=ChatText(CHATX,INPUTY,label);
 		//keep the end of a long message visible
 		float room=CHATX+CHATWIDTH-x-.02f;
@@ -248,17 +248,17 @@ void DrawChat()
 			room-=UITextAdvance("..",CHATH);
 			while(*visible&&UITextWidth(visible,CHATH)>room) visible++;
 		}
-		glColor4f(1,1,1,1);
+		RColor4f(1,1,1,1);
 		x=UIText(x,INPUTY,visible,CHATH);
 		if(!((curtime/500)&1))   //caret, as in the menus' text fields
 			UIRect(x+.005f,INPUTY+CHATH*.12f,x+.009f,INPUTY+CHATH*.8f,1,1,.5f,.9f);
 		char hint[80];
 		snprintf(hint,sizeof(hint),"%d/%d  Tab: %s  Enter: send  Esc: cancel",len,CHATMAXLEN,team?"all":"team");
-		glColor4f(.6f,.6f,.6f,1);
+		RColor4f(.6f,.6f,.6f,1);
 		ChatText(CHATX,INPUTY-.07f,hint);
 	}
-	glPopAttrib();
-	glColor3f(1,1,1);
+	RPopAttrib();
+	RColor3f(1,1,1);
 }
 
 //voice chat (src/audio/voice.cpp): "Mic on" while transmitting, and who is heard
@@ -272,25 +272,25 @@ void DrawVoiceHUD()
 	for(int i=0;i<GetNumPlayers()&&i<MAXPLAYERS;i++)
 		if(VoiceIsSpeaking(i)&&i!=GetLocalNum()) speakers++;
 	if(!transmitting&&!speakers) return;
-	glPushAttrib(GL_ENABLE_BIT|GL_CURRENT_BIT|GL_COLOR_BUFFER_BIT);
-	glEnable(GL_BLEND);
-	glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
-	glEnable(GL_TEXTURE_2D);
+	RPushAttrib(RATTR_ENABLE|RATTR_CURRENT|RATTR_COLOR);
+	REnable(RCAP_BLEND);
+	RBlendFunc(RBLEND_ALPHA);
+	REnable(RCAP_TEXTURE);
 	float y=VOICEHUDY;
 	if(transmitting)
 	{
-		glColor4f(.4f,1,.4f,1);
+		RColor4f(.4f,1,.4f,1);
 		ChatText(VOICEHUDX,y,"Mic on");
 		y-=LINEH;
 	}
 	for(int i=0;i<GetNumPlayers()&&i<MAXPLAYERS;i++)
 	{
 		if(!VoiceIsSpeaking(i)||i==GetLocalNum()) continue;
-		glColor4f(1,1,1,1);
+		RColor4f(1,1,1,1);
 		float x=ChatText(VOICEHUDX,y,"Speaking: ");
 		TeamColor(GetPlayer(i)->team,1);
 		ChatText(x,y,GetPlayer(i)->name);
 		y-=LINEH;
 	}
-	glPopAttrib();
+	RPopAttrib();
 }

@@ -1,7 +1,7 @@
 //AseObj is a class that can load .cob (truespace) objects, including textures.  It also includes the functions to draw them
 
-#include "gl.h"
 #include "renderer.h"
+#include <vector>
 #include "fileio.h"
 #include "vector.h"
 #include "ase.h"
@@ -475,10 +475,12 @@ void AseObj::Draw(Vector pos,Vector x,Vector y)
 	{z.x*sv.scale,z.y*sv.scale,z.z*sv.scale,0}, 
 	{pos.x,pos.y,pos.z,1}
 	};
-	Mat4 modelview=RModelView();
-	RSetModelView(Mat4Mul(modelview,Mat4From(m)));
-
-	glBegin(GL_TRIANGLES);
+	//the triangles, in runs of one texture, for RDrawMesh; kept between calls
+	static std::vector<RVertex> verts;
+	static std::vector<RMeshPart> parts;
+	verts.clear();
+	parts.clear();
+	RMeshPart part={RMESH_KEEPTEX,0,0};   //before the first texture change: what is bound
 	int curtex=0;
 	Vector lightdir;
 	lightdir.x=0;
@@ -514,43 +516,43 @@ void AseObj::Draw(Vector pos,Vector x,Vector y)
 			curface=&object.objs[curobj].faces[face];
 			if(curface->texture!=curtex)
 			{
-
-				glEnd();
-				if(curface->texture<5)
-					TexBind(TEX_GROUND0);
-				else
-					TexBind(curface->texture);
-				
+				if(part.count) parts.push_back(part);
+				part.texture=curface->texture<5?TEX_GROUND0:curface->texture;
+				part.first=(int)verts.size();
+				part.count=0;
 				curtex=curface->texture;
-				glBegin(GL_TRIANGLES);
 			}
-			float color;
 			
 			for(int point=0;point<3;point++)
 			{
 				totalfaces+=1;
 				curvect=&curface->pnt[point]->vctr;
-				glColor4f(curface->pnt[point]->curcolor,
-				curface->pnt[point]->curcolor,
-				curface->pnt[point]->curcolor,1);
-	
+				RVertex v;
+				v.x=curvect->x;
+				v.y=curvect->y;
+				v.z=curvect->z;
+				v.r=v.g=v.b=curface->pnt[point]->curcolor;
+				v.a=1;
 				if(curtex>5)
 				{
-					glTexCoord2f(curface->tex[point].u,curface->tex[point].v);
+					v.u=curface->tex[point].u;
+					v.v=curface->tex[point].v;
 				}
 				else
 				{
-					glColor3f(.5,.5,1);
+					v.r=v.g=.5f;
+					v.b=1;
 					translatedvect=VectMult(curface->pnt[point]->nvctr,x,y,z);
-					glTexCoord2f(atan(translatedvect.x)/5,translatedvect.y/5);
+					v.u=atan(translatedvect.x)/5;
+					v.v=translatedvect.y/5;
 				}
-				glVertex3fv(&curvect->x);
-					
+				verts.push_back(v);
+				part.count++;
 			}
 		}
 		
 	}
 	
-	glEnd();
-	RSetModelView(modelview);
+	if(part.count) parts.push_back(part);
+	RDrawMesh(Mat4From(m),verts.data(),parts.data(),(int)parts.size());
 }

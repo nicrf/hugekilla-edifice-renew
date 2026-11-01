@@ -120,7 +120,8 @@ build/fuzz/fuzz_map -max_total_time=60 /tmp/c    # fuzzing (le corpus grandit da
 
 ```
 src/game/      boucle de jeu, terrain (land*), structures, physique, config, vector, hugekilla.cpp
-src/render/    rendu (redrawing), renderer.h (matrices, viewport, relecture de l'image ; backend OpenGL renderer_gl.cpp),
+src/render/    rendu (redrawing), renderer.h (API du rendu : primitives en lots, états, matrices ; renderer.cpp),
+               backend OpenGL fixe renderer_gl.cpp + texture_gl.cpp (seuls fichiers qui appellent gl*, rbackend.h),
                rmath.h (matrices 4x4), textures (registre textures.h, image.cpp = stb_image), modèles .cob (ase, models.h)
 src/net/       sockets UDP (sock), protocole et serveur/client (multiplay*)
 src/ui/        menus en jeu, console, Options, Server Setup, crédits
@@ -128,7 +129,7 @@ src/audio/     sound_sdl.cpp (son SDL), voice.cpp (chat vocal opus)
 src/platform/  platform_sdl.cpp : main SDL (fenêtre, contexte GL, entrées, dossiers ; platform.h) ;
                system_sdl.cpp : horloges (hktime.h), touches tenues (hkkeys.h), boîtes de message ;
                hktypes.h : DWORD/WORD/BYTE ; hksocket.h : sockets (Winsock / POSIX) ;
-               gl.h : OpenGL et GLU ; fileio.* : accès aux fichiers (std::filesystem, stdio) ;
+               gl.h : OpenGL et GLU (pour le seul backend du rendu) ; fileio.* : accès aux fichiers (std::filesystem, stdio) ;
                windows/ : edifice.rc et icônes de Edifice.exe
 src/third_party/ stb/stb_image.h v2.30 (nothings/stb 31c1ad3, domaine public / MIT, licence dans stb/LICENSE)
 data/          données du jeu (ini, textures, sons, objets, Structures)
@@ -136,7 +137,7 @@ data/          données du jeu (ini, textures, sons, objets, Structures)
 
 Un seul chemin de code : `main()` est celui de SDL sur les trois systèmes (`SDL2main` fournit `WinMain` sous Windows). Le build Win32 natif d'origine (WinMain/WndProc, DirectSound, boîtes de dialogue, menus, variante serveur dédié `HKDS`, projet Visual Studio 2003) n'était plus compilé : il a été retiré (M12.3), il reste dans l'historique git.
 
-Chaque `.cpp` inclut ce qu'il utilise (plus de `StdAfx.h` ni d'émulation Win32) : les types `DWORD`/`WORD`/`BYTE` par `hktypes.h` (gardés : `DWORD` fait 32 bits dans les structs réseau et les sauvegardes), l'horloge par `hktime.h` (`HKTicks`, `HKPerfCounter`, `HKSleep`), les codes de touches par `hkkeys.h` (`KEY_TAB`, `KEY_F1`… : les valeurs des codes VK de Windows, que `control.ini` désigne par leur nom), les sockets par `hksocket.h`, OpenGL par `gl.h`, et les globales partagées par le header du module qui les définit (`land.h`, `playing.h`, `multiplay.h`, `redrawing.h`, `models.h`, `ui.h`, `platform.h`…), déclarées une seule fois : pas d'`extern` local dans un `.cpp`.
+Chaque `.cpp` inclut ce qu'il utilise (plus de `StdAfx.h` ni d'émulation Win32) : les types `DWORD`/`WORD`/`BYTE` par `hktypes.h` (gardés : `DWORD` fait 32 bits dans les structs réseau et les sauvegardes), l'horloge par `hktime.h` (`HKTicks`, `HKPerfCounter`, `HKSleep`), les codes de touches par `hkkeys.h` (`KEY_TAB`, `KEY_F1`… : les valeurs des codes VK de Windows, que `control.ini` désigne par leur nom), les sockets par `hksocket.h`, le rendu par `renderer.h` (OpenGL, par `gl.h`, n'est inclus que par `renderer_gl.cpp` et `texture_gl.cpp`), et les globales partagées par le header du module qui les définit (`land.h`, `playing.h`, `multiplay.h`, `redrawing.h`, `models.h`, `ui.h`, `platform.h`…), déclarées une seule fois : pas d'`extern` local dans un `.cpp`.
 
 ## Données
 

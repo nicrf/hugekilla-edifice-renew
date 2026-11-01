@@ -1,6 +1,5 @@
 
 
-#include "gl.h"
 #include "renderer.h"
 #include "platform.h"
 #include "fileio.h"
@@ -684,45 +683,45 @@ static void ConsoleText(float x,float y,const char *text,int len=-1)
 	if(len<0||len>(int)strlen(text)) len=strlen(text);
 	const float cell=1.f/16;
 	TexBind(TEX_FONT);
-	glBegin(GL_QUADS);
+	RBegin(RP_QUADS);
 	for(int i=0;i<len;i++,x+=CONCHARW)
 	{
 		int c=(unsigned char)text[i]-32;
 		if(c<=0||c>=96) continue;
 		float u=(c%16)*cell,v=(c/16)*cell;
 		float x1=x-(CONQUADW-CONCHARW)/2;
-		glTexCoord2f(u,v);
-		glVertex2f(x1,y+CONGLYPHH);
-		glTexCoord2f(u,v+cell);
-		glVertex2f(x1,y);
-		glTexCoord2f(u+cell,v+cell);
-		glVertex2f(x1+CONQUADW,y);
-		glTexCoord2f(u+cell,v);
-		glVertex2f(x1+CONQUADW,y+CONGLYPHH);
+		RTexCoord2f(u,v);
+		RVertex2f(x1,y+CONGLYPHH);
+		RTexCoord2f(u,v+cell);
+		RVertex2f(x1,y);
+		RTexCoord2f(u+cell,v+cell);
+		RVertex2f(x1+CONQUADW,y);
+		RTexCoord2f(u+cell,v);
+		RVertex2f(x1+CONQUADW,y+CONGLYPHH);
 	}
-	glEnd();
+	REnd();
 }
 
 static void ConsoleRect(float x1,float y1,float x2,float y2,float r,float g,float b,float a)
 {
-	glDisable(GL_TEXTURE_2D);
-	glColor4f(r,g,b,a);
-	glBegin(GL_QUADS);
-	glVertex2f(x1,y1);
-	glVertex2f(x2,y1);
-	glVertex2f(x2,y2);
-	glVertex2f(x1,y2);
-	glEnd();
-	glEnable(GL_TEXTURE_2D);
+	RDisable(RCAP_TEXTURE);
+	RColor4f(r,g,b,a);
+	RBegin(RP_QUADS);
+	RVertex2f(x1,y1);
+	RVertex2f(x2,y1);
+	RVertex2f(x2,y2);
+	RVertex2f(x1,y2);
+	REnd();
+	REnable(RCAP_TEXTURE);
 }
 
 static void KindColor(int kind,float alpha)
 {
-	if(kind==KIND_ECHO) glColor4f(1,1,.5f,alpha);
-	else if(kind==KIND_ERROR) glColor4f(1,.45f,.4f,alpha);
-	else if(kind==KIND_VALUE) glColor4f(.55f,.8f,1,alpha);
-	else if(kind==KIND_DIM) glColor4f(.55f,.55f,.55f,alpha);
-	else glColor4f(.9f,.9f,.9f,alpha);
+	if(kind==KIND_ECHO) RColor4f(1,1,.5f,alpha);
+	else if(kind==KIND_ERROR) RColor4f(1,.45f,.4f,alpha);
+	else if(kind==KIND_VALUE) RColor4f(.55f,.8f,1,alpha);
+	else if(kind==KIND_DIM) RColor4f(.55f,.55f,.55f,alpha);
+	else RColor4f(.9f,.9f,.9f,alpha);
 }
 
 //one screen row of a console line (long lines wrap)
@@ -781,16 +780,13 @@ void DrawConsolePanel(int fullscreen)
 
 	Mat4 projection=RProjection(),modelview=RModelView();   //over the game: back to them after
 	RSet2D();
-	glPushAttrib(GL_ENABLE_BIT|GL_CURRENT_BIT|GL_COLOR_BUFFER_BIT|GL_TEXTURE_BIT);
-	glDisable(GL_DEPTH_TEST);
-	glDisable(GL_FOG);
-	glDisable(GL_LIGHTING);
-	glDisable(GL_CULL_FACE);
-	glDisable(GL_ALPHA_TEST);
-	glEnable(GL_BLEND);
-	glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
-	glTexEnvi(GL_TEXTURE_ENV,GL_TEXTURE_ENV_MODE,GL_MODULATE);
-	glEnable(GL_TEXTURE_2D);
+	RPushAttrib(RATTR_ENABLE|RATTR_CURRENT|RATTR_COLOR|RATTR_TEXTURE);
+	RDisable(RCAP_DEPTHTEST);
+	RDisable(RCAP_FOG);
+	RDisable(RCAP_CULL);
+	REnable(RCAP_BLEND);
+	RBlendFunc(RBLEND_ALPHA);
+	REnable(RCAP_TEXTURE);
 
 	//panel, title bar, input bar
 	ConsoleRect(-1,bottom,1,top,0,0,0,fullscreen?1:.84f);
@@ -802,9 +798,9 @@ void DrawConsolePanel(int fullscreen)
 
 	char text[200];
 	float texty=top-CONHEADH+(CONHEADH-CONGLYPHH)/2;
-	glColor4f(1,1,.5f,1);
+	RColor4f(1,1,.5f,1);
 	ConsoleText(CONX1,texty,"Console");
-	glColor4f(.5f,.5f,.5f,1);
+	RColor4f(.5f,.5f,.5f,1);
 	snprintf(text,sizeof(text),"Edifice %s",EDIFICE_VERSION_STRING);
 	ConsoleText(CONX1+9*CONCHARW,texty,text);
 	if(!fullscreen)
@@ -843,7 +839,7 @@ void DrawConsolePanel(int fullscreen)
 		float y=logbottom+r*CONLINEH;
 		if(kind==KIND_ECHO&&row.start==0)
 		{
-			glColor4f(1,1,.5f,1);
+			RColor4f(1,1,.5f,1);
 			ConsoleText(CONX1,y,">");
 		}
 		KindColor(kind,1);
@@ -853,7 +849,7 @@ void DrawConsolePanel(int fullscreen)
 	{
 		ConsoleRect(-1,logbottom-.006f,x2-CONSCROLLW-.01f,logbottom+CONLINEH-.006f,.25f,.25f,.1f,.9f);
 		snprintf(text,sizeof(text),"v  %d more row%s below  (PgDn)",consolescroll,consolescroll==1?"":"s");
-		glColor4f(1,1,.5f,1);
+		RColor4f(1,1,.5f,1);
 		ConsoleText(CONX1+2*CONCHARW,logbottom,text);
 	}
 	if(numrows>visible)
@@ -874,7 +870,7 @@ void DrawConsolePanel(int fullscreen)
 		float y=bottom+CONINPUTH+.012f;
 		float x=CONX1+2*CONCHARW;
 		float right=x2-CONSCROLLW-.02f;
-		glColor4f(.5f,.5f,.5f,1);
+		RColor4f(.5f,.5f,.5f,1);
 		ConsoleText(CONX1,y,"Tab");
 		x+=2*CONCHARW;
 		for(int i=0;i<nummatches;i++)
@@ -883,13 +879,13 @@ void DrawConsolePanel(int fullscreen)
 			if(x+(len+8)*CONCHARW>right&&i<nummatches-1)
 			{
 				snprintf(text,sizeof(text),"+%d more",nummatches-i);
-				glColor4f(.5f,.5f,.5f,1);
+				RColor4f(.5f,.5f,.5f,1);
 				ConsoleText(x,y,text);
 				break;
 			}
-			glColor4f(1,1,.5f,1);
+			RColor4f(1,1,.5f,1);
 			ConsoleText(x,y,matchnames[i],typedlen);
-			glColor4f(.75f,.75f,.75f,1);
+			RColor4f(.75f,.75f,.75f,1);
 			ConsoleText(x+typedlen*CONCHARW,y,&matchnames[i][typedlen]);
 			x+=(len+2)*CONCHARW;
 		}
@@ -897,7 +893,7 @@ void DrawConsolePanel(int fullscreen)
 
 	//prompt; a long command scrolls to keep the cursor in view
 	float y=bottom+(CONINPUTH-CONGLYPHH)/2;
-	glColor4f(1,1,.5f,1);
+	RColor4f(1,1,.5f,1);
 	ConsoleText(CONX1,y,">");
 	int len=strlen(consolecommand);
 	if(consolecursor>len) consolecursor=len;
@@ -906,13 +902,13 @@ void DrawConsolePanel(int fullscreen)
 	float x=CONX1+2*CONCHARW;
 	if(!fullscreen&&!((curtime/500)&1))
 		ConsoleRect(x+(consolecursor-first)*CONCHARW,y-.004f,x+(consolecursor-first+1)*CONCHARW,y+CONGLYPHH,1,1,.5f,.55f);
-	glColor4f(1,1,1,1);
+	RColor4f(1,1,1,1);
 	ConsoleText(x,y,&consolecommand[first],room);
 
-	glPopAttrib();
+	RPopAttrib();
 	RSetProjection(projection);
 	RSetModelView(modelview);
-	glColor3f(1,1,1);
+	RColor3f(1,1,1);
 }
 
 //the last few lines over the game for a few seconds (console closed)
@@ -920,18 +916,18 @@ void DrawConsoleNotify()
 {
 	consoleoverlay=0;
 	if(consolepartvisible<=0) return;
-	glPushAttrib(GL_ENABLE_BIT|GL_CURRENT_BIT|GL_COLOR_BUFFER_BIT);
-	glEnable(GL_BLEND);
-	glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
-	glEnable(GL_TEXTURE_2D);
+	RPushAttrib(RATTR_ENABLE|RATTR_CURRENT|RATTR_COLOR);
+	REnable(RCAP_BLEND);
+	RBlendFunc(RBLEND_ALPHA);
+	REnable(RCAP_TEXTURE);
 	for(int i=0;i<consolepartvisible&&i<consolecount;i++)
 	{
 		float y=.985f-CONGLYPHH-(consolepartvisible-1-i)*CONLINEH;
-		glColor4f(0,0,0,.8f);   //shadow: readable on snow too
+		RColor4f(0,0,0,.8f);   //shadow: readable on snow too
 		ConsoleText(-.84f+.003f,y-.004f,consoletext[i],120);
 		KindColor(consolekind[i],1);
 		ConsoleText(-.84f,y,consoletext[i],120);
 	}
-	glPopAttrib();
-	glColor3f(1,1,1);
+	RPopAttrib();
+	RColor3f(1,1,1);
 }

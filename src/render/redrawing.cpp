@@ -1,7 +1,6 @@
 //functions to draw everything in the 3d world, and some 2d overlays
 
 
-#include "gl.h"
 #include "renderer.h"
 #include "platform.h"
 #include "fileio.h"
@@ -21,17 +20,17 @@
 #include "sound.h"
 #include "ui.h"
 #include "hktime.h"
-//glVertex3fv of a computed point: the temporary binds to the reference, where
+//a vertex at a computed point: the temporary binds to the reference, where
 //glVertex3fv((float *)&(a+b)) took the address of an rvalue (GCC: -fpermissive)
 static inline void Vertex(const Vector &v)
 {
-	glVertex3f(v.x,v.y,v.z);
+	RVertex3f(v.x,v.y,v.z);
 }
 
 float cloudposx,cloudposy;
 float cloudmistposx,cloudmistposy;	
 #define PI (3.1415926)
-#define LANDSCAPERENDER GL_TRIANGLE_STRIP
+#define LANDSCAPERENDER RP_TRISTRIP
 #define GTEXREPEAT 16
 #define TEXMULT ((float)1/GTEXREPEAT)
 #define BTEXMULT ((float)96/512)
@@ -99,7 +98,7 @@ inline void SetLandLight(int x, int y)
 		l*=nf;
 		if(l<.3)l=.3;
 	}
-	glColor4f(l,l,l,1);
+	RColor4f(l,l,l,1);
 }
 
 //this is bad style, but it's the fastest way to do this
@@ -108,7 +107,7 @@ inline void SetLandLight(int x, int y)
 {\
 landfaces++;\
 SetLandLight(x,y); \
-glTexCoord2f(((float)x+xtexoffset)*TEXMULT,((float)y+ytexoffset)*TEXMULT);\
+RTexCoord2f(((float)x+xtexoffset)*TEXMULT,((float)y+ytexoffset)*TEXMULT);\
 cf=1;\
 if(x<inminx) cf*=1-((float)inminx-x)/(float)(inminx-minx+2);\
 else if(x>inmaxx) cf*=1-(float)(inmaxx-x)/(float)(inmaxx-maxx-4);\
@@ -119,17 +118,17 @@ if(cf<0)cf=0;\
 if(cf>1)cf=1;\
 curheight=landmip[mipnum][x&(LANDGRIDSIZE-1)][y&(LANDGRIDSIZE-1)]*cf+landmip[mipnum+1][x&(LANDGRIDSIZE-1)][y&(LANDGRIDSIZE-1)]*(1-cf);\
 }\
-glVertex3f(x,curheight,y);
+RVertex3f(x,curheight,y);
 
 #define LANDVERTEX(x,y) LV((x),(y))			
 #define TEXTURESWITCHRD(x,y,type,x1,y1,x2,y2)\
 if(curtex!=landtex[(x&LANDGRIDSIZE-1)/LANDTEXBLOCKSIZE][(y&LANDGRIDSIZE-1)/LANDTEXBLOCKSIZE])\
-{glEnd();TexBind((curtex=landtex[(x&LANDGRIDSIZE-1)/LANDTEXBLOCKSIZE][(y&LANDGRIDSIZE-1)/LANDTEXBLOCKSIZE])+TEX_GROUND0);glBegin(type);\
+{REnd();TexBind((curtex=landtex[(x&LANDGRIDSIZE-1)/LANDTEXBLOCKSIZE][(y&LANDGRIDSIZE-1)/LANDTEXBLOCKSIZE])+TEX_GROUND0);RBegin(type);\
 LANDVERTEX(x1,y1);LANDVERTEX(x2,y2);}\
 
 #define TEXTURESWITCH(x,y,type)\
 if(curtex!=landtex[(x&LANDGRIDSIZE-1)/LANDTEXBLOCKSIZE][(y&LANDGRIDSIZE-1)/LANDTEXBLOCKSIZE])\
-{glEnd();TexBind((curtex=landtex[(x&LANDGRIDSIZE-1)/LANDTEXBLOCKSIZE][(y&LANDGRIDSIZE-1)/LANDTEXBLOCKSIZE])+TEX_GROUND0);glBegin(type);}\
+{REnd();TexBind((curtex=landtex[(x&LANDGRIDSIZE-1)/LANDTEXBLOCKSIZE][(y&LANDGRIDSIZE-1)/LANDTEXBLOCKSIZE])+TEX_GROUND0);RBegin(type);}\
 
 
 //draws a block of land with a hole in the middle to allow for less detail far away by calling this function a few times
@@ -171,14 +170,14 @@ void DrawMip(float fcx,float fcy,float fhcx,float fhcy,int prevsize,int newsize,
 	y=maxy;
 	x=minx;
 	TexBind(TEX_LAND);
-	glCullFace(GL_BACK);
-	glBegin(GL_TRIANGLES);
+	RCullFace(RFACE_BACK);
+	RBegin(RP_TRIANGLES);
 	y=maxy;
 	x=minx;
 	
 	for(x=minx+res;x<=maxx-res;x+=res*2)
 	{
-		TEXTURESWITCH(x,y,GL_TRIANGLES);
+		TEXTURESWITCH(x,y,RP_TRIANGLES);
 		LANDVERTEX(x,y);
 		LANDVERTEX(x,y+res*2);
 		LANDVERTEX(x+res,y);
@@ -191,12 +190,12 @@ void DrawMip(float fcx,float fcy,float fhcx,float fhcy,int prevsize,int newsize,
 	}
 	y=miny-res;
 	x=minx;
-	glEnd();
-	glCullFace(GL_FRONT);
-	glBegin(GL_TRIANGLES);
+	REnd();
+	RCullFace(RFACE_FRONT);
+	RBegin(RP_TRIANGLES);
 	for(x=minx+res;x<=maxx-res;x+=res*2)
 	{
-		TEXTURESWITCH(x,y,GL_TRIANGLES);
+		TEXTURESWITCH(x,y,RP_TRIANGLES);
 		LANDVERTEX(x,y+res*2);
 		LANDVERTEX(x,y);
 		LANDVERTEX(x+res,y+res*2);
@@ -207,14 +206,14 @@ void DrawMip(float fcx,float fcy,float fhcx,float fhcy,int prevsize,int newsize,
 		LANDVERTEX(x+res*2,y+res*2);
 		LANDVERTEX(x+res,y+res*2);
 	}
-	glEnd();
+	REnd();
 	y=miny;
 	x=minx-res;
-	glCullFace(GL_BACK);
-	glBegin(GL_TRIANGLES);
+	RCullFace(RFACE_BACK);
+	RBegin(RP_TRIANGLES);
 	for(y=miny+res;y<=maxy-res;y+=res*2)
 	{
-		TEXTURESWITCH(x,y,GL_TRIANGLES);
+		TEXTURESWITCH(x,y,RP_TRIANGLES);
 		LANDVERTEX(x+res*2,y);
 		LANDVERTEX(x,y);
 		LANDVERTEX(x+res*2,y+res);
@@ -225,14 +224,14 @@ void DrawMip(float fcx,float fcy,float fhcx,float fhcy,int prevsize,int newsize,
 		LANDVERTEX(x+res*2,y+res*2);
 		LANDVERTEX(x+res*2,y+res);
 	}
-	glEnd();
+	REnd();
 	y=miny;
 	x=maxx;
-	glCullFace(GL_FRONT);
-	glBegin(GL_TRIANGLES);
+	RCullFace(RFACE_FRONT);
+	RBegin(RP_TRIANGLES);
 	for(y=miny+res;y<=maxy-res;y+=res*2)
 	{
-		TEXTURESWITCH(x,y,GL_TRIANGLES);
+		TEXTURESWITCH(x,y,RP_TRIANGLES);
 		LANDVERTEX(x,y);
 		LANDVERTEX(x+res*2,y);
 		LANDVERTEX(x,y+res);
@@ -243,7 +242,7 @@ void DrawMip(float fcx,float fcy,float fhcx,float fhcy,int prevsize,int newsize,
 		LANDVERTEX(x,y+res*2);
 		LANDVERTEX(x,y+res);
 	}
-	TEXTURESWITCH(minx-res,miny-res,GL_TRIANGLES);
+	TEXTURESWITCH(minx-res,miny-res,RP_TRIANGLES);
 	LANDVERTEX(minx-res,miny-res);
 	LANDVERTEX(minx-res+res*2,miny-res);
 	LANDVERTEX(minx-res,miny-res+res*2);
@@ -251,7 +250,7 @@ void DrawMip(float fcx,float fcy,float fhcx,float fhcy,int prevsize,int newsize,
 	LANDVERTEX(minx-res+res*2,miny-res);
 	LANDVERTEX(minx-res+res*2,miny-res+res*2);
 	
-	TEXTURESWITCH(maxx,miny-res,GL_TRIANGLES);
+	TEXTURESWITCH(maxx,miny-res,RP_TRIANGLES);
 	LANDVERTEX(maxx,miny-res);
 	LANDVERTEX(maxx+res*2,miny-res);
 	LANDVERTEX(maxx,miny-res+res*2);
@@ -259,7 +258,7 @@ void DrawMip(float fcx,float fcy,float fhcx,float fhcy,int prevsize,int newsize,
 	LANDVERTEX(maxx+res*2,miny-res);
 	LANDVERTEX(maxx+res*2,miny-res+res*2);
 	
-	TEXTURESWITCH(minx-res,maxy,GL_TRIANGLES);
+	TEXTURESWITCH(minx-res,maxy,RP_TRIANGLES);
 	LANDVERTEX(minx-res,maxy);
 	LANDVERTEX(minx-res+res*2,maxy);
 	LANDVERTEX(minx-res,maxy+res*2);
@@ -267,7 +266,7 @@ void DrawMip(float fcx,float fcy,float fhcx,float fhcy,int prevsize,int newsize,
 	LANDVERTEX(minx-res+res*2,maxy);
 	LANDVERTEX(minx-res+res*2,maxy+res*2);
 	
-	TEXTURESWITCH(maxx,maxy,GL_TRIANGLES);
+	TEXTURESWITCH(maxx,maxy,RP_TRIANGLES);
 	LANDVERTEX(maxx,maxy);
 	LANDVERTEX(maxx+res*2,maxy);
 	LANDVERTEX(maxx,maxy+res*2);
@@ -275,15 +274,15 @@ void DrawMip(float fcx,float fcy,float fhcx,float fhcy,int prevsize,int newsize,
 	LANDVERTEX(maxx+res*2,maxy);
 	LANDVERTEX(maxx+res*2,maxy+res*2);
 	
-	glEnd();
+	REnd();
 
 	
-	glCullFace(GL_BACK);
+	RCullFace(RFACE_BACK);
 	
 	for(y=inmaxy;y<maxy;y+=res)
 	{
 		
-		glBegin(LANDSCAPERENDER);		
+		RBegin(LANDSCAPERENDER);		
 		for(x=minx+res;x<=maxx;x+=res)
 		{
 			LANDVERTEX(x,y);
@@ -292,12 +291,12 @@ void DrawMip(float fcx,float fcy,float fhcx,float fhcy,int prevsize,int newsize,
 			
 			
 		}
-		glEnd();
+		REnd();
 		
 	}
 	for(y=miny+res;y<inminy;y+=res)
 	{
-		glBegin(LANDSCAPERENDER);		
+		RBegin(LANDSCAPERENDER);		
 		for(x=minx+res;x<=maxx;x+=res)
 		{
 			LANDVERTEX(x,y);
@@ -305,12 +304,12 @@ void DrawMip(float fcx,float fcy,float fhcx,float fhcy,int prevsize,int newsize,
 			TEXTURESWITCHRD(x,y,LANDSCAPERENDER,x,y,x,y+res);
 			
 		}
-		glEnd();
+		REnd();
 	}
-	glCullFace(GL_FRONT);
+	RCullFace(RFACE_FRONT);
 	for(x=minx+res;x<inminx;x+=res)
 	{
-		glBegin(LANDSCAPERENDER);		
+		RBegin(LANDSCAPERENDER);		
 		for(y=inminy;y<=inmaxy;y+=res)
 		{
 			
@@ -319,11 +318,11 @@ void DrawMip(float fcx,float fcy,float fhcx,float fhcy,int prevsize,int newsize,
 			TEXTURESWITCHRD(x,y,LANDSCAPERENDER,x,y,x+res,y);
 			
 		}
-		glEnd();
+		REnd();
 	}
 	for(x=inmaxx;x<maxx;x+=res)
 	{
-		glBegin(LANDSCAPERENDER);		
+		RBegin(LANDSCAPERENDER);		
 		for(y=inminy;y<=inmaxy;y+=res)
 		{
 			
@@ -332,7 +331,7 @@ void DrawMip(float fcx,float fcy,float fhcx,float fhcy,int prevsize,int newsize,
 			TEXTURESWITCHRD(x,y,LANDSCAPERENDER,x,y,x+res,y);
 			
 		}
-		glEnd();
+		REnd();
 	}
 }	
 
@@ -341,8 +340,8 @@ void DrawMip(float fcx,float fcy,float fhcx,float fhcy,int prevsize,int newsize,
 
 void DrawCloudBox(Vector pos)
 {
-	glDisable(GL_DEPTH_TEST);
-	glEnable(GL_TEXTURE_2D);
+	RDisable(RCAP_DEPTHTEST);
+	REnable(RCAP_TEXTURE);
 	
 	static Vector opos;
 	SetCloudShift(cloudposx,cloudposy);
@@ -362,11 +361,11 @@ void DrawCloudBox(Vector pos)
 	int repeats=3;
 	
 	opos=pos;
-	glCullFace(GL_BACK);
+	RCullFace(RFACE_BACK);
 	TexBind(TEX_CLOUDS);
-	glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+	RBlendFunc(RBLEND_ALPHA);
 		
-	glColor4f(1,1,1,.5);
+	RColor4f(1,1,1,.5);
 	float fy;
 	float fx;
 	float of=(float)1/repeats;
@@ -374,37 +373,37 @@ void DrawCloudBox(Vector pos)
 	int x;
 	for(x=-repeats;x<repeats;x++)
 	{
-		glBegin(GL_TRIANGLE_STRIP);
+		RBegin(RP_TRISTRIP);
 		fx=(float)x/repeats;
 		for(int y=-repeats;y<repeats;y++)
 		{
 			fy=(float)y/repeats;
-			glTexCoord2f(texrepeat*fx+cloudposx,texrepeat*fy+cloudposy);
-			glVertex3f(pos.x+boxsize*fx,highest,pos.z+boxsize*fy);
-			glTexCoord2f(texrepeat*(fx+of)+cloudposx,texrepeat*fy+cloudposy);
-			glVertex3f(pos.x+boxsize*(fx+of),highest,pos.z+boxsize*fy);
+			RTexCoord2f(texrepeat*fx+cloudposx,texrepeat*fy+cloudposy);
+			RVertex3f(pos.x+boxsize*fx,highest,pos.z+boxsize*fy);
+			RTexCoord2f(texrepeat*(fx+of)+cloudposx,texrepeat*fy+cloudposy);
+			RVertex3f(pos.x+boxsize*(fx+of),highest,pos.z+boxsize*fy);
 		}
-		glEnd();
+		REnd();
 	}
 	if(GetSkySettings()->usemist)
 	{
 		highest-=60;
-		glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+		RBlendFunc(RBLEND_ALPHA);
 		TexBind(TEX_CLOUDMIST);
-		glColor4f(1,1,1,GetSkySettings()->mistopacity);
+		RColor4f(1,1,1,GetSkySettings()->mistopacity);
 		for(x=-repeats;x<repeats;x++)
 		{
-			glBegin(GL_TRIANGLE_STRIP);
+			RBegin(RP_TRISTRIP);
 			fx=(float)x/repeats;
 			for(int y=-repeats;y<repeats;y++)
 			{
 				fy=(float)y/repeats;
-				glTexCoord2f(texrepeat*fx+cloudmistposx,texrepeat*fy+cloudmistposy);
-				glVertex3f(pos.x+boxsize*fx,highest,pos.z+boxsize*fy);
-				glTexCoord2f(texrepeat*(fx+of)+cloudmistposx,texrepeat*fy+cloudmistposy);
-				glVertex3f(pos.x+boxsize*(fx+of),highest,pos.z+boxsize*fy);
+				RTexCoord2f(texrepeat*fx+cloudmistposx,texrepeat*fy+cloudmistposy);
+				RVertex3f(pos.x+boxsize*fx,highest,pos.z+boxsize*fy);
+				RTexCoord2f(texrepeat*(fx+of)+cloudmistposx,texrepeat*fy+cloudmistposy);
+				RVertex3f(pos.x+boxsize*(fx+of),highest,pos.z+boxsize*fy);
 			}
-			glEnd();
+			REnd();
 		}
 	}
 }
@@ -448,30 +447,30 @@ inline void DrawBlockSide(BlockBuf *cb)
 	{
 	case SIDEXN:
 	{
-		glColor3f(XNC,XNC,XNC);
-		glTexCoord2f(0,0);				glVertex3f(x,y,z);
-		glTexCoord2f(1,0);		glVertex3f(x,y,z+BLOCKSIZE);
-		glTexCoord2f(1,1);glVertex3f(x,y+BLOCKSIZE*t2,z+BLOCKSIZE);
-		glTexCoord2f(0,t1);		glVertex3f(x,y+BLOCKSIZE*t1,z);
+		RColor3f(XNC,XNC,XNC);
+		RTexCoord2f(0,0);				RVertex3f(x,y,z);
+		RTexCoord2f(1,0);		RVertex3f(x,y,z+BLOCKSIZE);
+		RTexCoord2f(1,1);RVertex3f(x,y+BLOCKSIZE*t2,z+BLOCKSIZE);
+		RTexCoord2f(0,t1);		RVertex3f(x,y+BLOCKSIZE*t1,z);
 		
 		break;
 	}
 	case SIDEXP:
 	{
-		glColor3f(XPC,XPC,XPC);
-		glTexCoord2f(1,0);				glVertex3f(x+BLOCKSIZE,y,z);
-		glTexCoord2f(1,t4);		glVertex3f(x+BLOCKSIZE,y+BLOCKSIZE*t4,z);
-		glTexCoord2f(0,t3);glVertex3f(x+BLOCKSIZE,y+BLOCKSIZE*t3,z+BLOCKSIZE);
-		glTexCoord2f(0,0);		glVertex3f(x+BLOCKSIZE,y,z+BLOCKSIZE);
+		RColor3f(XPC,XPC,XPC);
+		RTexCoord2f(1,0);				RVertex3f(x+BLOCKSIZE,y,z);
+		RTexCoord2f(1,t4);		RVertex3f(x+BLOCKSIZE,y+BLOCKSIZE*t4,z);
+		RTexCoord2f(0,t3);RVertex3f(x+BLOCKSIZE,y+BLOCKSIZE*t3,z+BLOCKSIZE);
+		RTexCoord2f(0,0);		RVertex3f(x+BLOCKSIZE,y,z+BLOCKSIZE);
 		break;
 	}
 	case SIDEYN:
 	{
-		glColor3f(YNC,YNC,YNC);
-		glTexCoord2f(0,0);				glVertex3f(x,y,z);
-		glTexCoord2f(1,0);		glVertex3f(x+BLOCKSIZE,y,z);
-		glTexCoord2f(1,1);glVertex3f(x+BLOCKSIZE,y,z+BLOCKSIZE);
-		glTexCoord2f(0,1);		glVertex3f(x,y,z+BLOCKSIZE);
+		RColor3f(YNC,YNC,YNC);
+		RTexCoord2f(0,0);				RVertex3f(x,y,z);
+		RTexCoord2f(1,0);		RVertex3f(x+BLOCKSIZE,y,z);
+		RTexCoord2f(1,1);RVertex3f(x+BLOCKSIZE,y,z+BLOCKSIZE);
+		RTexCoord2f(0,1);		RVertex3f(x,y,z+BLOCKSIZE);
 		
 		break;
 	}
@@ -480,47 +479,47 @@ inline void DrawBlockSide(BlockBuf *cb)
 		switch(type)
 		{
 		case 1:
-			glColor3f(YPC,YPC,YPC);
+			RColor3f(YPC,YPC,YPC);
 			break;
 		case 2:
-			glColor3f(TC2,TC2,TC2);
+			RColor3f(TC2,TC2,TC2);
 			break;
 		case 3:
-			glColor3f(TC3,TC3,TC3);
+			RColor3f(TC3,TC3,TC3);
 			break;
 		case 4:
-			glColor3f(TC4,TC4,TC4);
+			RColor3f(TC4,TC4,TC4);
 			break;
 		case 5:
-			glColor3f(TC5,TC5,TC5);
+			RColor3f(TC5,TC5,TC5);
 			break;
 		}
 		
-		glTexCoord2f(0,0);				glVertex3f(x,y+BLOCKSIZE*t1,z);
-		glTexCoord2f(0,1);		glVertex3f(x,y+BLOCKSIZE*t2,z+BLOCKSIZE);
-		glTexCoord2f(1,1);glVertex3f(x+BLOCKSIZE,y+BLOCKSIZE*t3,z+BLOCKSIZE);
-		glTexCoord2f(1,0);		glVertex3f(x+BLOCKSIZE,y+BLOCKSIZE*t4,z);
+		RTexCoord2f(0,0);				RVertex3f(x,y+BLOCKSIZE*t1,z);
+		RTexCoord2f(0,1);		RVertex3f(x,y+BLOCKSIZE*t2,z+BLOCKSIZE);
+		RTexCoord2f(1,1);RVertex3f(x+BLOCKSIZE,y+BLOCKSIZE*t3,z+BLOCKSIZE);
+		RTexCoord2f(1,0);		RVertex3f(x+BLOCKSIZE,y+BLOCKSIZE*t4,z);
 		
 		break;
 	}
 	case SIDEZN:
 	{
-		glColor3f(ZNC,ZNC,ZNC);
-		glTexCoord2f(1,0);		glVertex3f(x,y,z);
-		glTexCoord2f(1,t1);glVertex3f(x,y+BLOCKSIZE*t1,z);
-		glTexCoord2f(0,t4);		glVertex3f(x+BLOCKSIZE,y+BLOCKSIZE*t4,z);
-		glTexCoord2f(0,0);				glVertex3f(x+BLOCKSIZE,y,z);
+		RColor3f(ZNC,ZNC,ZNC);
+		RTexCoord2f(1,0);		RVertex3f(x,y,z);
+		RTexCoord2f(1,t1);RVertex3f(x,y+BLOCKSIZE*t1,z);
+		RTexCoord2f(0,t4);		RVertex3f(x+BLOCKSIZE,y+BLOCKSIZE*t4,z);
+		RTexCoord2f(0,0);				RVertex3f(x+BLOCKSIZE,y,z);
 		
 		break;
 	}
 	
 	case SIDEZP:
 	{
-		glColor3f(ZPC,ZPC,ZPC);
-		glTexCoord2f(0,0);				glVertex3f(x,y,z+BLOCKSIZE);
-		glTexCoord2f(1,0);		glVertex3f(x+BLOCKSIZE,y,z+BLOCKSIZE);
-		glTexCoord2f(1,t3);glVertex3f(x+BLOCKSIZE,y+BLOCKSIZE*t3,z+BLOCKSIZE);
-		glTexCoord2f(0,t2);		glVertex3f(x,y+BLOCKSIZE*t2,z+BLOCKSIZE);
+		RColor3f(ZPC,ZPC,ZPC);
+		RTexCoord2f(0,0);				RVertex3f(x,y,z+BLOCKSIZE);
+		RTexCoord2f(1,0);		RVertex3f(x+BLOCKSIZE,y,z+BLOCKSIZE);
+		RTexCoord2f(1,t3);RVertex3f(x+BLOCKSIZE,y+BLOCKSIZE*t3,z+BLOCKSIZE);
+		RTexCoord2f(0,t2);		RVertex3f(x,y+BLOCKSIZE*t2,z+BLOCKSIZE);
 		
 		break;
 	}	
@@ -530,8 +529,8 @@ inline void DrawBlockSide(BlockBuf *cb)
 //the shade of a face of the build preview: grey, or red where it can't be built
 static inline void BlockColor(float c,char red)
 {
-	if(red) glColor3f(.5f+c*.5f,c*.15f,c*.15f);
-	else glColor3f(c,c,c);
+	if(red) RColor3f(.5f+c*.5f,c*.15f,c*.15f);
+	else RColor3f(c,c,c);
 }
 
 //draws an individual block (the wireframe of the build preview)
@@ -560,22 +559,22 @@ void DrawBlock(int x,int y,int z,unsigned char ds,char type,int &px,int &py,int 
 	if(x>px&&ds&SIDEXN)
 	{
 		BlockColor(XNC,red);
-		glTexCoord2f(xtexoffset,ytexoffset);				glVertex3f(x,y,z);
-		glTexCoord2f(BTEXMULT+xtexoffset,ytexoffset);		glVertex3f(x,y,z+BLOCKSIZE);
-		glTexCoord2f(xtexoffset,BTEXMULT*t1+ytexoffset);		glVertex3f(x,y+BLOCKSIZE*t1,z);
-		glTexCoord2f(xtexoffset,BTEXMULT*t1+ytexoffset);		glVertex3f(x,y+BLOCKSIZE*t1,z);
-		glTexCoord2f(BTEXMULT+xtexoffset,ytexoffset);		glVertex3f(x,y,z+BLOCKSIZE);
-		glTexCoord2f(BTEXMULT+xtexoffset,BTEXMULT+ytexoffset);glVertex3f(x,y+BLOCKSIZE*t2,z+BLOCKSIZE);
+		RTexCoord2f(xtexoffset,ytexoffset);				RVertex3f(x,y,z);
+		RTexCoord2f(BTEXMULT+xtexoffset,ytexoffset);		RVertex3f(x,y,z+BLOCKSIZE);
+		RTexCoord2f(xtexoffset,BTEXMULT*t1+ytexoffset);		RVertex3f(x,y+BLOCKSIZE*t1,z);
+		RTexCoord2f(xtexoffset,BTEXMULT*t1+ytexoffset);		RVertex3f(x,y+BLOCKSIZE*t1,z);
+		RTexCoord2f(BTEXMULT+xtexoffset,ytexoffset);		RVertex3f(x,y,z+BLOCKSIZE);
+		RTexCoord2f(BTEXMULT+xtexoffset,BTEXMULT+ytexoffset);RVertex3f(x,y+BLOCKSIZE*t2,z+BLOCKSIZE);
 	}
 	 if(x<px&&ds&SIDEXP)
 	{
 		BlockColor(XPC,red);
-		glTexCoord2f(BTEXMULT+xtexoffset,ytexoffset);				glVertex3f(x+BLOCKSIZE,y,z);
-		glTexCoord2f(BTEXMULT+xtexoffset,BTEXMULT*t4+ytexoffset);		glVertex3f(x+BLOCKSIZE,y+BLOCKSIZE*t4,z);
-		glTexCoord2f(xtexoffset,ytexoffset);		glVertex3f(x+BLOCKSIZE,y,z+BLOCKSIZE);
-		glTexCoord2f(xtexoffset,ytexoffset);		glVertex3f(x+BLOCKSIZE,y,z+BLOCKSIZE);
-		glTexCoord2f(BTEXMULT+xtexoffset,BTEXMULT*t4+ytexoffset);		glVertex3f(x+BLOCKSIZE,y+BLOCKSIZE*t4,z);
-		glTexCoord2f(xtexoffset,BTEXMULT*t3+ytexoffset);glVertex3f(x+BLOCKSIZE,y+BLOCKSIZE*t3,z+BLOCKSIZE);
+		RTexCoord2f(BTEXMULT+xtexoffset,ytexoffset);				RVertex3f(x+BLOCKSIZE,y,z);
+		RTexCoord2f(BTEXMULT+xtexoffset,BTEXMULT*t4+ytexoffset);		RVertex3f(x+BLOCKSIZE,y+BLOCKSIZE*t4,z);
+		RTexCoord2f(xtexoffset,ytexoffset);		RVertex3f(x+BLOCKSIZE,y,z+BLOCKSIZE);
+		RTexCoord2f(xtexoffset,ytexoffset);		RVertex3f(x+BLOCKSIZE,y,z+BLOCKSIZE);
+		RTexCoord2f(BTEXMULT+xtexoffset,BTEXMULT*t4+ytexoffset);		RVertex3f(x+BLOCKSIZE,y+BLOCKSIZE*t4,z);
+		RTexCoord2f(xtexoffset,BTEXMULT*t3+ytexoffset);RVertex3f(x+BLOCKSIZE,y+BLOCKSIZE*t3,z+BLOCKSIZE);
 	}
 	xtexoffset=1,ytexoffset=0;
 	xtexoffset=xtexoffset/4+stdxoff;
@@ -583,12 +582,12 @@ void DrawBlock(int x,int y,int z,unsigned char ds,char type,int &px,int &py,int 
 	if(y>py&&ds&SIDEYN)
 	{
 		BlockColor(YNC,red);
-		glTexCoord2f(xtexoffset,ytexoffset);				glVertex3f(x,y,z);
-		glTexCoord2f(BTEXMULT+xtexoffset,ytexoffset);		glVertex3f(x+BLOCKSIZE,y,z);
-		glTexCoord2f(xtexoffset,BTEXMULT+ytexoffset);		glVertex3f(x,y,z+BLOCKSIZE);
-		glTexCoord2f(xtexoffset,BTEXMULT+ytexoffset);		glVertex3f(x,y,z+BLOCKSIZE);
-		glTexCoord2f(BTEXMULT+xtexoffset,ytexoffset);		glVertex3f(x+BLOCKSIZE,y,z);
-		glTexCoord2f(BTEXMULT+xtexoffset,BTEXMULT+ytexoffset);glVertex3f(x+BLOCKSIZE,y,z+BLOCKSIZE);
+		RTexCoord2f(xtexoffset,ytexoffset);				RVertex3f(x,y,z);
+		RTexCoord2f(BTEXMULT+xtexoffset,ytexoffset);		RVertex3f(x+BLOCKSIZE,y,z);
+		RTexCoord2f(xtexoffset,BTEXMULT+ytexoffset);		RVertex3f(x,y,z+BLOCKSIZE);
+		RTexCoord2f(xtexoffset,BTEXMULT+ytexoffset);		RVertex3f(x,y,z+BLOCKSIZE);
+		RTexCoord2f(BTEXMULT+xtexoffset,ytexoffset);		RVertex3f(x+BLOCKSIZE,y,z);
+		RTexCoord2f(BTEXMULT+xtexoffset,BTEXMULT+ytexoffset);RVertex3f(x+BLOCKSIZE,y,z+BLOCKSIZE);
 	}
 	xtexoffset=0,ytexoffset=1;
 	xtexoffset=xtexoffset/4+stdxoff;
@@ -615,12 +614,12 @@ void DrawBlock(int x,int y,int z,unsigned char ds,char type,int &px,int &py,int 
 			break;
 		}
 		
-		glTexCoord2f(xtexoffset,ytexoffset);				glVertex3f(x,y+BLOCKSIZE*t1,z);
-		glTexCoord2f(xtexoffset,BTEXMULT+ytexoffset);		glVertex3f(x,y+BLOCKSIZE*t2,z+BLOCKSIZE);
-		glTexCoord2f(BTEXMULT+xtexoffset,ytexoffset);		glVertex3f(x+BLOCKSIZE,y+BLOCKSIZE*t4,z);
-		glTexCoord2f(BTEXMULT+xtexoffset,ytexoffset);		glVertex3f(x+BLOCKSIZE,y+BLOCKSIZE*t4,z);
-		glTexCoord2f(xtexoffset,BTEXMULT+ytexoffset);		glVertex3f(x,y+BLOCKSIZE*t2,z+BLOCKSIZE);
-		glTexCoord2f(BTEXMULT+xtexoffset,BTEXMULT+ytexoffset);glVertex3f(x+BLOCKSIZE,y+BLOCKSIZE*t3,z+BLOCKSIZE);
+		RTexCoord2f(xtexoffset,ytexoffset);				RVertex3f(x,y+BLOCKSIZE*t1,z);
+		RTexCoord2f(xtexoffset,BTEXMULT+ytexoffset);		RVertex3f(x,y+BLOCKSIZE*t2,z+BLOCKSIZE);
+		RTexCoord2f(BTEXMULT+xtexoffset,ytexoffset);		RVertex3f(x+BLOCKSIZE,y+BLOCKSIZE*t4,z);
+		RTexCoord2f(BTEXMULT+xtexoffset,ytexoffset);		RVertex3f(x+BLOCKSIZE,y+BLOCKSIZE*t4,z);
+		RTexCoord2f(xtexoffset,BTEXMULT+ytexoffset);		RVertex3f(x,y+BLOCKSIZE*t2,z+BLOCKSIZE);
+		RTexCoord2f(BTEXMULT+xtexoffset,BTEXMULT+ytexoffset);RVertex3f(x+BLOCKSIZE,y+BLOCKSIZE*t3,z+BLOCKSIZE);
 	}
 	xtexoffset=0,ytexoffset=0;
 	xtexoffset=xtexoffset/4+stdxoff;
@@ -628,22 +627,22 @@ void DrawBlock(int x,int y,int z,unsigned char ds,char type,int &px,int &py,int 
 	if(z>pz&&ds&SIDEZN)
 	{
 		BlockColor(ZNC,red);
-		glTexCoord2f(BTEXMULT+xtexoffset,ytexoffset);		glVertex3f(x,y,z);
-		glTexCoord2f(BTEXMULT+xtexoffset,BTEXMULT*t1+ytexoffset);glVertex3f(x,y+BLOCKSIZE*t1,z);
-		glTexCoord2f(xtexoffset,ytexoffset);				glVertex3f(x+BLOCKSIZE,y,z);
-		glTexCoord2f(xtexoffset,ytexoffset);				glVertex3f(x+BLOCKSIZE,y,z);
-		glTexCoord2f(BTEXMULT+xtexoffset,BTEXMULT*t1+ytexoffset);glVertex3f(x,y+BLOCKSIZE*t1,z);
-		glTexCoord2f(xtexoffset,BTEXMULT*t4+ytexoffset);		glVertex3f(x+BLOCKSIZE,y+BLOCKSIZE*t4,z);
+		RTexCoord2f(BTEXMULT+xtexoffset,ytexoffset);		RVertex3f(x,y,z);
+		RTexCoord2f(BTEXMULT+xtexoffset,BTEXMULT*t1+ytexoffset);RVertex3f(x,y+BLOCKSIZE*t1,z);
+		RTexCoord2f(xtexoffset,ytexoffset);				RVertex3f(x+BLOCKSIZE,y,z);
+		RTexCoord2f(xtexoffset,ytexoffset);				RVertex3f(x+BLOCKSIZE,y,z);
+		RTexCoord2f(BTEXMULT+xtexoffset,BTEXMULT*t1+ytexoffset);RVertex3f(x,y+BLOCKSIZE*t1,z);
+		RTexCoord2f(xtexoffset,BTEXMULT*t4+ytexoffset);		RVertex3f(x+BLOCKSIZE,y+BLOCKSIZE*t4,z);
 	}
 	if(z<pz&&ds&SIDEZP)
 	{
 		BlockColor(ZPC,red);
-		glTexCoord2f(xtexoffset,ytexoffset);				glVertex3f(x,y,z+BLOCKSIZE);
-		glTexCoord2f(BTEXMULT+xtexoffset,ytexoffset);		glVertex3f(x+BLOCKSIZE,y,z+BLOCKSIZE);
-		glTexCoord2f(xtexoffset,BTEXMULT*t2+ytexoffset);		glVertex3f(x,y+BLOCKSIZE*t2,z+BLOCKSIZE);
-		glTexCoord2f(xtexoffset,BTEXMULT*t2+ytexoffset);		glVertex3f(x,y+BLOCKSIZE*t2,z+BLOCKSIZE);
-		glTexCoord2f(BTEXMULT+xtexoffset,ytexoffset);		glVertex3f(x+BLOCKSIZE,y,z+BLOCKSIZE);
-		glTexCoord2f(BTEXMULT+xtexoffset,BTEXMULT*t3+ytexoffset);glVertex3f(x+BLOCKSIZE,y+BLOCKSIZE*t3,z+BLOCKSIZE);
+		RTexCoord2f(xtexoffset,ytexoffset);				RVertex3f(x,y,z+BLOCKSIZE);
+		RTexCoord2f(BTEXMULT+xtexoffset,ytexoffset);		RVertex3f(x+BLOCKSIZE,y,z+BLOCKSIZE);
+		RTexCoord2f(xtexoffset,BTEXMULT*t2+ytexoffset);		RVertex3f(x,y+BLOCKSIZE*t2,z+BLOCKSIZE);
+		RTexCoord2f(xtexoffset,BTEXMULT*t2+ytexoffset);		RVertex3f(x,y+BLOCKSIZE*t2,z+BLOCKSIZE);
+		RTexCoord2f(BTEXMULT+xtexoffset,ytexoffset);		RVertex3f(x+BLOCKSIZE,y,z+BLOCKSIZE);
+		RTexCoord2f(BTEXMULT+xtexoffset,BTEXMULT*t3+ytexoffset);RVertex3f(x+BLOCKSIZE,y+BLOCKSIZE*t3,z+BLOCKSIZE);
 	}	
 }
 
@@ -710,7 +709,7 @@ void DrawBlocks(int px,int py,int pz,int size)
 	plx=ppos.x/BLOCKSIZE;
 	ply=ppos.y/BLOCKSIZE;
 	plz=ppos.z/BLOCKSIZE;
-	//glDisable(GL_CULL_FACE);
+	//RDisable(RCAP_CULL);
 	for(int x=px-size;x<px+size;x++)
 	{
 		for(int z=pz-size;z<pz+size;z++)
@@ -764,21 +763,21 @@ void DrawBlocks(int px,int py,int pz,int size)
 	for(i=0;i<32;i++)
 	{
 		TexBind(TEX_BLOCK0+i);
-		glBegin(GL_QUADS);
+		RBegin(RP_QUADS);
 		for(int i2=0;i2<numblockbuf[i];i2++)
 		{
 			DrawBlockSide(&blockbuf[i][i2]);
 		}
-		glEnd();
+		REnd();
 	}
-	glPushAttrib(GL_ENABLE_BIT|GL_FOG_BIT|GL_COLOR_BUFFER_BIT|GL_POLYGON_BIT);
-	glDisable(GL_TEXTURE_2D);
-	glDisable(GL_BLEND);	
-	glBlendFunc(GL_ONE,GL_ONE);
-	glBegin(GL_LINES);
+	RPushAttrib(RATTR_ENABLE|RATTR_FOG|RATTR_COLOR|RATTR_POLYGON);
+	RDisable(RCAP_TEXTURE);
+	RDisable(RCAP_BLEND);	
+	RBlendFunc(RBLEND_ADDONE);
+	RBegin(RP_LINES);
 	if(menu==BUILDING) PlaceStructure(0);
-	glEnd();
-	glPopAttrib();
+	REnd();
+	RPopAttrib();
 	
 }
 
@@ -788,7 +787,7 @@ float DrawText(float x,float y,const char *text)
 {
 	
 	TexBind(TEX_FONT);
-	glBegin(GL_QUADS);
+	RBegin(RP_QUADS);
 	int xp,yp;
 	float xtp,ytp;
 	float tsize=(float)1/16;
@@ -809,19 +808,19 @@ float DrawText(float x,float y,const char *text)
 		yp=xp/16;
 		xp=xp%16;
 		xtp=(float)xp/16; ytp=(float)yp/16;
-		glTexCoord2f(xtp+toffset,ytp);
-		glVertex2f(x,y+.07);
-		glTexCoord2f(xtp+toffset,ytp+tysize);
-		glVertex2f(x,y);
-		glTexCoord2f(xtp+tsize+toffset,ytp+tysize);
-		glVertex2f(x+(.040),y);
-		glTexCoord2f(xtp+tsize+toffset,ytp);
-		glVertex2f(x+(.040),y+.07);
+		RTexCoord2f(xtp+toffset,ytp);
+		RVertex2f(x,y+.07);
+		RTexCoord2f(xtp+toffset,ytp+tysize);
+		RVertex2f(x,y);
+		RTexCoord2f(xtp+tsize+toffset,ytp+tysize);
+		RVertex2f(x+(.040),y);
+		RTexCoord2f(xtp+tsize+toffset,ytp);
+		RVertex2f(x+(.040),y+.07);
 		x+=.040;
 		sp++;
 	}
 	
-	glEnd();
+	REnd();
 	return 1;
 }
 
@@ -834,11 +833,11 @@ static void DrawRadarBuildZones(float cx,float cy,float w,float h)
 	const float scale=1.f/250;
 	int vp[4];
 	RGetViewport(vp);
-	glEnable(GL_SCISSOR_TEST);
-	glScissor(vp[0]+(GLint)((cx-w+1)/2*vp[2]),vp[1]+(GLint)((cy-h+1)/2*vp[3]),
-		(GLsizei)(w*vp[2]),(GLsizei)(h*vp[3]));
-	glEnable(GL_BLEND);
-	glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+	REnable(RCAP_SCISSOR);
+	RScissor(vp[0]+(int)((cx-w+1)/2*vp[2]),vp[1]+(int)((cy-h+1)/2*vp[3]),
+		(int)(w*vp[2]),(int)(h*vp[3]));
+	REnable(RCAP_BLEND);
+	RBlendFunc(RBLEND_ALPHA);
 	Player *me=GetLocalPlayer();
 	Vector side=CrossProduct(Vector(0,1,0),me->fwd);
 	for(int i=0;i<MAXSERVEROBJS;i++)
@@ -852,28 +851,28 @@ static void DrawRadarBuildZones(float cx,float cy,float w,float h)
 		float x=cx-r.z*w,y=cy+r.x*h,rx=BUILDZONE*scale*w,ry=BUILDZONE*scale*h;
 		float red=sobject[i].team==1?1:.45f,green=sobject[i].team==1?.35f:.6f,blue=sobject[i].team==1?.35f:1;
 		float a=sobject[i].team==me->team?1:.6f;   //ours stands out
-		glColor4f(red,green,blue,.22f*a);
-		glBegin(GL_TRIANGLE_FAN);
-		glVertex2f(x,y);
+		RColor4f(red,green,blue,.22f*a);
+		RBegin(RP_TRIFAN);
+		RVertex2f(x,y);
 		for(int k=0;k<=32;k++)
-			glVertex2f(x+rx*cosf(k*PI/16),y+ry*sinf(k*PI/16));
-		glEnd();
-		glLineWidth(HKPixelScale());
-		glColor4f(red,green,blue,.7f*a);
-		glBegin(GL_LINE_LOOP);
+			RVertex2f(x+rx*cosf(k*PI/16),y+ry*sinf(k*PI/16));
+		REnd();
+		RLineWidth(HKPixelScale());
+		RColor4f(red,green,blue,.7f*a);
+		RBegin(RP_LINELOOP);
 		for(int k=0;k<32;k++)
-			glVertex2f(x+rx*cosf(k*PI/16),y+ry*sinf(k*PI/16));
-		glEnd();
+			RVertex2f(x+rx*cosf(k*PI/16),y+ry*sinf(k*PI/16));
+		REnd();
 	}
-	glDisable(GL_SCISSOR_TEST);
+	RDisable(RCAP_SCISSOR);
 }
 
 //draw text in 3d space using the 2d DrawText function
 
 void DrawText3D(Vector facing,Vector pos,float scale,char *text)
 {
-	glCullFace(GL_BACK);
-	glBlendFunc(GL_COLOR,GL_ZERO);
+	RCullFace(RFACE_BACK);
+	//(here glBlendFunc(GL_COLOR,GL_ZERO): not a blend factor, GL ignored the call)
 	facing=Normalize(facing);
 	Vector x,y,z;
 	x=Normalize(CrossProduct(facing,Vector(0,1,0))*-1);
@@ -890,7 +889,7 @@ void DrawText3D(Vector facing,Vector pos,float scale,char *text)
 	RSetModelView(Mat4Mul(modelview,Mat4From(mx)));
 	DrawText(-(float)strlen(text)*.040/2,0,text);
 	RSetModelView(modelview);
-	glCullFace(GL_FRONT);
+	RCullFace(RFACE_FRONT);
 }
 
 //draws the water where it needs to be drawn (the isdrawing variable is used to restart the triangle strip,
@@ -898,7 +897,7 @@ void DrawText3D(Vector facing,Vector pos,float scale,char *text)
 
 void DrawWater(int size,float cx,float cy)
 {
-	glDisable(GL_CULL_FACE);
+	RDisable(RCAP_CULL);
 	
 	cx/=WATERBLOCKSIZE;
 	cy/=WATERBLOCKSIZE;
@@ -910,10 +909,10 @@ void DrawWater(int size,float cx,float cy)
 	wox+=.0003;
 	if(wox>4) wox-=4;
 	if(woy>4) woy-=4;
-	glDisable(GL_CULL_FACE);
+	RDisable(RCAP_CULL);
 	int belowwater=GetLocalPlayer()->pos.y<WATERHEIGHT;
 	TexBind(TEX_CLOUDS);
-	glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+	RBlendFunc(RBLEND_ALPHA);
 	float vpx=GetLocalPlayer()->pos.x/-64;
 	float vpy=GetLocalPlayer()->pos.z/-64;
 	for(int x=cx-size;x<cx+size;x++)
@@ -930,7 +929,7 @@ void DrawWater(int size,float cx,float cy)
 			isvisible=GetWater(x,y);
 			if(isvisible&&isdrawing==0)
 			{
-				glBegin(GL_TRIANGLE_STRIP);
+				RBegin(RP_TRISTRIP);
 				isdrawing=1;
 				ysincerestart=0;
 			}
@@ -941,20 +940,20 @@ void DrawWater(int size,float cx,float cy)
 				float light=*GetWaterLight(x,y);
 				light+=lightoff;
 				if(belowwater) light=.3;
-				glColor4f(light,light,light,.7);
-				glTexCoord2f(reflectoffx,reflectoffy);
-				glVertex3f(x*WATERBLOCKSIZE,WATERHEIGHT+heightoffy+heightoffx,y*WATERBLOCKSIZE);
+				RColor4f(light,light,light,.7);
+				RTexCoord2f(reflectoffx,reflectoffy);
+				RVertex3f(x*WATERBLOCKSIZE,WATERHEIGHT+heightoffy+heightoffx,y*WATERBLOCKSIZE);
 				light=*GetWaterLight(x+1,y);
 				light+=lightoff;
 				if(belowwater) light=.3;
-				glColor4f(light,light,light,.7);
-				glTexCoord2f(reflectoffx1,reflectoffy);
-				glVertex3f((x+1)*WATERBLOCKSIZE,WATERHEIGHT+heightoffy+heightoffx1,y*WATERBLOCKSIZE);
+				RColor4f(light,light,light,.7);
+				RTexCoord2f(reflectoffx1,reflectoffy);
+				RVertex3f((x+1)*WATERBLOCKSIZE,WATERHEIGHT+heightoffy+heightoffx1,y*WATERBLOCKSIZE);
 				ysincerestart++;
 				if(ysincerestart>12) 
 				{
-					glEnd();
-					glBegin(GL_TRIANGLE_STRIP);
+					REnd();
+					RBegin(RP_TRISTRIP);
 					y--;
 					ysincerestart=0;
 				}
@@ -963,24 +962,23 @@ void DrawWater(int size,float cx,float cy)
 			if(!isvisible&&isdrawing)
 			{
 				isdrawing=0;
-				glEnd();
+				REnd();
 			}
 		}
 		if(isdrawing)
 		{
 			isdrawing=0;
-			glEnd();
+			REnd();
 		}
 	}
 	TexBind(TEX_LILLYPAD);
-	glColor4f(1,1,1,1);
-	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE); 
-	glBegin(GL_QUADS);
+	RColor4f(1,1,1,1);
+	RBegin(RP_QUADS);
 	int underwater=GetLocalPlayer()->pos.y<WATERHEIGHT;
 	float yoffset=.1;
 	if(underwater) 
 	{
-		glColor4f(.6,.6,.6,1);
+		RColor4f(.6,.6,.6,1);
 		yoffset=-.1;
 	}
 	for(int i=0;i<numlillypad;i++)
@@ -990,13 +988,13 @@ void DrawWater(int size,float cx,float cy)
 		float z=lillypad[i].pos.z;
 		float y=WATERHEIGHT+sin((float)(x/WATERBLOCKSIZE)*3.141592653/4+woy*3.141592653*8)/6+yoffset;
 		float size=lillypad[i].size;
-		glTexCoord2f(0,0);glVertex3f(x-size,y,z-size);
-		glTexCoord2f(0,1);glVertex3f(x-size,y,z+size);
-		glTexCoord2f(1,1);glVertex3f(x+size,y,z+size);
-		glTexCoord2f(1,0);glVertex3f(x+size,y,z-size);
+		RTexCoord2f(0,0);RVertex3f(x-size,y,z-size);
+		RTexCoord2f(0,1);RVertex3f(x-size,y,z+size);
+		RTexCoord2f(1,1);RVertex3f(x+size,y,z+size);
+		RTexCoord2f(1,0);RVertex3f(x+size,y,z-size);
 	}
-	glEnd();
-	glEnable(GL_CULL_FACE); 
+	REnd();
+	REnable(RCAP_CULL); 
 	
 }
 
@@ -1004,40 +1002,40 @@ void DrawWater(int size,float cx,float cy)
 
 void DrawSun()
 {
-	glCullFace(GL_FRONT);
+	RCullFace(RFACE_FRONT);
 	Player *cur=GetLocalPlayer();
-	glDisable(GL_FOG);
-	//glDisable(GL_DEPTH_TEST);
-	glBlendFunc(GL_SRC_ALPHA,GL_ONE );
+	RDisable(RCAP_FOG);
+	//RDisable(RCAP_DEPTHTEST);
+	RBlendFunc(RBLEND_ADD);
 	TexBind(TEX_SUNBACK);
-	glDisable(GL_DEPTH_TEST);
-	glBegin(GL_TRIANGLE_STRIP);
-	glColor4f(1,1,1,GetSkySettings()->suneyelight*sunflarebright);
-	glTexCoord2f(0,0);
-	glVertex3f(cur->pos.x-50,cur->pos.y+60*GetSkySettings()->sunheight+50,cur->pos.z+60);
-	glTexCoord2f(1,0);
-	glVertex3f(cur->pos.x-50,cur->pos.y+60*GetSkySettings()->sunheight-50,cur->pos.z+60);
-	glTexCoord2f(0,1);
-	glVertex3f(cur->pos.x+50,cur->pos.y+60*GetSkySettings()->sunheight+50,cur->pos.z+60);
-	glTexCoord2f(1,1);
-	glVertex3f(cur->pos.x+50,cur->pos.y+60*GetSkySettings()->sunheight-50,cur->pos.z+60);
-	glEnd();
+	RDisable(RCAP_DEPTHTEST);
+	RBegin(RP_TRISTRIP);
+	RColor4f(1,1,1,GetSkySettings()->suneyelight*sunflarebright);
+	RTexCoord2f(0,0);
+	RVertex3f(cur->pos.x-50,cur->pos.y+60*GetSkySettings()->sunheight+50,cur->pos.z+60);
+	RTexCoord2f(1,0);
+	RVertex3f(cur->pos.x-50,cur->pos.y+60*GetSkySettings()->sunheight-50,cur->pos.z+60);
+	RTexCoord2f(0,1);
+	RVertex3f(cur->pos.x+50,cur->pos.y+60*GetSkySettings()->sunheight+50,cur->pos.z+60);
+	RTexCoord2f(1,1);
+	RVertex3f(cur->pos.x+50,cur->pos.y+60*GetSkySettings()->sunheight-50,cur->pos.z+60);
+	REnd();
 
 	TexBind(TEX_SUN);
-	glEnable(GL_DEPTH_TEST);
-	glBegin(GL_TRIANGLE_STRIP);
-	glColor4f(1,1,1,1);
-	glTexCoord2f(0,0);
+	REnable(RCAP_DEPTHTEST);
+	RBegin(RP_TRISTRIP);
+	RColor4f(1,1,1,1);
+	RTexCoord2f(0,0);
 	float dist=160;
 	float size=dist/60*2;
-	glVertex3f(cur->pos.x-size,cur->pos.y+dist*GetSkySettings()->sunheight+size,cur->pos.z+dist);
-	glTexCoord2f(1,0);
-	glVertex3f(cur->pos.x-size,cur->pos.y+dist*GetSkySettings()->sunheight-size,cur->pos.z+dist);
-	glTexCoord2f(0,1);
-	glVertex3f(cur->pos.x+size,cur->pos.y+dist*GetSkySettings()->sunheight+size,cur->pos.z+dist);
-	glTexCoord2f(1,1);
-	glVertex3f(cur->pos.x+size,cur->pos.y+dist*GetSkySettings()->sunheight-size,cur->pos.z+dist);
-	glEnd();
+	RVertex3f(cur->pos.x-size,cur->pos.y+dist*GetSkySettings()->sunheight+size,cur->pos.z+dist);
+	RTexCoord2f(1,0);
+	RVertex3f(cur->pos.x-size,cur->pos.y+dist*GetSkySettings()->sunheight-size,cur->pos.z+dist);
+	RTexCoord2f(0,1);
+	RVertex3f(cur->pos.x+size,cur->pos.y+dist*GetSkySettings()->sunheight+size,cur->pos.z+dist);
+	RTexCoord2f(1,1);
+	RVertex3f(cur->pos.x+size,cur->pos.y+dist*GetSkySettings()->sunheight-size,cur->pos.z+dist);
+	REnd();
 }
 
 //draws the explosion coming out from the gun
@@ -1075,23 +1073,23 @@ void DrawGunExplosions()
 			epos[2]=pos+top*factor*(sin(ang+PI*1.5)*1)+right*factor*(cos(ang+PI*1.5)*1);
 			epos[3]=pos+top*factor*(sin(ang+PI)*1)+right*factor*(cos(ang+PI)*1);
 			
-			glEnable(GL_DEPTH_TEST);
-			glDisable(GL_FOG);
-			glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA );
+			REnable(RCAP_DEPTHTEST);
+			RDisable(RCAP_FOG);
+			RBlendFunc(RBLEND_ALPHA);
 			TexBind(TEX_EXPLOSION0+pl->weapon*2);
 
-			glBegin(GL_TRIANGLE_STRIP);
-			glColor4f(1,1,1,(float)(10-timesincefire)/5);
-			glTexCoord2f(1,1);
-			glVertex3fv((float*)&epos[0]);
-			glTexCoord2f(1,0);
-			glVertex3fv((float*)&epos[1]);
-			glTexCoord2f(0,1);
-			glVertex3fv((float*)&epos[2]);
-			glTexCoord2f(0,0);
-			glVertex3fv((float*)&epos[3]);
+			RBegin(RP_TRISTRIP);
+			RColor4f(1,1,1,(float)(10-timesincefire)/5);
+			RTexCoord2f(1,1);
+			RVertex3fv((float*)&epos[0]);
+			RTexCoord2f(1,0);
+			RVertex3fv((float*)&epos[1]);
+			RTexCoord2f(0,1);
+			RVertex3fv((float*)&epos[2]);
+			RTexCoord2f(0,0);
+			RVertex3fv((float*)&epos[3]);
 			
-			glEnd();
+			REnd();
 		}
 	}
 }
@@ -1106,8 +1104,8 @@ void DrawGunSelection()
 	float bright=1.8-(float)(curtime-GetLocalPlayer()->lastswitchtime)/1000;
 	if(bright<0) return;
 	if(bright>1) bright=1;
-	glPushAttrib(GL_ENABLE_BIT|GL_FOG_BIT|GL_COLOR_BUFFER_BIT|GL_POLYGON_BIT);
-	glDisable(GL_CULL_FACE);
+	RPushAttrib(RATTR_ENABLE|RATTR_FOG|RATTR_COLOR|RATTR_POLYGON);
+	RDisable(RCAP_CULL);
 	float targrot=-(float)GetLocalPlayer()->weapon/8*pi*2-pi-.3;
 	curgunselrotvel+=(targrot-curgunselrot)/20;
 	if(fabs(curgunselrot-targrot)<.3)
@@ -1118,26 +1116,26 @@ void DrawGunSelection()
 	curgunselrotvel/=1.2;
 	curgunselrot+=curgunselrotvel;
 	float rot=curgunselrot;
-	glEnable(GL_TEXTURE_2D);
+	REnable(RCAP_TEXTURE);
 	TexBind(TEX_GUNNAMES);
-	glBegin(GL_TRIANGLE_STRIP);
+	RBegin(RP_TRISTRIP);
 	
 	
 	for(int i=0;i<64;i++)
 	{
 		float y=sin((float)i/64*pi*2+rot)/2;
 		float z=cos((float)i/64*pi*2+rot)/1.6;
-		glColor4f(1,1,1,(-z/1.5+.4)*bright);
+		RColor4f(1,1,1,(-z/1.5+.4)*bright);
 		z+=2;
 		float offx=.2;
 		float offy=-.4;
-		glTexCoord2f(0,(float)i/64);
-		glVertex2f(offx-.8/z,offy+y/z);
-		glTexCoord2f(1,(float)i/64);
-		glVertex2f(offx+.8/z,offy+y/z);
+		RTexCoord2f(0,(float)i/64);
+		RVertex2f(offx-.8/z,offy+y/z);
+		RTexCoord2f(1,(float)i/64);
+		RVertex2f(offx+.8/z,offy+y/z);
 	}
-	glEnd();
-	glPopAttrib();
+	REnd();
+	RPopAttrib();
 }
 
 //draws the console alone on a black screen (loading, connecting); in game it is drawn
@@ -1145,8 +1143,8 @@ void DrawGunSelection()
 
 void DrawConsole()
 {
-	glClearColor(0,0,0,0);
-	glClear(GL_COLOR_BUFFER_BIT);
+	RClearColor(0,0,0,0);
+	RClear(1,0);
 	DrawConsolePanel(1);
 	HKSwapWindow();
 }
@@ -1182,9 +1180,6 @@ void ScreenShot()
 		int planesize=(vp[2]-vp[0])*(vp[3]-vp[1]);
 		int bufsize=planesize*3+sizeof(BMoPHdr);
 		char *filebuf=new char[bufsize];
-		/*glReadPixels(vp[0],vp[1],vp[2],vp[3],GL_RED,GL_UNSIGNED_BYTE,&filebuf[128]);
-		glReadPixels(vp[0],vp[1],vp[2],vp[3],GL_GREEN,GL_UNSIGNED_BYTE,&filebuf[128+planesize]);
-		glReadPixels(vp[0],vp[1],vp[2],vp[3],GL_BLUE,GL_UNSIGNED_BYTE,&filebuf[128+planesize*2]);*/
 		RReadPixels(vp[0],vp[1],vp[2],vp[3],1,(unsigned char *)&filebuf[sizeof(BMoPHdr)]);
 		BMoPHdr *hdr=(BMoPHdr *)filebuf;
 		hdr->id[0]='B';
@@ -1236,7 +1231,7 @@ void Redraw()
 	landfaces=0;
 	
 	{
-		glClear(GL_COLOR_BUFFER_BIT);
+		RClear(1,0);
 	
 		if(graphicsprefs.stereoseparation==0)
 			Draw(0);
@@ -1290,11 +1285,11 @@ void Redraw()
 	{
 		char zoomtext[32];
 		snprintf(zoomtext,sizeof(zoomtext),"Zoom x%.1f",powf(1.1f,GetLocalPlayer()->fzoom));
-		glColor3f(0,0,0);   //shadow: readable on snow too
+		RColor3f(0,0,0);   //shadow: readable on snow too
 		UIText(.555f,-.905f,zoomtext,.06f);
-		glColor3f(1,1,.6f);
+		RColor3f(1,1,.6f);
 		UIText(.55f,-.9f,zoomtext,.06f);
-		glColor3f(1,1,1);
+		RColor3f(1,1,1);
 	}
 	DrawVoiceHUD();
 	
@@ -1309,34 +1304,34 @@ void Redraw()
 		sendbright=1;
 	}
 	sendbright/=1.3;
-	glDisable(GL_TEXTURE_2D);
-	glColor4f(1,0,0,sendbright);
-	glBegin(GL_QUADS);
-	glVertex2f(.5,.75);
-	glVertex2f(.6,.75);
-	glVertex2f(.6,.82);
-	glVertex2f(.5,.82);
+	RDisable(RCAP_TEXTURE);
+	RColor4f(1,0,0,sendbright);
+	RBegin(RP_QUADS);
+	RVertex2f(.5,.75);
+	RVertex2f(.6,.75);
+	RVertex2f(.6,.82);
+	RVertex2f(.5,.82);
 	
-	glEnd();
-	glEnable(GL_TEXTURE_2D);
-	glColor3f(1,1,1);
+	REnd();
+	REnable(RCAP_TEXTURE);
+	RColor3f(1,1,1);
 	if(datarecvthisframe)
 	{
 		recvbright=1;
 	}
 
 	recvbright/=1.3;
-	glDisable(GL_TEXTURE_2D);
-	glColor4f(0,0,1,recvbright);
-	glBegin(GL_QUADS);
-	glVertex2f(.7,.75);
-	glVertex2f(.8,.75);
-	glVertex2f(.8,.82);
-	glVertex2f(.7,.82);
+	RDisable(RCAP_TEXTURE);
+	RColor4f(0,0,1,recvbright);
+	RBegin(RP_QUADS);
+	RVertex2f(.7,.75);
+	RVertex2f(.8,.75);
+	RVertex2f(.8,.82);
+	RVertex2f(.7,.82);
 	
-	glEnd();
-	glEnable(GL_TEXTURE_2D);
-	glColor3f(1,1,1);
+	REnd();
+	REnable(RCAP_TEXTURE);
+	RColor3f(1,1,1);
 
 	datasendthisframe=0;
 	datarecvthisframe=0;
@@ -1374,23 +1369,23 @@ void Redraw()
 	
 	TexBind(TEX_AMMOICON);
 	float bf=(float)GetLocalPlayer()->ammoingun[GetLocalPlayer()->weapon]/GetAmmoHold(GetLocalPlayer()->weapon);
-	glColor4f(bf/2+.5,bf/2+.5,bf/2+.5,bf/2+.5);
-	glBegin(GL_QUADS);
-	glTexCoord2f(0,1);glVertex2f(.35+offset,-.95);
-	glTexCoord2f(0,0);glVertex2f(.35+offset,-.85);
-	glTexCoord2f(1,0);glVertex2f(.28+offset,-.85);
-	glTexCoord2f(1,1);glVertex2f(.28+offset,-.95);
-	glEnd();
+	RColor4f(bf/2+.5,bf/2+.5,bf/2+.5,bf/2+.5);
+	RBegin(RP_QUADS);
+	RTexCoord2f(0,1);RVertex2f(.35+offset,-.95);
+	RTexCoord2f(0,0);RVertex2f(.35+offset,-.85);
+	RTexCoord2f(1,0);RVertex2f(.28+offset,-.85);
+	RTexCoord2f(1,1);RVertex2f(.28+offset,-.95);
+	REnd();
 	
 	TexBind(TEX_HEALTHICON);
 	bf=(float)GetLocalPlayer()->life/100;
-	glColor4f(bf/2+.5,bf/2+.5,bf/2+.5,bf/2+.5);
-	glBegin(GL_QUADS);
-	glTexCoord2f(0,1);glVertex2f(.55+offset,-.95);
-	glTexCoord2f(0,0);glVertex2f(.55+offset,-.85);
-	glTexCoord2f(1,0);glVertex2f(.48+offset,-.85);
-	glTexCoord2f(1,1);glVertex2f(.48+offset,-.95);
-	glEnd();
+	RColor4f(bf/2+.5,bf/2+.5,bf/2+.5,bf/2+.5);
+	RBegin(RP_QUADS);
+	RTexCoord2f(0,1);RVertex2f(.55+offset,-.95);
+	RTexCoord2f(0,0);RVertex2f(.55+offset,-.85);
+	RTexCoord2f(1,0);RVertex2f(.48+offset,-.85);
+	RTexCoord2f(1,1);RVertex2f(.48+offset,-.95);
+	REnd();
 
 	for(int curcredit=0;curcredit<10;curcredit++)
 	{
@@ -1399,13 +1394,13 @@ void Redraw()
 		{
 			TexBind(TEX_CREDIT0+curcredit);
 			float yoffset=(float)curcredit*.15-.25;
-			glColor4f(1,1,1,1);
-			glBegin(GL_QUADS);
-			glTexCoord2f(1,1);glVertex2f(.35+offset,yoffset-.10);
-			glTexCoord2f(1,0);glVertex2f(.35+offset,yoffset);
-			glTexCoord2f(0,0);glVertex2f(.28+offset,yoffset);
-			glTexCoord2f(0,1);glVertex2f(.28+offset,yoffset-.10);
-			glEnd();
+			RColor4f(1,1,1,1);
+			RBegin(RP_QUADS);
+			RTexCoord2f(1,1);RVertex2f(.35+offset,yoffset-.10);
+			RTexCoord2f(1,0);RVertex2f(.35+offset,yoffset);
+			RTexCoord2f(0,0);RVertex2f(.28+offset,yoffset);
+			RTexCoord2f(0,1);RVertex2f(.28+offset,yoffset-.10);
+			REnd();
 			if(credits>1)
 			{
 				char tmptxt[50];
@@ -1416,22 +1411,22 @@ void Redraw()
 	}
 
 
-	glDisable(GL_TEXTURE_2D);
+	RDisable(RCAP_TEXTURE);
 	if(sv.radarenable)
 	{
-		glColor4f(0,0,0,.4);
+		RColor4f(0,0,0,.4);
 		float radarcenterx=-.77,radarcentery=-.60,radarwidth=.15,radarheight=.2;
-		glBegin(GL_QUADS);
-		glVertex2f(radarcenterx-radarwidth,radarcentery-radarheight);
-		glVertex2f(radarcenterx+radarwidth,radarcentery-radarheight);
-		glVertex2f(radarcenterx+radarwidth,radarcentery+radarheight);
-		glVertex2f(radarcenterx-radarwidth,radarcentery+radarheight);
-		glEnd();
+		RBegin(RP_QUADS);
+		RVertex2f(radarcenterx-radarwidth,radarcentery-radarheight);
+		RVertex2f(radarcenterx+radarwidth,radarcentery-radarheight);
+		RVertex2f(radarcenterx+radarwidth,radarcentery+radarheight);
+		RVertex2f(radarcenterx-radarwidth,radarcentery+radarheight);
+		REnd();
 		DrawRadarBuildZones(radarcenterx,radarcentery,radarwidth,radarheight);
-		glPointSize(2*HKPixelScale());
-		glEnable(GL_BLEND);
-		glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
-		glBegin(GL_POINTS);
+		RPointSize(2*HKPixelScale());
+		REnable(RCAP_BLEND);
+		RBlendFunc(RBLEND_ALPHA);
+		RBegin(RP_POINTS);
 		Vector mypos=GetLocalPlayer()->pos;
 		mypos.y=0;
 		Vector theypos;
@@ -1450,9 +1445,9 @@ void Redraw()
 				float dist=Magnitude(theypos);
 				if(dist<.3) bright-=(.3-dist)*16;
 				if(GetPlayer(i)==GetLocalPlayer()) bright=1;
-				glColor4f(1,0,0,bright);
+				RColor4f(1,0,0,bright);
 				if(fabs(theypos.x)<1&&fabs(theypos.z)<1)
-				glVertex2f(radarcenterx-theypos.z*radarwidth,radarcentery+theypos.x*radarheight);
+				RVertex2f(radarcenterx-theypos.z*radarwidth,radarcentery+theypos.x*radarheight);
 			}
 		}
 		for(i=0;i<MAXSERVEROBJS;i++)
@@ -1468,26 +1463,26 @@ void Redraw()
 				float dist=Magnitude(theypos);
 				if(dist<.3) bright-=(.3-dist)*16;
 				if(GetPlayer(i)==GetLocalPlayer()) bright=1;
-				glColor4f(1,0,0,bright);
+				RColor4f(1,0,0,bright);
 				if(fabs(theypos.x)<1&&fabs(theypos.z)<1)
-				glVertex2f(radarcenterx-theypos.z*radarwidth,radarcentery+theypos.x*radarheight);
+				RVertex2f(radarcenterx-theypos.z*radarwidth,radarcentery+theypos.x*radarheight);
 			}
 		}
-		glEnd();
+		REnd();
 	}
 	DrawGunSelection();
 	
 	if(sv.thrustrechargerate>0)
 	{
-		glBegin(GL_QUADS);
-		glColor4f(1,0,0,.3+GetLocalPlayer()->thrustfuel*.4);
-		glVertex2f(-.2,.95);
-		glVertex2f(-.2,.9);
-		glColor4f(1,0,0,.2+GetLocalPlayer()->thrustfuel*.4);
-		glVertex2f(-.2+.4*GetLocalPlayer()->thrustfuel,.9);
-		glVertex2f(-.2+.4*GetLocalPlayer()->thrustfuel,.95);
+		RBegin(RP_QUADS);
+		RColor4f(1,0,0,.3+GetLocalPlayer()->thrustfuel*.4);
+		RVertex2f(-.2,.95);
+		RVertex2f(-.2,.9);
+		RColor4f(1,0,0,.2+GetLocalPlayer()->thrustfuel*.4);
+		RVertex2f(-.2+.4*GetLocalPlayer()->thrustfuel,.9);
+		RVertex2f(-.2+.4*GetLocalPlayer()->thrustfuel,.95);
 		
-		glEnd();
+		REnd();
 	}
 	//over the rest of the HUD (radar, console lines), under the console only
 	if(GetLocalPlayer()->scores||rgd.gamestate==2)
@@ -1513,10 +1508,8 @@ void Draw(float offset)
 	
 	int viewport[4];
 	RGetViewport(viewport);
-	glBlendFunc(GL_SRC_ALPHA,GL_ZERO );
-	glEnable(GL_BLEND);
-	//glTexEnvi(GL_TEXTURE_ENV,GL_TEXTURE_ENV_MODE,GL_MODULATE);
-	glFogi(GL_FOG_MODE,GL_LINEAR);
+	RBlendFunc(RBLEND_SCALE);
+	REnable(RCAP_BLEND);
 	float fogend=400;
 	float fogbegin=GetSkySettings()->fogbegin;
 	float color[4];
@@ -1533,15 +1526,10 @@ void Draw(float offset)
 		color[1]=.15;
 		color[2]=.2;
 	}
-	glFogf(GL_FOG_END,fogend);
-	glFogf(GL_FOG_START,fogbegin*fogend);
-	glFogf(GL_FOG_DENSITY,.04);
+	RFogRange(fogbegin*fogend,fogend);   //linear fog (RInit)
+	RFogColor(color);
 	
-	glFogfv(GL_FOG_COLOR,color);
-	
-	glClearColor(color[0]*1.0115,color[1]*1.0115,color[2]*1.0110,1);
-	glHint(GL_PERSPECTIVE_CORRECTION_HINT,GL_FASTEST);
-	//glHint(GL_FOG_HINT,GL_NICEST);
+	RClearColor(color[0]*1.0115,color[1]*1.0115,color[2]*1.0110,1);
 	
 	//the zoom narrows the field of view. Redraw multiplied it into the projection
 	//before calling Draw, which then reset it: the camera never zoomed, even in
@@ -1552,46 +1540,45 @@ void Draw(float offset)
 	camup=GetRight(VectMult(cur->tilt,cur->fwd,Vector(0,1,0),CrossProduct(cur->dir,Vector(0,1,0))),Vector(0,1,0));
 	RSetModelView(Mat4LookAt(view,cur->pos.x,cur->pos.y,cur->pos.z,cur->pos.x+cur->dir.x,cur->pos.y+cur->dir.y,cur->pos.z+cur->dir.z,camup.x,camup.y,camup.z));
 	
-	glEnable(GL_FOG);
-	glFogf(GL_FOG_END,400);
-	glFogf(GL_FOG_START,fogbegin*400);
+	REnable(RCAP_FOG);
+	RFogRange(fogbegin*400,400);
 
 	DrawCloudBox(cur->pos);
 	if(GetSkySettings()->lightning&&curtime>nextlightning)
 	{
 		float c=.5+RND*.5;
-		glPushAttrib(GL_ENABLE_BIT|GL_FOG_BIT|GL_COLOR_BUFFER_BIT|GL_POLYGON_BIT);
+		RPushAttrib(RATTR_ENABLE|RATTR_FOG|RATTR_COLOR|RATTR_POLYGON);
 		Player *cur=GetLocalPlayer();
-		glDisable(GL_FOG);
-		glDisable(GL_DEPTH_TEST);
-		glBlendFunc(GL_SRC_ALPHA,GL_ONE );
+		RDisable(RCAP_FOG);
+		RDisable(RCAP_DEPTHTEST);
+		RBlendFunc(RBLEND_ADD);
 		TexBind(TEX_SUNBACK);
-		glBegin(GL_TRIANGLE_STRIP);
+		RBegin(RP_TRISTRIP);
 		float color=RND*.5+.1;
-		glColor4f(1,1,1,color);
-		glTexCoord2f(0,0);
+		RColor4f(1,1,1,color);
+		RTexCoord2f(0,0);
 
-		glVertex3f(lightningpos[0].x-200,lightningpos[0].y,lightningpos[0].z+200);
-		glTexCoord2f(1,0);
-		glVertex3f(lightningpos[0].x-200,lightningpos[0].y,lightningpos[0].z-200);
-		glTexCoord2f(0,1);
-		glVertex3f(lightningpos[0].x+200,lightningpos[0].y,lightningpos[0].z+200);
-		glTexCoord2f(1,1);
-		glVertex3f(lightningpos[0].x+200,lightningpos[0].y,lightningpos[0].z-200);
-		glEnd();
-		glDisable(GL_TEXTURE_2D);
-		glLineWidth(3*HKPixelScale());
-		glBlendFunc(GL_ONE,GL_ZERO);
-		glBegin(GL_LINES);
+		RVertex3f(lightningpos[0].x-200,lightningpos[0].y,lightningpos[0].z+200);
+		RTexCoord2f(1,0);
+		RVertex3f(lightningpos[0].x-200,lightningpos[0].y,lightningpos[0].z-200);
+		RTexCoord2f(0,1);
+		RVertex3f(lightningpos[0].x+200,lightningpos[0].y,lightningpos[0].z+200);
+		RTexCoord2f(1,1);
+		RVertex3f(lightningpos[0].x+200,lightningpos[0].y,lightningpos[0].z-200);
+		REnd();
+		RDisable(RCAP_TEXTURE);
+		RLineWidth(3*HKPixelScale());
+		RBlendFunc(RBLEND_OPAQUE);
+		RBegin(RP_LINES);
 
-		glColor3f(.8,.8,.8);
+		RColor3f(.8,.8,.8);
 		for(int i=0;i<numlightning;i++)
 		{
-			glVertex3fv((float *)&lightningpos[i]);
-			glVertex3fv((float *)&lightningend[i]);
+			RVertex3fv((float *)&lightningpos[i]);
+			RVertex3fv((float *)&lightningend[i]);
 		}
-		glEnd();
-		glPopAttrib();
+		REnd();
+		RPopAttrib();
 		if(RND*500<2)
 		{
 			PlaySound(500,0);
@@ -1621,27 +1608,17 @@ void Draw(float offset)
 		}
 		
 	}
-	glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+	RBlendFunc(RBLEND_ALPHA);
 
-	glFogf(GL_FOG_END,fogend);
-	glFogf(GL_FOG_START,fogbegin*fogend);
-	glEnable(GL_FOG);
-	glEnable(GL_CULL_FACE);
-	glEnable(GL_DEPTH_TEST);
+	RFogRange(fogbegin*fogend,fogend);
+	REnable(RCAP_FOG);
+	REnable(RCAP_CULL);
+	REnable(RCAP_DEPTHTEST);
 	
-	glClear(GL_DEPTH_BUFFER_BIT);
+	RClear(0,1);
 	
 	RSetProjection(Mat4Mul(Mat4Scale(zoom,zoom,1),Mat4Perspective(70,1.2,.15,fogend)));   //same zoom as the sky
 
-	/*float xyoffsetmx[4][4]=
-	{
-		{1,0,0,0},
-		{0,1,0,0},
-		{0,0,1,0},
-		{offset,0,0,1}
-	};
-	
-	glMultMatrixf((float *)xyoffsetmx);*/
 	eyepos=cur->pos+offset*Normalize(CrossProduct(cur->dir,Vector(0,1,0)));
 
 	RSetModelView(Mat4LookAt(view,eyepos.x,eyepos.y,eyepos.z,eyepos.x+cur->dir.x,eyepos.y+cur->dir.y,eyepos.z+cur->dir.z,camup.x,camup.y,camup.z));
@@ -1649,7 +1626,7 @@ void Draw(float offset)
 	
 	Vector drawpos=eyepos+cur->dir*(17*2-5);
 	
-	glDisable(GL_BLEND);
+	RDisable(RCAP_BLEND);
 
 	DrawBlocks(drawpos.x,drawpos.y,drawpos.z,48);
 	
@@ -1674,7 +1651,7 @@ void Draw(float offset)
 	DrawMip(dxpos,dypos,odxpos,odypos,unisize,unisize,3);
 	DrawMip(dxpos,dypos,odxpos,odypos,unisize,unisize,4);
 	//DrawMip(dxpos,dypos,odxpos,odypos,unisize,unisize,5);
-	glEnable(GL_BLEND);
+	REnable(RCAP_BLEND);
 	osize=0;
 	
 	Vector pos,front,top,right;
@@ -1731,9 +1708,9 @@ void Draw(float offset)
 					torso[team][cur->weapon].Draw(cur->pos-Vector(0,1.5,0),fwd,GetRight(fwd,Vector(0,1,0)));
 					leg[cur->legframe].Draw(cur->pos-Vector(0,1.5,0),fwd,GetRight(fwd,Vector(0,1,0)));
 				}
-				if(cur->team==0)glColor3f(1,1,1);
-				if(cur->team==1)glColor3f(1,0,0);
-				if(cur->team==2)glColor3f(0,0,1);
+				if(cur->team==0)RColor3f(1,1,1);
+				if(cur->team==1)RColor3f(1,0,0);
+				if(cur->team==2)RColor3f(0,0,1);
 				DrawText3D(GetLocalPlayer()->dir*-1,cur->pos+Vector(0,.1,0),3,cur->name);
 			}
 		}
@@ -1761,14 +1738,14 @@ void Draw(float offset)
 					servercobs[sobject[i].type][sobject[i].team].Draw(sobject[i].pos,sobject[i].dir,GetRight(sobject[i].dir,Vector(0,1,0)));
 				else
 					servercobs[sobject[i].type][0].Draw(sobject[i].pos,sobject[i].dir,GetRight(sobject[i].dir,Vector(0,1,0)));			
-				glColor3f(1,1,1);
+				RColor3f(1,1,1);
 				char *teamtext;
 
 				if(sobject[i].type==1)
 				{
-					if(sobject[i].team==0){teamtext="White";glColor3f(1,1,1);}
-					if(sobject[i].team==1){teamtext="Red";glColor3f(1,0,0);}
-					if(sobject[i].team==2){teamtext="Blue";glColor3f(0,0,1);}
+					if(sobject[i].team==0){teamtext="White";RColor3f(1,1,1);}
+					if(sobject[i].team==1){teamtext="Red";RColor3f(1,0,0);}
+					if(sobject[i].team==2){teamtext="Blue";RColor3f(0,0,1);}
 					DrawText3D(sobject[i].dir,sobject[i].pos+sobject[i].dir*.2+Vector(0,.5,0),1,teamtext);
 					DrawText3D(sobject[i].dir*-1,sobject[i].pos+sobject[i].dir*-.2+Vector(0,.5,0),1,teamtext);
 				}
@@ -1786,7 +1763,7 @@ void Draw(float offset)
 
 
 	
-	glEnable(GL_DEPTH_TEST);
+	REnable(RCAP_DEPTHTEST);
 	int numscenery=GetNumSceneries();
 	drawpos=cur->pos+cur->dir*20;
 	for(i=0;i<numscenery;i++)
@@ -1806,11 +1783,11 @@ void Draw(float offset)
 	static float depth=1;
 	if(fabs(sposx)<1e6&&fabs(sposy)<1e6) RReadDepth((int)sposx,(int)sposy,&depth);
 	
-	glPushAttrib(GL_ENABLE_BIT);
-	glDisable(GL_TEXTURE_2D);
-	glDisable(GL_CULL_FACE);
-	glBlendFunc(GL_SRC_ALPHA,GL_ONE);
-	glBegin(GL_TRIANGLES);
+	RPushAttrib(RATTR_ENABLE);
+	RDisable(RCAP_TEXTURE);
+	RDisable(RCAP_CULL);
+	RBlendFunc(RBLEND_ADD);
+	RBegin(RP_TRIANGLES);
 	
 	for(i=0;i<MAXPARTICLES;i+=1)
 	if(particle[i].type)
@@ -1822,22 +1799,22 @@ void Draw(float offset)
 		particle[i].pos+=particle[i].vel;
 		if(particle[i].type==1)
 		{
-			glColor4f(.5,.5,.9,.2);
-			glVertex3fv((float *)&particle[i].pos);
+			RColor4f(.5,.5,.9,.2);
+			RVertex3fv((float *)&particle[i].pos);
 			Vertex(particle[i].pos+Vector(.05,-.5,0));
 			Vertex(particle[i].pos+Vector(-.05,-.5,0));
-			glVertex3fv((float *)&particle[i].pos);
+			RVertex3fv((float *)&particle[i].pos);
 			Vertex(particle[i].pos+Vector(0,-.5,-.05));
 			Vertex(particle[i].pos+Vector(0,-.5,.05));
 		}
 		if(particle[i].type==2)
 		{
 
-			glColor4f(.9,.9,.9,.3);
-			glVertex3fv((float *)&particle[i].pos);
+			RColor4f(.9,.9,.9,.3);
+			RVertex3fv((float *)&particle[i].pos);
 			Vertex(particle[i].pos+Vector(.1,-.1,0));
 			Vertex(particle[i].pos+Vector(-.1,-.1,0));
-			glVertex3fv((float *)&particle[i].pos);
+			RVertex3fv((float *)&particle[i].pos);
 			Vertex(particle[i].pos+Vector(0,-.1,-.1));
 			Vertex(particle[i].pos+Vector(0,-.1,.1));
 		}
@@ -1849,66 +1826,66 @@ void Draw(float offset)
 				particle[i].vel.y*=-.4;
 			}
 			int timeleft=particle[i].timeout-curtime;
-			if(timeleft<1000) glColor4f(.9,.6,.1,.1);
-			else if(timeleft<1500) glColor4f(.9,.6,.6,.3);
-			else if(timeleft<2000) glColor4f(.9,.4,.1,.6);
-			else if(timeleft<2500) glColor4f(.9,.3,.1,.8);
-			else glColor4f(.9,.0,.0,.6);
-			glVertex3fv((float *)&particle[i].pos);
+			if(timeleft<1000) RColor4f(.9,.6,.1,.1);
+			else if(timeleft<1500) RColor4f(.9,.6,.6,.3);
+			else if(timeleft<2000) RColor4f(.9,.4,.1,.6);
+			else if(timeleft<2500) RColor4f(.9,.3,.1,.8);
+			else RColor4f(.9,.0,.0,.6);
+			RVertex3fv((float *)&particle[i].pos);
 			Vertex(particle[i].pos+Vector(.02,-.2,0));
 			Vertex(particle[i].pos+Vector(-.02,-.2,0));
-			glVertex3fv((float *)&particle[i].pos);
+			RVertex3fv((float *)&particle[i].pos);
 			Vertex(particle[i].pos+Vector(0,-.2,-.02));
 			Vertex(particle[i].pos+Vector(0,-.2,.02));
 		}
 		if(particle[i].type==4)
 		{
 			int timeleft=particle[i].timeout-curtime;
-			if(timeleft<200) glColor4f(.9,.6,.1,.1);
-			else if(timeleft<400) glColor4f(.9,.6,.6,.3);
-			else if(timeleft<600) glColor4f(.9,.4,.1,.6);
-			else if(timeleft<850) glColor4f(.9,.3,.1,.8);
-			else glColor4f(.9,.0,.0,.6);
-			glVertex3fv((float *)&particle[i].pos);
+			if(timeleft<200) RColor4f(.9,.6,.1,.1);
+			else if(timeleft<400) RColor4f(.9,.6,.6,.3);
+			else if(timeleft<600) RColor4f(.9,.4,.1,.6);
+			else if(timeleft<850) RColor4f(.9,.3,.1,.8);
+			else RColor4f(.9,.0,.0,.6);
+			RVertex3fv((float *)&particle[i].pos);
 			Vertex(particle[i].pos+Vector(.1,-.1,0)+particle[i].vel*3);
 			Vertex(particle[i].pos+Vector(-.1,-.1,0)+particle[i].vel*3);
-			glVertex3fv((float *)&particle[i].pos);
+			RVertex3fv((float *)&particle[i].pos);
 			Vertex(particle[i].pos+Vector(0,-.1,-.1)+particle[i].vel*3);
 			Vertex(particle[i].pos+Vector(0,-.1,.1)+particle[i].vel*3);
 		}
 		if(particle[i].type==5)
 		{
-			glEnd();
-			glEnable(GL_TEXTURE_2D);
+			REnd();
+			REnable(RCAP_TEXTURE);
 			TexBind(TEX_SUN);
-			glDisable(GL_FOG);
-			glBlendFunc(GL_SRC_ALPHA,GL_ONE);
-			glBegin(GL_TRIANGLE_STRIP);
+			RDisable(RCAP_FOG);
+			RBlendFunc(RBLEND_ADD);
+			RBegin(RP_TRISTRIP);
 			
 			int timeleft=particle[i].timeout-curtime;
-			glColor4f(.8,.8,.8,(float)timeleft/200);//(float)timeleft/200);
+			RColor4f(.8,.8,.8,(float)timeleft/200);//(float)timeleft/200);
 			Vector fwd=GetLocalPlayer()->pos-particle[i].pos;
 			Vector up=GetRight(fwd,Vector(0,1,0));
 			Vector right=Normalize(CrossProduct(fwd,up));
 			Vector pos=(GetLocalPlayer()->pos+particle[i].pos*10)/11;
 			float size=6;
-			glTexCoord2f(0,0);
+			RTexCoord2f(0,0);
 			Vertex(pos+up*size+right*size);
-			glTexCoord2f(0,1);
+			RTexCoord2f(0,1);
 			Vertex(pos+up*size-right*size);
-			glTexCoord2f(1,0);
+			RTexCoord2f(1,0);
 			Vertex(pos-up*size+right*size);
-			glTexCoord2f(1,1);
+			RTexCoord2f(1,1);
 			Vertex(pos-up*size-right*size);
-			glEnd();
-			glDisable(GL_TEXTURE_2D);
-			glEnable(GL_FOG);
-			glBegin(GL_TRIANGLES);
+			REnd();
+			RDisable(RCAP_TEXTURE);
+			REnable(RCAP_FOG);
+			RBegin(RP_TRIANGLES);
 		}
 	}
-	glEnd();
-	glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
-	glBegin(GL_TRIANGLES);
+	REnd();
+	RBlendFunc(RBLEND_ALPHA);
+	RBegin(RP_TRIANGLES);
 	
 	for(i=0;i<MAXPARTICLES;i+=1)
 	if(particle[i].type)
@@ -1918,43 +1895,43 @@ void Draw(float offset)
 		if(particle[i].type==6)
 		{
 			int timeleft=particle[i].timeout-curtime;
-			glColor4f(.3,.15,.1,1);
+			RColor4f(.3,.15,.1,1);
 			
-			glVertex3fv((float *)&particle[i].pos);
+			RVertex3fv((float *)&particle[i].pos);
 			Vertex(particle[i].pos+Vector(.07,-.07,0)+particle[i].vel*3);
 			Vertex(particle[i].pos+Vector(-.07,-.07,0)+particle[i].vel*3);
-			glVertex3fv((float *)&particle[i].pos);
+			RVertex3fv((float *)&particle[i].pos);
 			Vertex(particle[i].pos+Vector(0,-.07,-.07)+particle[i].vel*3);
 			Vertex(particle[i].pos+Vector(0,-.07,.07)+particle[i].vel*3);
 		}
 	}
-	glEnd();
-	glPopAttrib();
-	glCullFace(GL_FRONT);
+	REnd();
+	RPopAttrib();
+	RCullFace(RFACE_FRONT);
 	DrawWater(50,drawpos.x,drawpos.z);
 	
 	
-	glDisable(GL_TEXTURE_2D);
+	RDisable(RCAP_TEXTURE);
 	
 	
-	glEnable(GL_LINE_SMOOTH);
-	glLineWidth(3*HKPixelScale());
+	REnable(RCAP_LINESMOOTH);
+	RLineWidth(3*HKPixelScale());
 	
-	glBegin(GL_LINES);
+	RBegin(RP_LINES);
 	
 	
 	for(i=0;i<30;i++)
 	{
-		glColor4f(1,0,0,0);
-		glVertex3fv((float *)&spark[i]);
-		glColor4f(1,1,0,sparkbright[i]);
+		RColor4f(1,0,0,0);
+		RVertex3fv((float *)&spark[i]);
+		RColor4f(1,1,0,sparkbright[i]);
 		Vertex(spark[i]+sparkvel[i]*sparklen[i]);
 		spark[i]+=sparkvel[i];
 		sparkbright[i]/=1.1;
 		if(spark[i].y<WATERHEIGHT) sparkbright[i]/=3.0;
 	}
-	glEnd();
-	glEnable(GL_TEXTURE_2D);
+	REnd();
+	REnable(RCAP_TEXTURE);
 	DrawGunExplosions();
 	
 	
@@ -2010,35 +1987,35 @@ void Draw(float offset)
 	if(sunflarebright<0) sunflarebright=0;
 	//if(sunflarebright==1)
 	{
-		glPushAttrib(GL_ENABLE_BIT|GL_FOG_BIT|GL_COLOR_BUFFER_BIT|GL_POLYGON_BIT);
+		RPushAttrib(RATTR_ENABLE|RATTR_FOG|RATTR_COLOR|RATTR_POLYGON);
 		DrawSun();
-		glPopAttrib();
+		RPopAttrib();
 	
 	}
 	
 	//crosshair
-	glCullFace(GL_BACK);
+	RCullFace(RFACE_BACK);
 	
-	glBlendFunc(GL_SRC_ALPHA,GL_ONE);
+	RBlendFunc(RBLEND_ADD);
 	TexBind(TEX_CROSSHAIR);
 	RSetModelView(Mat4Identity());
 	RSetProjection(Mat4Mul(Mat4Identity(),Mat4Translate(offset*-.5,0,0)));
-	glBegin(GL_TRIANGLE_STRIP);
-	glColor4f(1,1,1,1);
-	glTexCoord2f(0,0);
+	RBegin(RP_TRISTRIP);
+	RColor4f(1,1,1,1);
+	RTexCoord2f(0,0);
 	
-	glVertex2f(-.06,-.06);
-	glTexCoord2f(0,1);
-	glVertex2f(.06,-.06);
-	glTexCoord2f(1,0);
-	glVertex2f(-.06,.06);
-	glTexCoord2f(1,1);
-	glVertex2f(.06,.06);
-	glEnd();
-	glEnable(GL_FOG);
-	glDisable(GL_DEPTH_TEST);
-	glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
-	glColor4f(1,1,1,1);
+	RVertex2f(-.06,-.06);
+	RTexCoord2f(0,1);
+	RVertex2f(.06,-.06);
+	RTexCoord2f(1,0);
+	RVertex2f(-.06,.06);
+	RTexCoord2f(1,1);
+	RVertex2f(.06,.06);
+	REnd();
+	REnable(RCAP_FOG);
+	RDisable(RCAP_DEPTHTEST);
+	RBlendFunc(RBLEND_ALPHA);
+	RColor4f(1,1,1,1);
 
 	
 }
@@ -2048,21 +2025,21 @@ void Draw(float offset)
 void RedrawSplash(int texnum,char *text,int drawlogo)
 {
 	texnum=TEX_SPLASH;   //always the splash, whatever the caller passes
-	glEnable(GL_TEXTURE_2D);
+	REnable(RCAP_TEXTURE);
 	TexBind(texnum);
 	RSetModelView(Mat4Identity());
-	glDisable(GL_DEPTH_TEST);
-	glEnable(GL_BLEND);
-	glBlendFunc(GL_ONE,GL_ZERO);
-	glBegin(GL_QUADS);
-	glColor4f(1,1,1,0);
-	glTexCoord2f(1,0); glVertex2i(1,1);
-	glTexCoord2f(0,0); glVertex2i(-1,1);
-	glTexCoord2f(0,.75); glVertex2i(-1,-1);
-	glTexCoord2f(1,.75); glVertex2i(1,-1);
-	glEnd();
-	glColor4f(1,1,1,1);
-	glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA );
+	RDisable(RCAP_DEPTHTEST);
+	REnable(RCAP_BLEND);
+	RBlendFunc(RBLEND_OPAQUE);
+	RBegin(RP_QUADS);
+	RColor4f(1,1,1,0);
+	RTexCoord2f(1,0); RVertex2f(1,1);
+	RTexCoord2f(0,0); RVertex2f(-1,1);
+	RTexCoord2f(0,.75); RVertex2f(-1,-1);
+	RTexCoord2f(1,.75); RVertex2f(1,-1);
+	REnd();
+	RColor4f(1,1,1,1);
+	RBlendFunc(RBLEND_ALPHA);
 
 	if(text)
 		UIText(-.97f,-.97f,text);

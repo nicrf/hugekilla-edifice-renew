@@ -2,7 +2,7 @@
 //everything is applied immediately and written back to control.ini when closed.
 
 
-#include "gl.h"
+#include "renderer.h"
 #include "platform.h"
 #include "fileio.h"
 #include "cfgfile.h"
@@ -412,8 +412,8 @@ static void Tab(float x1,float y1,float x2,float y2,const char *label,int active
 	int over=!active&&Inside(x1,y1,x2,y2);
 	UIRect(x1,y1,x2,y2,1,1,active?.5f:1,active?.2f:over?.14f:.06f);
 	if(active) UIRect(x1,y1,x2,y1+.006f,1,1,.5f,.9f);
-	if(active) glColor3f(1,1,.5f);
-	else glColor3f(over?1:.7f,over?1:.7f,over?1:.7f);
+	if(active) RColor3f(1,1,.5f);
+	else RColor3f(over?1:.7f,over?1:.7f,over?1:.7f);
 	UIText((x1+x2-UITextWidth(label))/2,UITextY(y1,y2),label);
 }
 
@@ -424,7 +424,7 @@ static void RowLabel(int row,const char *label,float &y1,float &y2)
 	y2=RowY(row)+ROWHEIGHT-.008f;
 	int hover=Inside(ROWX1,RowY(row),ROWX2,RowY(row)+ROWHEIGHT);
 	if(hover) UIRect(ROWX1,RowY(row),ROWX2,RowY(row)+ROWHEIGHT,1,1,1,.06f);
-	glColor3f(hover?1:.75f,hover?1:.75f,hover?1:.75f);
+	RColor3f(hover?1:.75f,hover?1:.75f,hover?1:.75f);
 	UIText(LABELX,UITextY(y1,y2),label);
 }
 
@@ -432,17 +432,17 @@ static void RowLabel(int row,const char *label,float &y1,float &y2)
 static void Value(float y1,float y2,const char *text,int highlight)
 {
 	UIRect(VALUEX,y1,VALUEX2,y2,0,0,0,.55f);
-	if(highlight) glColor3f(1,1,.5f);
-	else glColor3f(1,1,1);
+	if(highlight) RColor3f(1,1,.5f);
+	else RColor3f(1,1,1);
 	UIText((VALUEX+VALUEX2-UITextWidth(text))/2,UITextY(y1,y2),text);
 }
 
 void DrawOptions()
 {
 	if(!showoptions) return;
-	glEnable(GL_BLEND);
-	glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
-	glEnable(GL_TEXTURE_2D);
+	REnable(RCAP_BLEND);
+	RBlendFunc(RBLEND_ALPHA);
+	REnable(RCAP_TEXTURE);
 	UIPanel(PANELX1,PANELY1,PANELX2,PANELY2,TITLEH,"Options");
 	Tab(TAB_CONTROLS,"Controls",optionstab==0);
 	Tab(TAB_VIDEO,"Video/Audio",optionstab==1);
@@ -482,11 +482,11 @@ void DrawOptions()
 		}
 		help="Click a value to change it; \"<\" lowers it";
 	}
-	glColor3f(.6f,.6f,.6f);
+	RColor3f(.6f,.6f,.6f);
 	UITextFit(LABELX,UITextY(-.72f,-.64f,.04f),help,PANELX2-.05f-LABELX,.04f);
-	glColor3f(.45f,.45f,.45f);
+	RColor3f(.45f,.45f,.45f);
 	UIText(LABELX,UITextY(-.87f,-.76f,.04f),"Esc: close (settings are saved)",.04f);
 	UIButton(BTN_CLOSE,"Close",1);
-	glColor3f(1,1,1);
+	RColor3f(1,1,1);
 }
 

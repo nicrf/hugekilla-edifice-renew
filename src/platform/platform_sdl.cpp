@@ -72,6 +72,7 @@ void HKSwapWindow()
 {
 	DebugScreenshot();
 	HKFrameDrawn();
+	RFlush();   // the end of the frame may still be batched
 	if (window) SDL_GL_SwapWindow(window);
 }
 
@@ -500,6 +501,7 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	SDL_GL_MakeCurrent(window, glcontext);
+	RInit();
 	// HK_SHOT captures: no vsync, whose swap waits forever while the display sleeps (macOS)
 	if (getenv("HK_SHOT")) vsync = 0;
 	SDL_GL_SetSwapInterval(vsync);

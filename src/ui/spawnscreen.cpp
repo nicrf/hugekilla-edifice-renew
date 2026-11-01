@@ -5,7 +5,7 @@
 //a click anywhere fires, which spawns, as the button says; Enter or Space too.
 
 
-#include "gl.h"
+#include "renderer.h"
 #include "platform.h"
 #include "redrawing.h"
 #include "playing.h"
@@ -89,8 +89,8 @@ static void TeamColumn(float x,float y,int team,const char *name)
 		if(GetPlayer(i)->playstate>=10&&GetPlayer(i)->team==team) count++;
 	char line[80];
 	snprintf(line,sizeof(line),"%s  %d",name,count);
-	if(team==1) glColor3f(1,.4f,.4f);
-	else glColor3f(.5f,.65f,1);
+	if(team==1) RColor3f(1,.4f,.4f);
+	else RColor3f(.5f,.65f,1);
 	UIText(x,y,line);
 	y-=ROWH;
 	int shown=0;
@@ -98,7 +98,7 @@ static void TeamColumn(float x,float y,int team,const char *name)
 	{
 		Player *p=GetPlayer(i);
 		if(p->playstate<10||p->team!=team) continue;
-		glColor3f(p==GetLocalPlayer()?1:.82f,p==GetLocalPlayer()?1:.82f,p==GetLocalPlayer()?.6f:.82f);
+		RColor3f(p==GetLocalPlayer()?1:.82f,p==GetLocalPlayer()?1:.82f,p==GetLocalPlayer()?.6f:.82f);
 		UITextFit(x+.03f,y,p->name,MIDX-x-.08f,.045f);
 		y-=ROWH*.85f;
 		shown++;
@@ -108,16 +108,16 @@ static void TeamColumn(float x,float y,int team,const char *name)
 void DrawSpawnScreen()
 {
 	if(!IsSpawnScreenOpen()) return;
-	glEnable(GL_BLEND);
-	glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+	REnable(RCAP_BLEND);
+	RBlendFunc(RBLEND_ALPHA);
 	char title[160];
 	snprintf(title,sizeof(title),"Capture the flag - %s",netsettings.servername);
 	UIPanel(PANELX1,PANELY1,PANELX2,PANELY2,TITLEH,title);
-	glEnable(GL_TEXTURE_2D);
+	REnable(RCAP_TEXTURE);
 
 	//teams and game state
 	float x=PANELX1+.07f,y=PANELY2-TITLEH-.1f;
-	glColor3f(.6f,.6f,.6f);
+	RColor3f(.6f,.6f,.6f);
 	UIText(x,y,"Players");
 	TeamColumn(x,y-ROWH*1.3f,1,"Red");
 	TeamColumn(x+(MIDX-x)/2,y-ROWH*1.3f,2,"Blue");
@@ -125,13 +125,13 @@ void DrawSpawnScreen()
 	if(rgd.gamestate==1) state=curscore[0]?curscore:"The game is on";
 	else if(rgd.gamestate==2) state="Game over";
 	else state="Starts with a player in each team";
-	glColor3f(1,1,.6f);
+	RColor3f(1,1,.6f);
 	UITextFit(x,PLAYY2+.12f,state,MIDX-x-.05f);
 
 	//how to play
 	UIRect(MIDX,PLAYY2+.06f,MIDX+.004f,PANELY2-TITLEH-.05f,1,1,1,.12f);
 	x=MIDX+.07f;
-	glColor3f(.6f,.6f,.6f);
+	RColor3f(.6f,.6f,.6f);
 	UIText(x,y,"How to play");
 	char lines[9][120];
 	int n=0;
@@ -146,20 +146,20 @@ void DrawSpawnScreen()
 		KeyLabel(controls.forward),KeyLabel(controls.lstrafe),KeyLabel(controls.back),
 		KeyLabel(controls.rstrafe),KeyLabel(controls.jump),KeyLabel(controls.jetpack),
 		KeyLabel(controls.showscores));
-	glColor3f(.9f,.9f,.9f);
+	RColor3f(.9f,.9f,.9f);
 	float ly=y-ROWH*1.3f;
 	for(int i=0;i<n;i++)
 	{
 		if(i==n-1)
 		{
 			ly-=ROWH*.4f;
-			glColor3f(.62f,.62f,.62f);
+			RColor3f(.62f,.62f,.62f);
 		}
 		UITextFit(x,ly,lines[i],PANELX2-x-.05f,.045f);
 		ly-=ROWH*.9f;
 	}
 
-	glColor3f(.55f,.55f,.55f);
+	RColor3f(.55f,.55f,.55f);
 	UIText(PANELX1+.07f,UITextY(PLAYY1,PLAYY2,.042f),"Click anywhere, Enter or Space: play",.042f);
 	Vector mouse=mousepos;
 	mousepos=Vector(PLAYX1+.01f,PLAYY1+.01f,0);   //drawn as hovered: the default action
