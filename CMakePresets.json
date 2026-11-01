@@ -13,6 +13,14 @@
     { "name": "linux-debug",   "inherits": "unix-base", "displayName": "Linux Debug",   "binaryDir": "${sourceDir}/build/linux-debug",   "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" },   "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" } },
     { "name": "linux-release", "inherits": "unix-base", "displayName": "Linux Release", "binaryDir": "${sourceDir}/build/linux-release", "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }, "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" } },
     {
+      "name": "web",
+      "displayName": "Web (Emscripten, WebGL2; EMSDK from emsdk_env)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/web",
+      "toolchainFile": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
       "name": "windows-vs",
       "displayName": "Windows (Visual Studio, x64)",
       "generator": "Visual Studio 17 2022",
@@ -29,6 +37,7 @@
     }
   ],
   "buildPresets": [
+    { "name": "web",             "configurePreset": "web" },
     { "name": "macos-debug",     "configurePreset": "macos-debug" },
     { "name": "macos-release",   "configurePreset": "macos-release" },
     { "name": "linux-debug",     "configurePreset": "linux-debug" },

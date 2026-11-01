@@ -27,9 +27,24 @@ if(MSVC)
   endif()
 endif()
 
+# ---- Web (Emscripten, roadmap M14) ---------------------------------------------
+# The CMake preset "web" (emcmake, or python3 build.py --web): the game as a page,
+# solo and offline for now, with no threads (GitHub Pages can't send the COOP/COEP
+# headers SharedArrayBuffer needs), so neither libcurl nor GameNetworkingSockets.
+if(EMSCRIPTEN AND EDIFICE_GNS)
+  message(FATAL_ERROR "EDIFICE_GNS: GameNetworkingSockets has no web build (M14 uses WebRTC instead)")
+endif()
+
 # ---- SDL2 --------------------------------------------------------------------
 option(EDIFICE_SYSTEM_SDL2 "Use an installed SDL2 instead of building it" OFF)
-if(EDIFICE_SYSTEM_SDL2)
+if(EMSCRIPTEN)
+  # Emscripten's own SDL2 port (WebGL, Web Audio, browser input), not the release
+  # tarball: SDL's Emscripten backend is built and kept up to date there
+  add_library(hk_sdl2_web INTERFACE)
+  target_compile_options(hk_sdl2_web INTERFACE -sUSE_SDL=2)
+  target_link_options(hk_sdl2_web INTERFACE -sUSE_SDL=2)
+  set(HK_SDL_LIBS hk_sdl2_web)
+elseif(EDIFICE_SYSTEM_SDL2)
   find_package(SDL2 REQUIRED)
   set(HK_SDL_LIBS SDL2::SDL2)
 else()
@@ -64,8 +79,9 @@ else()
   set(OPUS_STATIC_RUNTIME ON CACHE BOOL "" FORCE)   # MSVC: same static CRT as the game
 endif()
 list(LENGTH CMAKE_OSX_ARCHITECTURES HK_NUM_OSX_ARCHS)
-if(HK_NUM_OSX_ARCHS GREATER 1)
-  # universal macOS build: opus picks SSE or NEON sources for the host CPU only
+if(HK_NUM_OSX_ARCHS GREATER 1 OR EMSCRIPTEN)
+  # universal macOS build: opus picks SSE or NEON sources for the host CPU only;
+  # WebAssembly: none of them
   set(OPUS_DISABLE_INTRINSICS ON CACHE BOOL "" FORCE)
 endif()
 FetchContent_Declare(opus
@@ -80,7 +96,7 @@ FetchContent_MakeAvailable(opus)
 # anyway, and the join screen's Internet tab says it isn't available.
 option(EDIFICE_LOBBY "Internet game list (needs libcurl)" ON)
 set(HK_CURL_LIB)
-if(EDIFICE_LOBBY)
+if(EDIFICE_LOBBY AND NOT EMSCRIPTEN)   # the web build has no curl (M14 task 2: fetch)
   find_package(CURL QUIET)
   if(CURL_FOUND)
     set(HK_CURL_LIB CURL::libcurl)
@@ -132,7 +148,9 @@ option(HK_RENDER_SOKOL "Draw with sokol_gfx (Metal, D3D11, GL 4.1 core) instead 
 set(HK_SOKOL_BACKEND "" CACHE STRING "sokol_gfx backend: METAL, D3D11 or GLCORE (empty: the platform's)")
 if(HK_RENDER_SOKOL)
   if(NOT HK_SOKOL_BACKEND)
-    if(APPLE)
+    if(EMSCRIPTEN)
+      set(HK_SOKOL_BACKEND GLES3)   # WebGL2
+    elseif(APPLE)
       set(HK_SOKOL_BACKEND METAL)
     elseif(WIN32)
       set(HK_SOKOL_BACKEND D3D11)
@@ -140,8 +158,11 @@ if(HK_RENDER_SOKOL)
       set(HK_SOKOL_BACKEND GLCORE)
     endif()
   endif()
-  if(NOT HK_SOKOL_BACKEND MATCHES "^(METAL|D3D11|GLCORE)$")
-    message(FATAL_ERROR "HK_SOKOL_BACKEND must be METAL, D3D11 or GLCORE (not ${HK_SOKOL_BACKEND})")
+  if(NOT HK_SOKOL_BACKEND MATCHES "^(METAL|D3D11|GLCORE|GLES3)$")
+    message(FATAL_ERROR "HK_SOKOL_BACKEND must be METAL, D3D11, GLCORE or GLES3 (not ${HK_SOKOL_BACKEND})")
+  endif()
+  if(EMSCRIPTEN AND NOT HK_SOKOL_BACKEND STREQUAL "GLES3")
+    message(FATAL_ERROR "the web build draws with WebGL2: HK_SOKOL_BACKEND=GLES3")
   endif()
   if(HK_SOKOL_BACKEND STREQUAL "GLCORE")
     find_package(OpenGL REQUIRED)
@@ -207,6 +228,8 @@ if(HK_RENDER_SOKOL)
     VERBATIM)
   set(HK_RENDER_SOURCES src/render/renderer_sokol.cpp src/render/texture_sokol.cpp
     src/render/sokol_native.cpp src/render/sokol_gfx_impl.cpp ${HK_SHADER_DIR}/edifice.glsl.h)
+elseif(EMSCRIPTEN)
+  message(FATAL_ERROR "the web build draws with sokol_gfx (WebGL2): HK_RENDER_SOKOL=ON")
 else()
   find_package(OpenGL REQUIRED)
   set(HK_RENDER_SOURCES src/render/renderer_gl.cpp src/render/texture_gl.cpp src/render/rcontext_gl.cpp)
@@ -265,7 +288,30 @@ set(INCLUDE_DIRS
   ${SRC}/third_party)   # "stb/stb_image.h" (public domain / MIT, see its LICENSE)
 
 # ---- Target ------------------------------------------------------------------
-if(APPLE)
+if(EMSCRIPTEN)
+  # The site: index.html (src/platform/web/shell.html), index.js, index.wasm and
+  # index.data, data/ preloaded as /data (read-only, in memory). The user folder
+  # is /user, in IndexedDB (src/platform/web/pre.js).
+  add_executable(Edifice ${SOURCES})
+  set_target_properties(Edifice PROPERTIES OUTPUT_NAME index SUFFIX .html)
+  set(HK_WEB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/platform/web)
+  target_link_options(Edifice PRIVATE
+    -sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2
+    -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=128MB   # the game has 80 MB of static arrays
+    # the main thread's stack natively is 1 MB (Windows) to 8 MB: the land
+    # generation keeps big arrays there
+    -sSTACK_SIZE=8MB
+    -sENVIRONMENT=web
+    -lidbfs.js
+    "SHELL:--pre-js ${HK_WEB_DIR}/pre.js"
+    "SHELL:--shell-file ${HK_WEB_DIR}/shell.html"
+    "SHELL:--preload-file ${DATA_DIR}@/data"
+    "SHELL:--exclude-file *.DS_Store"
+    $<$<CONFIG:Debug>:-sASSERTIONS=2>)
+  file(GLOB_RECURSE DATA_FILES CONFIGURE_DEPENDS ${DATA_DIR}/*)
+  set_property(TARGET Edifice APPEND PROPERTY LINK_DEPENDS
+    ${HK_WEB_DIR}/pre.js ${HK_WEB_DIR}/shell.html ${DATA_FILES})
+elseif(APPLE)
   # Ship the game data inside Edifice.app/Contents/Resources/data
   file(GLOB_RECURSE DATA_FILES RELATIVE ${DATA_DIR} CONFIGURE_DEPENDS ${DATA_DIR}/*)
   list(FILTER DATA_FILES EXCLUDE REGEX "(^|/)\\.DS_Store$")
@@ -370,6 +416,8 @@ if(HK_RENDER_SOKOL)
     target_link_libraries(Edifice PRIVATE "-framework Metal")
   elseif(HK_SOKOL_BACKEND STREQUAL "D3D11")
     target_link_libraries(Edifice PRIVATE d3d11 dxgi)
+  elseif(HK_SOKOL_BACKEND STREQUAL "GLES3")
+    # WebGL2: linked by Emscripten (-sMAX_WEBGL_VERSION above)
   elseif(APPLE)
     target_link_libraries(Edifice PRIVATE "-framework OpenGL")
   else()
@@ -431,6 +479,14 @@ add_test(NAME lobby COMMAND lobby_test)
 add_executable(signaling_test tests/signaling_test.cpp src/net/signaling.cpp)
 target_include_directories(signaling_test PRIVATE ${SRC}/net)
 add_test(NAME signaling COMMAND signaling_test)
+if(EMSCRIPTEN)
+  # the web build's unit tests run in Node.js (the toolchain's emulator), on the
+  # real files (fileio_test makes folders)
+  foreach(t worldrandom_test wire_test voice_test anticheat_test hmac_test fileio_test map_test
+      lobby_test signaling_test)
+    target_link_options(${t} PRIVATE -sNODERAWFS=1 -sALLOW_MEMORY_GROWTH=1 -sSTACK_SIZE=1MB)
+  endforeach()
+endif()
 
 # ---- GameNetworkingSockets (roadmap M7) ---------------------------------------
 # Encrypted connections and P2P Internet games; on in the release archives.

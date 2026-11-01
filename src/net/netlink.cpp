@@ -25,8 +25,24 @@ static int UseGns(int *port)
 }
 #endif
 
+#ifdef __EMSCRIPTEN__
+//The browser has no UDP (roadmap M14): Emscripten would turn each address into a
+//WebSocket connection. Solo games still open their info socket, which then sends
+//nothing and never receives; network games wait for the WebRTC link (M14 task 3).
+class NullLink:public DatagramLink
+{
+public:
+	int SendTo(const void *,int size,const SOCKADDR_IN *) { return size; }
+	int ReceiveFrom(void *,int,SOCKADDR_IN *) { return 0; }
+};
+#endif
+
 DatagramLink *NetOpenInfoLink(WORD port,int host,int p2p)
 {
+#ifdef __EMSCRIPTEN__
+	(void)port;(void)host;(void)p2p;
+	return new NullLink;
+#else
 	UdpLink *udp=UdpLink::Open(port,1);
 #ifdef EDIFICE_GNS
 	int gnsport;
@@ -39,15 +55,21 @@ DatagramLink *NetOpenInfoLink(WORD port,int host,int p2p)
 	}
 #endif
 	return udp;
+#endif
 }
 
 DatagramLink *NetOpenDataLink(WORD port,const SOCKADDR_IN *server)
 {
+#ifdef __EMSCRIPTEN__
+	(void)port;(void)server;
+	return new NullLink;
+#else
 #ifdef EDIFICE_GNS
 	GnsLink *link=GnsLink::OpenData(server);
 	if(link) return link;
 #endif
 	return UdpLink::Open(port,0);
+#endif
 }
 
 DatagramLink *NetOpenPeerLink(const SOCKADDR_IN *source)

@@ -68,8 +68,16 @@ std::string HKResolvePath(const char *path)
 #endif
 }
 
+static int fileswritten;
+
+int HKFilesWritten()
+{
+	return fileswritten;
+}
+
 FILE *HKFileOpen(const char *path, const char *mode)
 {
+	if (strpbrk(mode, "wa+")) fileswritten++;
 	std::string p = HKResolvePath(path);
 #ifdef _WIN32
 	wchar_t wmode[8];
@@ -119,7 +127,7 @@ int HKMakeDir(const char *path)
 {
 	std::error_code ec;
 	fs::path p = HostPath(HKResolvePath(path));
-	fs::create_directory(p, ec);
+	if (fs::create_directory(p, ec)) fileswritten++;
 	return fs::is_directory(p, ec);
 }
 
@@ -127,6 +135,7 @@ int HKRenameFile(const char *from, const char *to)
 {
 	std::error_code ec;
 	fs::rename(HostPath(HKResolvePath(from)), HostPath(HKResolvePath(to)), ec);
+	fileswritten++;
 	return !ec;
 }
 

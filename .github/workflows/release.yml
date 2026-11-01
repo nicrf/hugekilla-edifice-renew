@@ -5,6 +5,8 @@
 #  - fuzzing: on main, every Monday, or by hand (Actions > Run workflow), not on PRs
 #  - sokol: the renderers (roadmap M13) built and drawn, on every push and PR: sokol_gfx
 #    in Debug (validation), and the fixed-function OpenGL backend kept for one release
+#  - web: the web version (roadmap M14, Emscripten) built and played in headless
+#    Chromium, on every push and PR
 name: Build & release
 
 on:
@@ -23,6 +25,9 @@ env:
   # vcpkg (GameNetworkingSockets, protobuf, OpenSSL), pinned so that releases are
   # reproducible and the binary caches stay valid; bump it to update the ports
   VCPKG_COMMIT: 9a5dfef5d1a0438a7d24856a85bd60f309d355e9
+  # Emscripten for the web version (roadmap M14), pinned like vcpkg; build.py --web
+  # installs the same one into build/emsdk
+  EMSDK_VERSION: '6.0.12'
 
 jobs:
   build:
@@ -204,6 +209,52 @@ jobs:
           path: |
             shots
             shots-gl
+          if-no-files-found: ignore
+
+  web:
+    # The web version (roadmap M14): Emscripten, WebGL2, no threads, solo and offline.
+    # Unit tests in Node.js, then tests/web_smoke.py plays it in headless Chromium
+    # (SwiftShader's WebGL2): the menu, a solo game, the IndexedDB user folder. The
+    # site (as a zip) and the screenshots are kept as artifacts.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: ${{ env.EMSDK_VERSION }}
+          actions-cache-folder: emsdk-cache
+
+      - name: Install ninja
+        timeout-minutes: 20
+        run: .github/scripts/apt-install.sh ninja-build
+
+      - name: Build, unit tests and package
+        env:
+          EDIFICE_CMAKE_ARGS: -DEDIFICE_WERROR=ON
+        run: |
+          # build.py --web takes emsdk from EMSDK, which setup-emsdk may not export
+          [ -n "${EMSDK:-}" ] || export EMSDK=$(cd "$(dirname "$(which emcc)")/../.." && pwd)
+          python build.py --web --test --package
+
+      - name: Play it in headless Chromium
+        timeout-minutes: 15
+        run: |
+          pip install playwright==1.64.1
+          python -m playwright install --with-deps chromium-headless-shell
+          python tests/web_smoke.py build/web --out web-shots
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: edifice-web
+          path: |
+            dist/Edifice-*-web.zip
+            web-shots
           if-no-files-found: ignore
 
   fuzzing:

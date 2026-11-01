@@ -20,6 +20,9 @@ int HKFileExists(const char *path);                    //1 if a file or folder i
 int HKChangeDir(const char *path);                     //1 if it is now the working directory
 int HKMakeDir(const char *path);                       //1 if the folder exists or was created
 int HKRenameFile(const char *from, const char *to);    //1 if moved; replaces the destination
+//how many times a file was opened for writing, a folder made or a file renamed: the
+//web build saves the user folder to IndexedDB when it changes (platform_sdl.cpp)
+int HKFilesWritten();
 
 struct HKDirEntry
 {

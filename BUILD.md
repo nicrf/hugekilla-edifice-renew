@@ -41,7 +41,11 @@ Sous Windows : `py build.py ...`. Options : `--clean`, `--test` (tests unitaires
 `-DEDIFICE_SYSTEM_SDL2=ON` (CMake) utilise une SDL2 installée au lieu de la compiler.
 La version vient de `project(Edifice VERSION …)` dans `CMakeLists.txt`.
 
-Avec les presets CMake : `cmake --preset macos-release && cmake --build --preset macos-release` (ou `linux-release`, `windows-vs` / `windows-release`).
+Avec les presets CMake : `cmake --preset macos-release && cmake --build --preset macos-release` (ou `linux-release`, `windows-vs` / `windows-release`, et `web` pour la version web, voir plus bas).
+
+```bash
+python3 build.py --web --run         # version web (Emscripten) dans build/web, servie sur http://127.0.0.1:8000/
+```
 
 ## Tests
 
@@ -85,6 +89,26 @@ Par défaut depuis M13.4, comme dans les releases (CMake : `-DHK_RENDER_SOKOL=ON
 - Une build Debug valide chaque appel sokol_gfx (et chaque erreur GL sous Linux) : les messages commencent par `sokol_gfx` sur stderr. `python3 tests/render_smoke.py <binaire ou .app> [--out dossier] [--ref dossier]` dessine les menus et une partie, et échoue sur une erreur de sokol_gfx (les avertissements sont seulement affichés), une image unie ou un jeu qui s'arrête (la CI le fait, en Debug).
 - Non reproduit : l'antialiasing des lignes (`RCAP_LINESMOOTH`, les étincelles) ; ces lignes sont dessinées pleines.
 
+## Version web (M14)
+
+Le jeu tourne dans un navigateur, compilé par **Emscripten** en WebAssembly : WebGL2 (sokol_gfx, GLSL ES 3.00), son par SDL2 (Web Audio), réglages dans IndexedDB. Pour l'instant **en solo et hors ligne** : le navigateur n'ouvre pas de socket UDP, les parties réseau attendent le lien WebRTC (M14, tâche 3).
+
+```bash
+python3 build.py --web               # build/web : index.html, index.js, index.wasm, index.data
+python3 build.py --web --run         # la sert sur http://127.0.0.1:8000/ (EDIFICE_WEB_PORT) et ouvre le navigateur
+python3 build.py --web --test        # + tests unitaires, compilés aussi en WebAssembly et lancés par Node.js
+python3 build.py --web --package     # dist/Edifice-<version>-web.zip (le site, prêt à copier sur un serveur web)
+```
+
+- **emsdk** : `build.py --web` prend celui de `EMSDK` (après `source <emsdk>/emsdk_env.sh`), sinon il clone emsdk dans `build/emsdk` et y installe la version de la CI (`EMSDK_VERSION` de `release.yml`, 6.0.12). Il faut aussi `ninja`. À la main : `cmake --preset web && cmake --build build/web` (preset `web`, toolchain d'Emscripten trouvée par `EMSDK`).
+- **Sans threads** : GitHub Pages ne peut pas envoyer les en-têtes COOP/COEP qu'exige `SharedArrayBuffer`, donc ni pthreads, ni libcurl (thread du lobby), ni GameNetworkingSockets dans cette build (`EDIFICE_GNS` y est refusé). Les sockets UDP deviennent un lien nul (`NullLink`, `src/net/netlink.cpp`) : une partie solo garde son serveur local, qui n'envoie rien.
+- **Boucle** : `main()` initialise puis rend la main au navigateur (`emscripten_set_main_loop`) ; `Frame()` (`src/platform/platform_sdl.cpp`) est un passage de la boucle, le même en natif (appelé en boucle par `main()`) et sur le web (une fois par image du navigateur, donc à la VSync). Pas de sommeil quand la fenêtre n'a pas le focus : le navigateur suspend lui-même un onglet masqué.
+- **Fichiers** : `data/` est préchargé en mémoire (`--preload-file`, `index.data`, environ 19 Mo), en lecture seule sous `/data`. Le dossier utilisateur est `/user`, un système de fichiers IndexedDB (IDBFS) que `src/platform/web/pre.js` monte et charge avant `main()` : `net.ini`, `control.ini`, `sv.ini` (copiés de `data/` au premier lancement) et `maps/`. Ce que le jeu y écrit est réenregistré au plus une fois par seconde (`HKFilesWritten`, `fileio.h`), et quand la page est masquée ou quittée.
+- **Page** : `src/platform/web/shell.html` (la page, un canvas plein écran que SDL suit quand la fenêtre change de taille ; progression du chargement ; message si WebGL2 manque) ; le son démarre au premier clic ou à la première touche (règle des navigateurs). La souris est capturée (pointer lock) au clic ; Échap la rend au navigateur et ramène au menu, comme Échap en natif. Plein écran : F6.
+- **Rendu** : `sokol_native.cpp` crée un contexte WebGL2 par SDL (ES 3.0, sans alpha : la page ne transparaît pas). WebGL2 ne relit pas la profondeur : le soleil n'est jamais caché par le relief dans cette build.
+- **Aides au debug** : les variables `HK_*` (voir « Aides au debug ») se passent dans l'URL, par exemple `http://127.0.0.1:8000/?HK_MENU=serverstart&HK_SEED=42`.
+- **Test** : `python3 tests/web_smoke.py [build/web] [--out dossier]` sert la build sur un port local et la joue dans Chromium sans écran par Playwright (`pip install playwright && playwright install chromium-headless-shell`) : le menu se dessine, une partie solo démarre (`HK_MENU=serverstart`), le joueur apparaît (clic) et avance, le dossier utilisateur survit à un rechargement ; captures dans `build/web-smoke`. La CI le fait (job `web`).
+
 ## GameNetworkingSockets (M7, dans les releases)
 
 GameNetworkingSockets (Valve, BSD-3), avec protobuf et OpenSSL, vient de vcpkg (fonction `gns` de `vcpkg.json`). Une fois vcpkg installé :
@@ -125,6 +149,8 @@ build/fuzz/fuzz_map -max_total_time=60 /tmp/c    # fuzzing (le corpus grandit da
 
 ## Releases automatiques
 
+Le job `web` compile aussi la version web à chaque push et PR (`build.py --web --test --package`, emsdk épinglé par `EMSDK_VERSION`), puis la joue dans Chromium sans écran (`tests/web_smoke.py`) ; le site zippé et les captures sont gardés comme artefacts.
+
 `.github/workflows/release.yml` : à chaque tag `v*` poussé (`git tag v0.2.0 && git push origin v0.2.0`), GitHub Actions compile macOS, Linux et Windows avec `build.py --config Release --gns --package --test` (`--universal` sur macOS ; vcpkg épinglé par `VCPKG_COMMIT`, cache binaire gardé par `actions/cache`), vérifie chaque archive avec `tests/check_package.py`, puis publie une release GitHub avec les trois archives. À chaque push et PR, les archives sont aussi disponibles comme artefacts, sans release. Minimums : macOS 10.15 (Intel, pour `std::filesystem`) / 11 (Apple Silicon), glibc 2.35 (Ubuntu 22.04 et plus récentes), Windows 10.
 
 ## Arborescence
@@ -143,7 +169,7 @@ src/platform/  platform_sdl.cpp : main SDL (fenêtre et son contexte par rcontex
                system_sdl.cpp : horloges (hktime.h), touches tenues (hkkeys.h), boîtes de message ;
                hktypes.h : DWORD/WORD/BYTE ; hksocket.h : sockets (Winsock / POSIX) ;
                gl.h : OpenGL et GLU (pour le seul backend du rendu) ; fileio.* : accès aux fichiers (std::filesystem, stdio) ;
-               windows/ : edifice.rc et icônes de Edifice.exe
+               windows/ : edifice.rc et icônes de Edifice.exe ; web/ : page (shell.html) et pre.js de la version web (M14)
 src/third_party/ stb/stb_image.h v2.30 (nothings/stb 31c1ad3, domaine public / MIT, licence dans stb/LICENSE)
                sokol/sokol_gfx.h (floooh/sokol 170136d, zlib, licence dans sokol/LICENSE)
 data/          données du jeu (ini, textures, sons, objets, Structures)
