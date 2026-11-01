@@ -24,7 +24,9 @@ def landdefs():
     # groundtex[9][60], int32 numgroundtex, uint32 randomseed numscenery numblotch
     out = struct.pack("<i", 40)
     for i in range(NUMDEF):
-        out += struct.pack("<b4i3f", i % 3, (i * 37) % 512, (i * 91) % 512, 10 + i % 20, (3 + i % 10) ** 2,
+        # type 0 ridges get sw=70 from AddRidge (land.cpp), which the server then sends
+        sw = 70 if i % 3 == 0 else (3 + i % 10) ** 2
+        out += struct.pack("<b4i3f", i % 3, (i * 37) % 512, (i * 91) % 512, 10 + i % 20, sw,
                            .1 + i * .003, 3.7 + i * .01, .3 + .1 * (i % 5))
     tex = [b"grassdirt.bmp", b"grassdirtblotch1.bmp", b"grassdirtblotch2.bmp", b"snowgrassblotch1.bmp"]
     out += b"".join(t.ljust(60, b"\0") for t in tex + [b""] * 5)
@@ -85,8 +87,13 @@ def check(path):
     print(("ok   " if ok else "FAIL ") + "joined the server (tests/net_join.py)")
     files = os.listdir(dump)
     land = [open(os.path.join(dump, n), "rb").read() for n in files if n.startswith("msg-%d-" % LANDINFO)]
-    good = bool(land) and land[0][1:1 + 5200] == filedefs and land[0][1 + 5200:1 + 5200 + 252] == filesky
+    gotdefs = land[0][1:1 + 5200] if land else b""
+    gotsky = land[0][1 + 5200:1 + 5200 + 252] if land else b""
+    good = gotdefs == filedefs and gotsky == filesky
     print(("ok   " if good else "FAIL ") + "LANDINFO carries the map's land and sky")
+    if land and not good:
+        diff = [i for i in range(min(len(gotdefs), len(filedefs))) if gotdefs[i] != filedefs[i]]
+        print("     defs differ at %s, sky %s" % (diff[:10], gotsky == filesky))
     ok &= good
     received = {}
     for n in files:
