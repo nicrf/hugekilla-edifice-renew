@@ -340,7 +340,17 @@ static void HandleEvent(const SDL_Event &ev)
 		}
 		if (menu == BUILDING && !consolevisible)
 		{
-			BuildPreviewWheel(ud, (SDL_GetModState() & (KMOD_CTRL | KMOD_GUI)) != 0);
+			// a trackpad or a smooth-scrolling mouse sends fractions of a notch, often
+			// rounded to 0 in wheel.y: one step per whole notch of preciseY
+			static float notches;
+			float y = ev.wheel.preciseY;
+			if (ev.wheel.direction == SDL_MOUSEWHEEL_FLIPPED) y = -y;
+			notches += y;
+			if (notches >= 1 || notches <= -1)
+			{
+				BuildPreviewWheel(notches > 0 ? 1 : -1, (SDL_GetModState() & (KMOD_CTRL | KMOD_GUI)) != 0);
+				notches = 0;
+			}
 			break;
 		}
 		if (consolevisible && GetLocalPlayer()->playstate != 0)

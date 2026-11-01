@@ -133,7 +133,7 @@ static void PickItem(int i)
 		return;
 	}
 	menu=BUILDING;
-	strcpy(menutext,"Left click: build here\rRight click: cancel");
+	BuildPreviewText();
 	GetLocalPlayer()->menudissapeartime=curtime+7000;
 }
 

@@ -171,6 +171,7 @@ int LoadStructure(char *filename);
 void DisplayBuildingType(char *path);
 void PlaceStructure(int task);
 void BuildPreviewWheel(int dir,int distance);   //wheel while placing: rotate, or move away
+void BuildPreviewText();
 void InitConsole();
 
 #define MAXOBJS 200

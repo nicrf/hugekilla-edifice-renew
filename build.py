@@ -2,12 +2,13 @@
 """Build Edifice (HugeKilla) on macOS, Linux or Windows.
 
     python3 build.py [--config Debug|Release] [--clean] [--run] [--package] [--test]
-                     [--gns] [--universal]
+                     [--no-gns] [--universal]
 
 Configures into build/<os>-<config>[-gns][-universal], builds, and optionally runs
 the game or its unit tests, or packages it into dist/Edifice-<version>-<os>.(zip|tar.gz).
---gns adds GameNetworkingSockets (P2P Internet games) through vcpkg (VCPKG_ROOT),
-as in the releases. Python 3 stdlib only.
+GameNetworkingSockets (P2P Internet games) is in by default, as in the releases,
+through vcpkg (VCPKG_ROOT, else fetched into build/vcpkg); --no-gns leaves it out.
+Python 3 stdlib only.
 """
 import argparse
 import glob
@@ -105,18 +106,45 @@ def find_ctest(cmake):
     return shutil.which("ctest") or die("ctest not found next to cmake")
 
 
+def local_vcpkg():
+    """vcpkg in build/vcpkg, at the commit the releases use (VCPKG_COMMIT of
+    release.yml), cloned and bootstrapped the first time: no setup needed for the
+    default GameNetworkingSockets build."""
+    root = os.path.join(ROOT, "build", "vcpkg")
+    exe = os.path.join(root, "vcpkg.exe" if OS == "windows" else "vcpkg")
+    if os.path.isfile(exe):
+        return root
+    if not shutil.which("git"):
+        die("GameNetworkingSockets needs vcpkg, and git to fetch it; or --no-gns", hint=False)
+    wf = open(os.path.join(ROOT, ".github", "workflows", "release.yml")).read()
+    m = re.search(r"VCPKG_COMMIT:\s*([0-9a-f]{40})", wf)
+    if not m:
+        die("VCPKG_COMMIT not found in release.yml", hint=False)
+    print("Fetching vcpkg into %s (first GameNetworkingSockets build: its libraries "
+          "take a while to compile, later builds reuse them)" % root, flush=True)
+    os.makedirs(root, exist_ok=True)
+    for cmd in (["git", "init", "-q"],
+                ["git", "fetch", "-q", "--depth", "1", "https://github.com/microsoft/vcpkg", m.group(1)],
+                ["git", "checkout", "-q", "FETCH_HEAD"],
+                [os.path.join(root, "bootstrap-vcpkg.bat" if OS == "windows" else "bootstrap-vcpkg.sh"),
+                 "-disableMetrics"]):
+        if subprocess.call(cmd, cwd=root) != 0:
+            shutil.rmtree(root, ignore_errors=True)
+            die("could not set up vcpkg (%s); --no-gns builds without P2P" % " ".join(cmd), hint=False)
+    return root
+
+
 def gns_args(args, extra):
     """CMake arguments of a GameNetworkingSockets build: vcpkg toolchain, the
     "gns" feature of vcpkg.json, and the triplet of the releases."""
     root = os.environ.get("VCPKG_ROOT")
     if not root and shutil.which("vcpkg"):
         root = os.path.dirname(os.path.realpath(shutil.which("vcpkg")))
-    toolchain = os.path.join(root or "", "scripts", "buildsystems", "vcpkg.cmake")
-    if not root or not os.path.isfile(toolchain):
-        die("--gns needs vcpkg (see BUILD.md):\n"
-            "    git clone https://github.com/microsoft/vcpkg\n"
-            "    vcpkg/bootstrap-vcpkg.sh   (Windows: vcpkg\\bootstrap-vcpkg.bat)\n"
-            "  then set VCPKG_ROOT to that folder.", hint=False)
+    if not root:
+        root = local_vcpkg()
+    toolchain = os.path.join(root, "scripts", "buildsystems", "vcpkg.cmake")
+    if not os.path.isfile(toolchain):
+        die("no vcpkg toolchain in %s (VCPKG_ROOT); --no-gns builds without P2P" % root, hint=False)
     cfg = ["-DEDIFICE_GNS=ON", "-DVCPKG_MANIFEST_FEATURES=gns",
            "-DCMAKE_TOOLCHAIN_FILE=" + toolchain,
            "-DVCPKG_OVERLAY_TRIPLETS=" + os.path.join(ROOT, "cmake", "triplets")]
@@ -145,8 +173,11 @@ def main():
     ap.add_argument("--package", action="store_true", help="create an archive in dist/")
     ap.add_argument("--test", action="store_true", help="run the unit tests (ctest) after building")
     ap.add_argument("--generator", help="override the CMake generator (e.g. Ninja)")
-    ap.add_argument("--gns", action="store_true",
-                    help="with GameNetworkingSockets (P2P Internet games), built by vcpkg (VCPKG_ROOT)")
+    ap.add_argument("--gns", action="store_true", default=True,
+                    help="with GameNetworkingSockets (P2P Internet games, the default), built by "
+                         "vcpkg: VCPKG_ROOT, else one fetched into build/vcpkg")
+    ap.add_argument("--no-gns", dest="gns", action="store_false",
+                    help="without GameNetworkingSockets: no P2P, Internet games need open UDP ports")
     ap.add_argument("--universal", action="store_true",
                     help="macOS: one binary for Apple Silicon and Intel (macOS %s or later)" % MACOS_MIN)
     args, game_args = ap.parse_known_args()
