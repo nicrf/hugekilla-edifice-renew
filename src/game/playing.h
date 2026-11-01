@@ -169,6 +169,8 @@ float GetSOSpeedPenalty(char pnum);
 char *GetStructureFilename(int number);
 int LoadStructure(char *filename);
 void DisplayBuildingType(char *path);
+//game mode 0: a team builds within this of its water pump (not carried)
+#define BUILDZONE 40
 void PlaceStructure(int task);
 void BuildPreviewWheel(int dir,int distance);   //wheel while placing: rotate, or move away
 void BuildPreviewText();

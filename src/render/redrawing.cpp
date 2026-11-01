@@ -845,6 +845,49 @@ float DrawText(float x,float y,const char *text)
 	return 1;
 }
 
+//game mode 0: where each team may build (BUILDZONE around its water pump, see
+//CanBuild), on the radar: centered on the local player, turned with its view, 250
+//units to the edge; the circles are cut at the edge of the radar with the scissor
+static void DrawRadarBuildZones(float cx,float cy,float w,float h)
+{
+	if(sv.gamemode!=0) return;
+	const float scale=1.f/250;
+	GLint vp[4];
+	glGetIntegerv(GL_VIEWPORT,vp);
+	glEnable(GL_SCISSOR_TEST);
+	glScissor(vp[0]+(GLint)((cx-w+1)/2*vp[2]),vp[1]+(GLint)((cy-h+1)/2*vp[3]),
+		(GLsizei)(w*vp[2]),(GLsizei)(h*vp[3]));
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+	Player *me=GetLocalPlayer();
+	Vector side=CrossProduct(Vector(0,1,0),me->fwd);
+	for(int i=0;i<MAXSERVEROBJS;i++)
+	{
+		if(sobject[i].type!=WATERPUMP||sobject[i].attached!=-1) continue;
+		Vector p=sobject[i].pos;
+		MakeClose(&p);
+		p-=me->pos;
+		p.y=0;
+		Vector r=(p.x*me->fwd+p.z*side)*scale;   //same turn as the radar's dots
+		float x=cx-r.z*w,y=cy+r.x*h,rx=BUILDZONE*scale*w,ry=BUILDZONE*scale*h;
+		float red=sobject[i].team==1?1:.45f,green=sobject[i].team==1?.35f:.6f,blue=sobject[i].team==1?.35f:1;
+		float a=sobject[i].team==me->team?1:.6f;   //ours stands out
+		glColor4f(red,green,blue,.22f*a);
+		glBegin(GL_TRIANGLE_FAN);
+		glVertex2f(x,y);
+		for(int k=0;k<=32;k++)
+			glVertex2f(x+rx*cosf(k*PI/16),y+ry*sinf(k*PI/16));
+		glEnd();
+		glLineWidth(HKPixelScale());
+		glColor4f(red,green,blue,.7f*a);
+		glBegin(GL_LINE_LOOP);
+		for(int k=0;k<32;k++)
+			glVertex2f(x+rx*cosf(k*PI/16),y+ry*sinf(k*PI/16));
+		glEnd();
+	}
+	glDisable(GL_SCISSOR_TEST);
+}
+
 //draw text in 3d space using the 2d DrawText function
 
 void DrawText3D(Vector facing,Vector pos,float scale,char *text)
@@ -1515,6 +1558,7 @@ void Redraw()
 		glVertex2f(radarcenterx+radarwidth,radarcentery+radarheight);
 		glVertex2f(radarcenterx-radarwidth,radarcentery+radarheight);
 		glEnd();
+		DrawRadarBuildZones(radarcenterx,radarcentery,radarwidth,radarheight);
 		glPointSize(2*HKPixelScale());
 		glEnable(GL_BLEND);
 		glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
