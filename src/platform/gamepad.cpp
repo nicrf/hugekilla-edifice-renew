@@ -21,6 +21,7 @@
 #include "multiplay.h"
 #include "ui.h"
 #include "inputlogic.h"
+#include "touch.h"
 #include <SDL.h>
 #include <math.h>
 
@@ -306,7 +307,7 @@ void PadShutdown()
 }
 
 // weapons in turn, around from the last to the first, as pads' bumpers usually do
-static void NextWeapon(int dir)
+void PadNextWeapon(int dir)
 {
 	Player *me = GetLocalPlayer();
 	int before = me->weapon;
@@ -332,7 +333,7 @@ static void DoAction(int a, int down)
 		if (!down) return;
 		// placing a structure: they turn it, as the mouse wheel does
 		if (menu == BUILDING) BuildPreviewWheel(a == PA_WEAPNEXT ? -1 : 1, 0);
-		else NextWeapon(a == PA_WEAPNEXT ? 1 : -1);
+		else PadNextWeapon(a == PA_WEAPNEXT ? 1 : -1);
 		return;
 	case PA_CLAIM:
 		if (menu == BUILDING)
@@ -387,6 +388,7 @@ static void InputChanged(int in, int down)
 {
 	if (in < 0 || in >= NUMINPUTS || inputdown[in] == down) return;
 	inputdown[in] = down;
+	if (down) TouchHide();   // the pad is in use: the touch controls go
 	if (!down)
 	{
 		if (ingame[in])
@@ -530,6 +532,7 @@ void PadFrame()
 //   F:log              prints the state on stderr ("padtest: ...")
 //   F:unplug           takes the virtual controller away (and F:plug brings it back)
 //   F:shot:NAME        saves the frame as NAME.ppm in HK_PADSHOTS (a folder; default: the user folder)
+//   F:finger:N:down|move|up:X:Y   finger N of a touch screen at X,Y (0..1 of the window)
 // Through a virtual controller (SDL_JoystickAttachVirtual), so SDL's mapping and
 // events are those of a real pad; where SDL has none, as pushed SDL events.
 
@@ -540,6 +543,8 @@ struct PadStep
 	char op[8];
 	char name[24];
 	float value;
+	int finger;          // finger steps: which, and where
+	float x, y;
 };
 static PadStep steps[MAXSTEPS];
 static int numsteps;
@@ -572,6 +577,8 @@ static void PadTestInit()
 		PadStep *s = &steps[numsteps];
 		memset(s, 0, sizeof(*s));
 		if (sscanf(step, "%d:%7[a-z]:%23[a-z]:%f", &s->frame, s->op, s->name, &s->value) < 2) continue;
+		if (!strcmp(s->op, "finger") &&
+			sscanf(step, "%*d:finger:%d:%23[a-z]:%f:%f", &s->finger, s->name, &s->x, &s->y) < 4) continue;
 		if (!strcmp(s->op, "press"))
 		{
 			// as a down now and an up later
@@ -645,10 +652,10 @@ static void PadTestLog()
 	float yaw = atan2f(me->fwd.x, me->fwd.z) * 180 / 3.14159265f;
 	fprintf(stderr, "padtest: frame %d pads %d ingame %d playstate %d pos %.2f %.2f %.2f yaw %.1f tilt %.3f "
 		"weapon %d firing %d jetpack %d zoom %.1f menu %d buildmenu %d up %d down %d left %d right %d focus %d "
-		"options %d join %d setup %d\n",
+		"options %d join %d setup %d touch %d\n",
 		testframe, numpads, HKInGame(), me->playstate, me->pos.x, me->pos.y, me->pos.z, yaw, me->tilt.y,
 		me->weapon, me->firing, me->jetpack, me->fzoom, menu, IsBuildMenuOpen(), me->up, me->down,
-		me->lstrafe, me->rstrafe, UIFocusCount(), IsOptionsOpen(), IsJoinScreenOpen(), IsServerSetupOpen());
+		me->lstrafe, me->rstrafe, UIFocusCount(), IsOptionsOpen(), IsJoinScreenOpen(), IsServerSetupOpen(), TouchShown());
 }
 
 static void PadTestFrame()
@@ -659,6 +666,19 @@ static void PadTestFrame()
 		PadStep *s = &steps[i];
 		if (s->frame != testframe) continue;
 		if (!strcmp(s->op, "log")) PadTestLog();
+		else if (!strcmp(s->op, "finger"))
+		{
+			// as a touch screen's events: SDL has no virtual touch device
+			SDL_Event e;
+			SDL_zero(e);
+			e.type = !strcmp(s->name, "down") ? SDL_FINGERDOWN : !strcmp(s->name, "up") ? SDL_FINGERUP : SDL_FINGERMOTION;
+			e.tfinger.touchId = TOUCH_TESTID;
+			e.tfinger.fingerId = s->finger;
+			e.tfinger.x = s->x;
+			e.tfinger.y = s->y;
+			e.tfinger.pressure = 1;
+			SDL_PushEvent(&e);
+		}
 		else if (!strcmp(s->op, "shot"))
 		{
 			char path[1100];

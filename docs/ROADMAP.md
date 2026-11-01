@@ -248,8 +248,10 @@ Jouer sans clavier ni souris : manette sur les trois systèmes et le web, écran
 - **Tâches :**
   1. Manettes (`SDL_GameController`) : branchement à chaud, base de SDL plus un `gamecontrollerdb.txt` facultatif, stick gauche en marche analogique, stick droit pour regarder (zone morte, courbe, sensibilité, inversion), boutons liés aux actions (`pad_*` de `control.ini`, onglet Gamepad d'Options), vibration quand on est touché ; menus au focus (croix/stick, `A`, `B`) par un registre des zones cliquables dessinées (`ui.cpp`).
 
-     *Fait :* `src/platform/gamepad.cpp`, logique pure dans `src/ui/inputlogic.h` (`tests/input_test.cpp`), aide `HK_PADTEST` (manette virtuelle de SDL) et `tests/input_smoke.py` ; détails dans BUILD.md, « Manettes ». Non vérifié : de vraies manettes (Xbox, PlayStation, Switch) et la vibration, l'API Gamepad des navigateurs.
+     *Fait :* `src/platform/gamepad.cpp`, logique pure dans `src/ui/inputlogic.h` (`tests/input_test.cpp`), aide `HK_PADTEST` (manette virtuelle de SDL) et `tests/input_smoke.py` ; détails dans BUILD.md, « Manettes ». Non vérifié : de vraies manettes (Xbox, PlayStation, Switch) et la vibration, l'API Gamepad des navigateurs (seulement une manette simulée dans Chromium).
   2. Commandes tactiles : manette à l'écran (stick gauche, zone de regard à droite, boutons), affichée au premier toucher, menus au doigt ; page web sans défilement ni zoom, bouton plein écran, indication de passer en paysage.
+
+     *Fait :* `src/platform/touch.cpp` (disposition dans `inputlogic.h`, testée), réglages dans Options → Pad / Touch, page web (`shell.html`) ; `tests/input_smoke.py` (doigts par `HK_PADTEST`) et `tests/web_smoke.py` (téléphone simulé par Playwright, événements tactiles CDP) ; détails dans BUILD.md, « Écrans tactiles ». Non vérifié : de vrais téléphones et tablettes (iOS Safari, Android Chrome), un écran tactile natif. Reste : le clavier du téléphone pour les champs de texte (code de partie, nom).
 
 ## 4. Sécurité : vulnérabilités classées
 

@@ -277,6 +277,7 @@ set(SOURCES
   src/audio/voice.cpp
   src/platform/platform_sdl.cpp
   src/platform/gamepad.cpp
+  src/platform/touch.cpp
   src/platform/fileio.cpp
   src/platform/system_sdl.cpp
 )

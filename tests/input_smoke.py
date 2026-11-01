@@ -227,7 +227,51 @@ def scene_build(exe, out):
     return [(300 in st and st[300]["buildmenu"] == 1 and st[300]["focus"] > 3, "the build menu with focus areas")], text
 
 
-SCENES = [("game", scene_game), ("spawn", scene_spawn), ("menus", scene_menus), ("build", scene_build)]
+def scene_touch(exe, out):
+    """the touch controls (src/platform/touch.cpp) in a 1024x768 window: walk with the
+    stick, look with a second finger and fire with a third at once; the Menu button
+    pauses and resumes; a tap on the spawn screen plays; a tap clicks the menus"""
+    fire = "%.4f:%.4f" % ((1024 - 92) / 1024, (768 - 92) / 768)
+    menu = "%.4f:%.4f" % (34 / 1024, 84 / 768)
+    s = ("300:log;"
+         "305:finger:1:down:.12:.75;307:finger:1:move:.12:.68;309:finger:1:move:.12:.6;"
+         "310:finger:2:down:.55:.4;312:finger:2:move:.58:.4;314:finger:2:move:.62:.4;"
+         "316:finger:3:down:" + fire + ";330:shot:touchgame;340:log;"
+         "350:finger:3:up:" + fire + ";351:finger:2:up:.62:.4;395:log;396:finger:1:up:.12:.6;410:log;"
+         "420:finger:4:down:" + menu + ";422:finger:4:up:" + menu + ";440:log;445:shot:touchpause;"
+         "450:finger:5:down:" + menu + ";452:finger:5:up:" + menu + ";470:log")
+    text, exited = run(exe, s, dict(HK_AUTOSTART="1", HK_PLAY="1"), out)
+    st = parse_logs(text)
+    checks = []
+    need = [300, 340, 395, 410, 440, 470]
+    missing = [f for f in need if f not in st]
+    checks.append((not missing, "all logs (missing %s)" % missing))
+    if missing:
+        return checks, text
+    checks.append((st[300]["touch"] == 0 and st[340]["touch"] == 1, "the controls show at the first touch"))
+    d = horizontal(st[300], st[395])
+    checks.append((st[340]["up"] == 1 and d > 2, "the stick walks forward (%.2f units)" % d))
+    yaw = (st[340]["yaw"] - st[300]["yaw"] + 180) % 360 - 180
+    checks.append((abs(yaw) > 5, "a second finger looks around (%.1f degrees)" % yaw))
+    checks.append((st[340]["firing"] == 1 and st[395]["firing"] == 0, "a third finger fires, and stops when lifted"))
+    checks.append((st[410]["up"] == 0, "the stick let go: standing"))
+    checks.append((st[440]["ingame"] == 0 and st[470]["ingame"] == 1, "Menu pauses, Resume plays again"))
+    # spawn screen and menus: taps
+    text2, _ = run(exe, "250:log;260:finger:1:down:.5:.5;262:finger:1:up:.5:.5;290:log", dict(HK_AUTOSTART="1"), out)
+    st2 = parse_logs(text2)
+    checks.append((250 in st2 and 290 in st2 and st2[250]["playstate"] == 11 and st2[290]["playstate"] == 10,
+                   "a tap on the spawn screen plays"))
+    # Options: (-.4, -.92) in the menus' units
+    text3, _ = run(exe, "60:log;70:finger:1:down:.3:.96;72:finger:1:up:.3:.96;90:log;"
+                   "100:finger:1:down:.77:.085;102:finger:1:up:.77:.085;120:shot:touchoptions;125:log", {}, out)
+    st3 = parse_logs(text3)
+    checks.append((60 in st3 and 90 in st3 and st3[60]["options"] == 0 and st3[90]["options"] == 1,
+                   "a tap on Options opens it"))
+    return checks, text + text2 + text3
+
+
+SCENES = [("game", scene_game), ("spawn", scene_spawn), ("menus", scene_menus), ("build", scene_build),
+          ("touch", scene_touch)]
 
 
 def main():

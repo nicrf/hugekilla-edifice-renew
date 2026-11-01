@@ -18,6 +18,7 @@
 #include "hktime.h"
 #include "effects.h"
 #include "gamepad.h"
+#include "touch.h"
 
 
 char menutext[5000];
@@ -1447,6 +1448,7 @@ void LoadControls()
 	controls.pushtotalk=TextToKey(controlini.GetValues("pushtotalk"));
 	if(!controls.pushtotalk) controls.pushtotalk='T';   //control.ini from before voice chat
 	PadLoadConfig();   //pad_* (src/platform/gamepad.cpp)
+	TouchLoadConfig();   //touchcontrols, touchsize (src/platform/touch.cpp)
 }
 
 //general keyboard input handler
