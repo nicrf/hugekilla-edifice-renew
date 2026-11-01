@@ -81,6 +81,7 @@ set(SOURCES
   src/game/Vector.cpp
   src/net/multiplay.cpp
   src/net/sock.cpp
+  src/net/udplink.cpp
   src/ui/console.cpp
   src/ui/ui.cpp
   src/ui/options.cpp
