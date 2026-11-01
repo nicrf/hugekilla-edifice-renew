@@ -103,7 +103,7 @@ func TestPrivateAnnouncementRefused(t *testing.T) {
 	if code, _ := announce("198.51.100.9"); code != http.StatusCreated {
 		t.Fatalf("from a public address through the proxy: %d", code)
 	}
-	if list := api.registry.List(0); len(list) != 1 || list[0].Address != "198.51.100.9" {
+	if list := api.registry.List(0, ""); len(list) != 1 || list[0].Address != "198.51.100.9" {
 		t.Fatalf("list = %+v", list)
 	}
 	api.trustProxy = false

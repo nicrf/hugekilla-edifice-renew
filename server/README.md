@@ -84,7 +84,7 @@ Pour le relais TURN, les ports UDP des allocations doivent aussi être joignable
 | Requête | Réponse |
 |---|---|
 | `POST /v1/sessions` | `identity`, `token`, serveurs STUN/TURN avec identifiants temporaires (12 h), `signaling` (`hôte:port` du relais de signalisation TCP, avec `-public-host`), `signaling_url` (le même en WebSocket, `wss://hôte/v1/signal`) |
-| `POST /v1/servers` `{name, port, version, protocol, players, maxplayers, mode, visibility, identity, session}` | `id`, `token`, `refresh_seconds` |
+| `POST /v1/servers` `{name, port, version, protocol, players, maxplayers, mode, visibility, identity, session, lan}` | `id`, `token`, `refresh_seconds` |
 | `PUT /v1/servers/{id}` (même corps, `Authorization: Bearer <token>`) | 204 : partie renouvelée |
 | `DELETE /v1/servers/{id}` (`Authorization: Bearer <token>`) | 204 |
 | `GET /v1/servers?protocol=N` | `{"servers": [...]}` : parties publiques, les plus peuplées d'abord |
@@ -93,6 +93,8 @@ Pour le relais TURN, les ports UDP des allocations doivent aussi être joignable
 | `GET /healthz` | `ok` |
 
 L'adresse d'une partie est **l'IP vue par le serveur**, jamais celle déclarée par l'hôte, et doit être publique (sauf `-allow-private`). De même, `identity` (à laquelle les joueurs se connectent en P2P) n'est listée que si `session` est le jeton de la session de cette identité : personne ne peut annoncer une partie sous l'identité d'un autre (sans preuve, la partie est listée sans identité ; le jeton n'est jamais renvoyé). `visibility` vaut `public` (listée), `friends` ou `private` (non listées, joignables par leur id). L'id est le **code de partie** : 6 caractères (chiffres et majuscules, sans 0/O ni 1/I) à se transmettre ; la recherche ignore la casse, les tirets et les espaces, et compte dans la limite de requêtes par IP pour qu'on ne puisse pas énumérer les parties privées. Limites : 4 parties par IP, requêtes d'écriture limitées par IP, corps de 4 Ko maximum, textes réduits à l'ASCII imprimable.
+
+Même réseau : `lan` (facultatif) donne les adresses IPv4 privées de l'hôte (`10/8`, `172.16/12`, `192.168/16`, 4 au plus ; les autres sont ignorées). Le lobby ne les renvoie (champ `lan` d'une partie, dans la liste comme par le code) **qu'aux joueurs dont la requête vient de la même adresse publique que l'hôte** (même règle d'adresse que l'annonce, donc avec `EDIFICE_TRUST_PROXY` / `EDIFICE_TRUSTED_PROXIES`) : derrière le même routeur, ils rejoignent l'hôte par son adresse locale (la plupart des routeurs ne renvoient pas vers le LAN un paquet adressé à leur propre IP publique). Les autres joueurs ne les voient jamais. Les anciennes versions du jeu n'envoient ni ne lisent ce champ ; les anciens lobbys l'ignorent.
 
 ## Signalisation
 

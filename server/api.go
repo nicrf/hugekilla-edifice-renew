@@ -24,6 +24,8 @@ import (
 //	GET    /v1/servers?protocol=N -> public games
 //	GET    /v1/servers/{id}      -> one game (private games are shared by id, a
 //	                                6-character game code)
+//	                                (both give a game's "lan" addresses only to a
+//	                                player from the host's own public address)
 //	GET    /v1/signal            -> the signaling relay over WebSocket (websocket.go)
 //	GET    /healthz
 type API struct {
@@ -273,7 +275,7 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	case path == "/v1/servers" && r.Method == http.MethodGet:
 		protocol, _ := strconv.Atoi(r.URL.Query().Get("protocol"))
-		writeJSON(w, http.StatusOK, map[string]interface{}{"servers": a.registry.List(protocol)})
+		writeJSON(w, http.StatusOK, map[string]interface{}{"servers": a.registry.List(protocol, a.clientIP(r))})
 
 	case path == "/v1/servers" && r.Method == http.MethodPost:
 		ip := a.clientIP(r)
@@ -301,7 +303,7 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		id := strings.TrimPrefix(path, "/v1/servers/")
 		switch r.Method {
 		case http.MethodGet:
-			s, ok := a.registry.Get(id)
+			s, ok := a.registry.Get(id, a.clientIP(r))
 			if !ok {
 				writeError(w, http.StatusNotFound, ErrNotFound.Error())
 				return

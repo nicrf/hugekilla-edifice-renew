@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"errors"
+	"net"
 	"sort"
 	"strings"
 	"sync"
@@ -25,7 +26,12 @@ type Server struct {
 	Mode       int    `json:"mode"`
 	Visibility string `json:"visibility"`
 	Identity   string `json:"identity,omitempty"` // GameNetworkingSockets identity, for P2P
+	// LAN: the host's private IPv4 addresses, shown only to a player who comes
+	// from the same public address (same network, see List and Get): most routers
+	// don't let a machine reach another one of their LAN through the public address.
+	LAN []string `json:"lan,omitempty"`
 
+	lan      []string // what the host announced, kept out of LAN for everyone else
 	token    string
 	lastSeen time.Time
 }
@@ -41,6 +47,9 @@ type Announcement struct {
 	Mode       int    `json:"mode"`
 	Visibility string `json:"visibility"` // public, friends, private
 	Identity   string `json:"identity"`
+	// LAN: the host's private IPv4 addresses (10/8, 172.16/12, 192.168/16), for
+	// players on its network; anything else is dropped (see cleanLAN)
+	LAN []string `json:"lan"`
 	// Session is the token of the session Identity comes from: an identity is
 	// only listed when it is the announcer's own (see API.vouch). Never stored.
 	Session string `json:"session"`
@@ -120,7 +129,48 @@ func NormalizeCode(s string) string {
 	return b.String()
 }
 
+// MaxLAN: LAN addresses kept per game
+const MaxLAN = 4
+
+var lanRanges = []*net.IPNet{
+	{IP: net.IPv4(10, 0, 0, 0).To4(), Mask: net.CIDRMask(8, 32)},
+	{IP: net.IPv4(172, 16, 0, 0).To4(), Mask: net.CIDRMask(12, 32)},
+	{IP: net.IPv4(192, 168, 0, 0).To4(), Mask: net.CIDRMask(16, 32)},
+}
+
+// cleanLAN keeps the private IPv4 addresses of list (dotted, each once), at most
+// MaxLAN: nothing else is ever given to a player to send packets to.
+func cleanLAN(list []string) []string {
+	var out []string
+	for _, s := range list {
+		if len(out) >= MaxLAN {
+			break
+		}
+		ip := net.ParseIP(s)
+		if ip == nil || strings.Contains(s, ":") {
+			continue
+		}
+		ip = ip.To4()
+		private := false
+		for _, n := range lanRanges {
+			private = private || n.Contains(ip)
+		}
+		dup := false
+		for _, o := range out {
+			dup = dup || o == ip.String()
+		}
+		if private && !dup {
+			out = append(out, ip.String())
+		}
+	}
+	return out
+}
+
 func (a *Announcement) validate() error {
+	if len(a.LAN) > 4*MaxLAN {
+		return ErrBadRequest
+	}
+	a.LAN = cleanLAN(a.LAN)
 	a.Name = cleanText(a.Name, 64)
 	a.Version = cleanText(a.Version, 15)
 	a.Identity = cleanText(a.Identity, 64)
@@ -144,6 +194,25 @@ func (a *Announcement) validate() error {
 func (s *Server) apply(a Announcement) {
 	s.Name, s.Port, s.Version, s.Protocol = a.Name, a.Port, a.Version, a.Protocol
 	s.Players, s.MaxPlayers, s.Mode, s.Visibility, s.Identity = a.Players, a.MaxPlayers, a.Mode, a.Visibility, a.Identity
+	s.lan = a.LAN
+}
+
+// sameIP: two addresses as the lobby writes them are the same host (an IPv4 and
+// its IPv4-mapped IPv6 form are)
+func sameIP(a, b string) bool {
+	ia, ib := net.ParseIP(a), net.ParseIP(b)
+	return ia != nil && ib != nil && ia.Equal(ib)
+}
+
+// view is s as the player at viewer sees it: its LAN addresses only when the
+// player comes from the host's public address (the same network)
+func (s *Server) view(viewer string) Server {
+	out := *s
+	out.LAN = nil
+	if len(s.lan) > 0 && sameIP(viewer, s.Address) {
+		out.LAN = append([]string(nil), s.lan...)
+	}
+	return out
 }
 
 // Register adds a game seen from ip and returns its id and the token needed to
@@ -213,7 +282,8 @@ func (r *Registry) Remove(id, token string) error {
 }
 
 // List returns the public games, most players first; protocol 0 means any.
-func (r *Registry) List(protocol int) []Server {
+// viewer is the address of the player asking (LAN addresses, see Server.view).
+func (r *Registry) List(protocol int, viewer string) []Server {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.expireLocked()
@@ -222,7 +292,7 @@ func (r *Registry) List(protocol int) []Server {
 		if s.Visibility != "public" || (protocol != 0 && s.Protocol != protocol) {
 			continue
 		}
-		out = append(out, *s)
+		out = append(out, s.view(viewer))
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Players != out[j].Players {
@@ -234,8 +304,8 @@ func (r *Registry) List(protocol int) []Server {
 }
 
 // Get returns one game by id (its game code, any case), whatever its
-// visibility (shared by invitation).
-func (r *Registry) Get(id string) (Server, bool) {
+// visibility (shared by invitation); viewer as for List.
+func (r *Registry) Get(id, viewer string) (Server, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.expireLocked()
@@ -243,7 +313,7 @@ func (r *Registry) Get(id string) (Server, bool) {
 	if !ok {
 		return Server{}, false
 	}
-	return *s, true
+	return s.view(viewer), true
 }
 
 func (r *Registry) expireLocked() {
