@@ -12,7 +12,6 @@
 
 #ifndef HK_WIN32_NATIVE
 
-#include "StdAfx.h"
 #include "vector.h"
 #include "playing.h"
 #include "multiplay.h"

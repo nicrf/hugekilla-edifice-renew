@@ -3,11 +3,11 @@
 //multiplay.cpp) and the map save files (src/game/mapfile.cpp). Also the
 //validation applied to them whether they come from the network or a file:
 //both are untrusted.
-//Needs land.h (and so DWORD and Vector) included before.
 
 #ifndef LANDWIREH
 #define LANDWIREH
 
+#include "land.h"
 #include "wire.h"
 
 //LandDefs: int32 numdefs, NUMDEF deformations of 29 bytes (int8 type, int32

@@ -1,3 +1,8 @@
+#ifndef UIH
+#define UIH
+
+#include "win32compat.h"
+
 void DrawMenu();
 void MenuMouseDown();
 void HandleButton(int handler);
@@ -67,3 +72,13 @@ struct Button
 	int texpos;
 	float x1,y1,x2,y2;
 };
+
+//console.cpp
+extern char consoletext[100][500];
+extern char consolecommand[500];
+extern int consolevisible;
+extern int consolepartvisible;
+extern DWORD consolescrolltime;
+extern int consoleoverlay;     //the game frame draws the console: no extra frame for it
+
+#endif

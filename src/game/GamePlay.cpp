@@ -1,18 +1,9 @@
-#include "StdAfx.h"
+#include "redrawing.h"
+#include "hugekilla.h"
 #include "multiplay.h"
 #include "gameplay.h"
 #include "stdio.h"
 
-extern int consolevisible;
-extern DWORD curtime;
-extern Object object[MAXOBJS];
-extern AseObj projectile[20];
-extern ServerVars sv;
-extern ServerObject sobject[MAXSERVEROBJS];
-extern LandDefs ldfs;
-extern int numplayers;
-extern int server;
-extern RemoteGameData rgd;
 GameData gd;
 Team team[3];
 

@@ -3,7 +3,7 @@
 #include "land.h"
 #include "vector.h"
 #include "playing.h"
-#include "winsock2.h"
+#include "win32compat.h"   //SOCKADDR_IN, LRESULT, WORD
 #include "version.h"
 
 LRESULT CALLBACK Multiplay(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
@@ -100,5 +100,13 @@ struct NetSettings
 	char playername[32];
 	DWORD maxplayers;
 };
+
+//multiplay.cpp
+extern int server;          //1: this game is the host
+extern int numplayers;      //see GetNumPlayers
+extern NetSettings netsettings;
+extern RemoteGameData rgd;
+extern char curobjective[1000];   //HUD lines the server sends (CMSG_OBJECTIVE, CMSG_SCORE)
+extern char curscore[1000];
 
 #endif

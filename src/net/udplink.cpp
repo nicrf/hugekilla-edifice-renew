@@ -1,6 +1,6 @@
 //UdpLink: DatagramLink over a UDP socket (see udplink.h)
 
-#include <StdAfx.h>
+#include "win32compat.h"
 #include "udplink.h"
 
 UdpLink::UdpLink()

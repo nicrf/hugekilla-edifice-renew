@@ -1,6 +1,8 @@
 #ifndef MULTIPLAYSTRUCTH
 #define MULTIPLAYSTRUCTH
 #include "sock.h"
+#include "land.h"
+#include "playing.h"   //ServerObject, ServerVars
 
 //main messages
 #define REQUESTENTER 1

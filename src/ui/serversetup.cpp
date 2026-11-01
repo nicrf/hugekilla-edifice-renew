@@ -7,18 +7,16 @@
 
 #ifndef HK_WIN32_NATIVE
 
-#include "StdAfx.h"
+#include "gl.h"
+#include "platform.h"
+#include "fileio.h"
+#include "cfgfile.h"
+#include "hugekilla.h"
 #include "redrawing.h"
 #include "playing.h"
 #include "multiplay.h"
 #include "ui.h"
 #include "lobbygame.h"
-
-extern Vector mousepos;
-extern ServerVars sv;
-extern int hkforcedsky;
-extern float hkreliefscale;
-extern int hksceneryoverride;
 
 #define MAXSKIES 16
 #define MAXMAPS 64

@@ -3,6 +3,7 @@
 // go through SDL (presenting, quitting, message boxes, keyboard state).
 
 #include "win32compat.h"
+#include "gl.h"   //HK_SHOT reads the back buffer
 #include <SDL.h>
 
 #ifndef _WIN32

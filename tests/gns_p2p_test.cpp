@@ -11,7 +11,7 @@
 //       without
 // Run by tests/net_p2p.py, after the games themselves.
 
-#include <StdAfx.h>
+#include "win32compat.h"
 #include <chrono>
 #include <string>
 #include <thread>

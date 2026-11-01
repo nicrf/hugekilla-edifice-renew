@@ -1,6 +1,8 @@
 #ifndef SOCKH
 #define SOCKH
 
+#include "win32compat.h"   //DWORD, WORD, SOCKADDR_IN
+
 #define MAXPACKETSIZE 1000
 #define BIGBUFSIZE 50000
 #define MAXSIMULRELIABLE 30
@@ -116,4 +118,8 @@ public:
 	void Flush();
 	
 };
+
+//sock.cpp: bytes through every Sock, for the network statistics overlay
+extern int datasendthissec,datarecvthissec;
+extern int datasendthisframe,datarecvthisframe;
 #endif

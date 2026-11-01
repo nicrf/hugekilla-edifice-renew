@@ -2,8 +2,8 @@
 //like sending a building, sending the land information, movement, chat messages
 //uses the class Sock intensively
 
-#include "StdAfx.h"
-#include "winsock2.h"
+#include "platform.h"
+#include "models.h"
 #include "cfgfile.h"
 #include "resource.h"
 #include "multiplay.h"
@@ -13,7 +13,6 @@
 #include "playing.h"
 #include "multiplaystruct.h"
 #include "math.h"
-#include "mmsystem.h"
 #include "sound.h"
 #include "stdio.h"
 #include "gameplay.h"
@@ -38,14 +37,6 @@
 #endif
 #include <SDL.h>
 #endif
-
-extern int consolevisible;
-extern DWORD curtime;
-extern Object object[MAXOBJS];
-extern AseObj projectile[20];
-extern ServerVars sv;
-extern ServerObject sobject[MAXSERVEROBJS];
-extern LandDefs ldfs;
 
 
 RemoteGameData rgd;
@@ -149,7 +140,32 @@ static void SendRequestEnter()
 	infosock.Flush();
 }
 
-extern int ac_enable,ac_requirecookie,ac_serverhits,ac_stableslots;
+//server anti-cheat settings (M11, the checks are further down; SendInfo announces them):
+//server vars, from the console or sv.ini; the defaults never get in the way of
+//normal play. 0 turns a check off.
+int ac_enable=1;            //0: no check at all
+int ac_killdamage=200;      //damage the server counts on a player before killing it itself
+int ac_hitcap=100;          //at most this much counted per bullet or grenade
+int ac_deadtime=5000;       //ms a player killed by the server stays dead
+int ac_killinterval=2000;   //ms between two deaths a client may report
+float ac_firetolerance=.75f;//shortest shot interval accepted, times the weapon's
+int ac_fireburst=300;       //ms of shots that may arrive bunched up (jitter)
+int ac_ammoslack=2;         //rounds the server's magazine may be off by, -1: off
+float ac_maxspeed=150;      //units/s between two positions above which it is logged
+int ac_firedist=20;         //units between a shot and its shooter above which it is logged
+int ac_builddist=50;        //blocks from the player a block may be placed or removed
+int ac_ipinfo=5;            //info requests answered per second and IP
+int ac_ipenter=30;          //join requests per minute and IP
+int ac_ippackets=50;        //messages per second and IP on the info port
+int ac_requirecookie=0;     //1: refuse clients that can't answer a join cookie (0.5.x and older)
+int ac_cookietime=30000;    //ms of a join cookie time bucket (valid one to two buckets)
+int ac_serverhits=1;        //1: the server decides hits and deaths (phase 3a); 0: phase-1 bounds
+float ac_hittolerance=.5f;  //units added around a player's hitbox when the server tests a bullet
+int ac_lagcomp=300;         //ms of a shooter's ping the server rewinds, at most
+//phase 3b. ac_stableslots isn't a check: it doesn't depend on ac_enable
+int ac_stableslots=1;       //1: a leaver frees its slot, the others keep their numbers (all clients able)
+float ac_posrate=2;         //positions per positionresendtime a client may send (more are dropped), 0: off
+int ac_moveclamp=0;         //1: a player moving faster than ac_maxspeed is held back to it (0: logged only)
 
 //server answers an info request, with its version
 static void SendInfo(SOCKADDR_IN dest)
@@ -231,32 +247,7 @@ static void WritePlayerName(ByteWriter &w,int i)
 }
 
 //---- anti-cheat (roadmap M11 phase 1, docs/M11.md; the logic is in anticheat.h) ----
-
-//server vars, from the console or sv.ini; the defaults never get in the way of
-//normal play. 0 turns a check off.
-int ac_enable=1;            //0: no check at all
-int ac_killdamage=200;      //damage the server counts on a player before killing it itself
-int ac_hitcap=100;          //at most this much counted per bullet or grenade
-int ac_deadtime=5000;       //ms a player killed by the server stays dead
-int ac_killinterval=2000;   //ms between two deaths a client may report
-float ac_firetolerance=.75f;//shortest shot interval accepted, times the weapon's
-int ac_fireburst=300;       //ms of shots that may arrive bunched up (jitter)
-int ac_ammoslack=2;         //rounds the server's magazine may be off by, -1: off
-float ac_maxspeed=150;      //units/s between two positions above which it is logged
-int ac_firedist=20;         //units between a shot and its shooter above which it is logged
-int ac_builddist=50;        //blocks from the player a block may be placed or removed
-int ac_ipinfo=5;            //info requests answered per second and IP
-int ac_ipenter=30;          //join requests per minute and IP
-int ac_ippackets=50;        //messages per second and IP on the info port
-int ac_requirecookie=0;     //1: refuse clients that can't answer a join cookie (0.5.x and older)
-int ac_cookietime=30000;    //ms of a join cookie time bucket (valid one to two buckets)
-int ac_serverhits=1;        //1: the server decides hits and deaths (phase 3a); 0: phase-1 bounds
-float ac_hittolerance=.5f;  //units added around a player's hitbox when the server tests a bullet
-int ac_lagcomp=300;         //ms of a shooter's ping the server rewinds, at most
-//phase 3b. ac_stableslots isn't a check: it doesn't depend on ac_enable
-int ac_stableslots=1;       //1: a leaver frees its slot, the others keep their numbers (all clients able)
-float ac_posrate=2;         //positions per positionresendtime a client may send (more are dropped), 0: off
-int ac_moveclamp=0;         //1: a player moving faster than ac_maxspeed is held back to it (0: logged only)
+//(settings: ac_* above SendInfo)
 
 #define AC_KILL 0
 #define AC_DEATH 1
@@ -904,7 +895,6 @@ static void RelayVoice(VoiceMessage *voice);
 #ifndef HK_WIN32_NATIVE
 static void JoinNetAddGame(const char *msg,int msglen,SOCKADDR_IN source);
 #endif
-void DeletePlayer(int num,int reason);
 void ReceiveChatMessage(char *msg,int msglen);
 
 

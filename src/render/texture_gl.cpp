@@ -1,7 +1,7 @@
 //OpenGL backend of the texture registry (textures.h): the only place that
 //creates, fills or frees GL texture objects. M13 replaces this file.
 
-#include "StdAfx.h"
+#include "gl.h"
 #include "textures.h"
 
 static GLuint texnames[TEX_NUMSLOTS];   //0: not created yet

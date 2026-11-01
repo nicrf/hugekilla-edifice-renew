@@ -1,12 +1,12 @@
 //AseObj is a class that can load .cob (truespace) objects, including textures.  It also includes the functions to draw them
 
-#include "StdAfx.h"
+#include "gl.h"
+#include "fileio.h"
 #include "vector.h"
 #include "ase.h"
 #include "redrawing.h"
 #include "land.h"
 #include "playing.h"
-extern ServerVars sv;
 
 void AseObj::Release()
 {
@@ -81,7 +81,7 @@ int ReadDupName(char *buf,short &dupecount,char *&name)
 	buf+=len;
 	return 2+len;
 }
-int ReadVertices(char *buf,sobject *obj)
+int ReadVertices(char *buf,asemesh *obj)
 {
 	int numpoints;
 	CopyMemory(&numpoints,buf,4);
@@ -101,7 +101,7 @@ int ReadVertices(char *buf,sobject *obj)
 	return 4+12*numpoints;
 
 }
-void TranslateVertices(sobject *obj,Vector center)
+void TranslateVertices(asemesh *obj,Vector center)
 {
 	
 	for(int i=0;i<obj->numpoints;i++)
@@ -110,7 +110,7 @@ void TranslateVertices(sobject *obj,Vector center)
 	}
 
 }
-void TranslateVertices(sobject *obj,Vector x,Vector y,Vector z)
+void TranslateVertices(asemesh *obj,Vector x,Vector y,Vector z)
 {
 	for(int i=0;i<obj->numpoints;i++)
 	{
@@ -129,7 +129,7 @@ void TranslateVect(float mx[][4],Vector &p)
 	p=d;
 }
 
-void TranslateVertices(sobject *obj,float mx[][4])
+void TranslateVertices(asemesh *obj,float mx[][4])
 {
 	for(int i=0;i<obj->numpoints;i++)
 	{
@@ -137,7 +137,7 @@ void TranslateVertices(sobject *obj,float mx[][4])
 	}
 }
 
-int ReadUVVertices(char *buf,sobject *obj)
+int ReadUVVertices(char *buf,asemesh *obj)
 {
 	int numtex;
 	CopyMemory(&numtex,buf,4);
@@ -154,7 +154,7 @@ int ReadUVVertices(char *buf,sobject *obj)
 	return 4+8*numtex;
 }
 
-int ReadFaces(char *buf,sobject *obj)
+int ReadFaces(char *buf,asemesh *obj)
 {
 	char *obuf=buf;
 	int numface;
@@ -223,7 +223,7 @@ int ReadFaces(char *buf,sobject *obj)
 
 
 }
-void ComputeNormals(sobject *obj)
+void ComputeNormals(asemesh *obj)
 {
 
 	int i;
@@ -251,7 +251,7 @@ void ComputeNormals(sobject *obj)
 		if(num) obj->pnt[i].nvctr=Normalize(avg/num);
 	}
 }
-void ReadObject(char *buf,int buflen,sobject *obj)
+void ReadObject(char *buf,int buflen,asemesh *obj)
 {
 	char *max=&buf[buflen];
 	short dupecount;
@@ -385,7 +385,7 @@ int AseObj::LoadCob(char *buf,int buflen)
 	object.nummats=nummats;
 	texinfo *tex=new texinfo[nummats];
 	object.numobjs=numobjs;
-	object.objs=new sobject[numobjs];
+	object.objs=new asemesh[numobjs];
 	
 	nummats=0;
 	numobjs=0;
@@ -434,7 +434,7 @@ int AseObj::LoadCob(char *buf,int buflen)
 	for(int i=0;i<object.numobjs;i++)
 	{
 		
-		sobject *obj=&object.objs[i];
+		asemesh *obj=&object.objs[i];
 		obj->lastcompx=Vector(0,0,0);
 		texinfo *tx=&tex[i];
 	}	

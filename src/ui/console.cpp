@@ -1,16 +1,16 @@
 
 
-#include <StdAfx.h>
+#include "gl.h"
+#include "platform.h"
+#include "fileio.h"
+#include "cfgfile.h"
+#include "hugekilla.h"
+#include "gameplay.h"
 #include "redrawing.h"
 #include "stdio.h"
 #include "multiplay.h"
 #include "ui.h"
 #include <ctype.h>
-extern GraphicsPrefs graphicsprefs;
-extern int server;
-extern ServerVars sv;
-extern int numplayers;
-extern GameData gd;
 
 char consoletext[100][500];
 char consolecommand[500];
@@ -18,9 +18,6 @@ char prevconsolecommand[40][500];
 int curprevconsolecommand=-1;
 int consolevisible;
 DWORD consolescrolltime;
-
-extern DWORD curtime;
-extern ServerObject sobject[MAXSERVEROBJS];
 
 char consolevar[100][40];
 void *consolevarptr[100];
@@ -674,9 +671,6 @@ void InitConsole()
 	AddConsoleVar(&graphicsprefs.stereoseparation,"stereoseperation",0);
 
 }
-extern HDC hdc;
-extern HBRUSH backbrush;
-extern HWND hWnd;
 
 void DrawConsoleNonGL()
 {

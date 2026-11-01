@@ -5,7 +5,6 @@
 
 
 
-#include <StdAfx.h>
 #include "multiplay.h"
 #include "sock.h"
 #include "redrawing.h"

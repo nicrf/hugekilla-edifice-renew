@@ -1,14 +1,16 @@
 //functions to do all the things that have to do with gameplay
 
 
-#include "StdAfx.h"
+#include "platform.h"
+#include "cfgfile.h"
+#include "models.h"
+#include "gameplay.h"
 #include "hugekilla.h"
 #include "ui.h"
 #include "vector.h"
 #include "playing.h"
 #include "land.h"
 #include "math.h"
-#include "mmsystem.h" 
 #include "multiplay.h"
 #include "sound.h"
 #include "voice.h"
@@ -18,14 +20,6 @@ char menutext[5000];
 char menu;
 
 char talktext[1000];
-extern char consoletext[100][500];
-extern char consolecommand[500];
-extern int consolevisible;
-extern ServerVars sv;
-extern char curstructurepath[1000];
-
-extern AseObj projectile[4];
-extern Particle particle[MAXPARTICLES];
 
 Object object[MAXOBJS];
 ServerObject sobject[MAXSERVEROBJS];

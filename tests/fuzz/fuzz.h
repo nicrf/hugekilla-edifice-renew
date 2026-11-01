@@ -6,8 +6,7 @@
 #ifndef FUZZH
 #define FUZZH
 
-#include "StdAfx.h"   //the game's types (DWORD, Vector, LandDefs, ServerVars...)
-#include "multiplay.h"
+#include "multiplay.h"   //the game's types (DWORD, Vector, LandDefs, ServerVars...)
 #include "multiplaystruct.h"
 #include "netmsg.h"
 #include <stdio.h>

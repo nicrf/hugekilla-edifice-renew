@@ -9,7 +9,7 @@
 // with another info port (the connection goes to gnsport all the same).
 // Run by tests/run_gns_netplay_test.sh.
 
-#include <StdAfx.h>
+#include "win32compat.h"
 #include <chrono>
 #include <thread>
 #include <steam/steamnetworkingsockets.h>

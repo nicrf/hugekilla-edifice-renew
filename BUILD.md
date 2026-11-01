@@ -107,19 +107,21 @@ build/fuzz/fuzz_map -max_total_time=60 /tmp/c    # fuzzing (le corpus grandit da
 ## Arborescence
 
 ```
-src/game/      boucle de jeu, terrain (land*), structures, physique, config, vector, StdAfx.h, hugekilla.cpp
-src/render/    rendu OpenGL (redrawing), textures (registre textures.h, image.cpp = stb_image), modèles .cob (ase)
+src/game/      boucle de jeu, terrain (land*), structures, physique, config, vector, hugekilla.cpp
+src/render/    rendu OpenGL (redrawing), textures (registre textures.h, image.cpp = stb_image), modèles .cob (ase, models.h)
 src/net/       sockets UDP (sock), protocole et serveur/client (multiplay*)
 src/ui/        menus en jeu, console, Options, Server Setup, crédits
 src/audio/     sound_sdl.cpp (SDL) ; sound.cpp = DirectSound d'origine, plus compilé
-src/platform/  platform_sdl.cpp : main SDL (fenêtre, contexte GL, entrées) ; fileio.* : accès aux fichiers (std::filesystem, stdio)
-src/compat/    win32compat.* : émulation Win32 (POSIX) / redirections SDL (Windows) ; include/ = faux windows.h, gl/gl.h… (POSIX)
+src/platform/  platform_sdl.cpp : main SDL (fenêtre, contexte GL, entrées, platform.h) ; gl.h : OpenGL et GLU ; fileio.* : accès aux fichiers (std::filesystem, stdio)
+src/compat/    win32compat.* : émulation Win32 (POSIX) / redirections SDL (Windows)
 src/third_party/ stb/stb_image.h v2.30 (nothings/stb 31c1ad3, domaine public / MIT, licence dans stb/LICENSE)
 win32/         hugekilla.rc, resource.h, icônes ; .sln/.vcproj d'origine pour référence
 data/          données du jeu (ini, textures, sons, objets, Structures)
 ```
 
 Le code Win32 natif d'origine (WinMain, DirectSound, boîtes de dialogue) reste lisible dans les sources derrière `HK_WIN32_NATIVE`, jamais défini.
+
+Chaque `.cpp` inclut ce qu'il utilise (plus de `StdAfx.h`) : les noms Win32 (`DWORD`, `SOCKADDR_IN`…) par `win32compat.h`, OpenGL par `gl.h`, et les globales partagées par le header du module qui les définit (`land.h`, `playing.h`, `multiplay.h`, `redrawing.h`, `models.h`, `ui.h`, `platform.h`…), déclarées une seule fois : pas d'`extern` local dans un `.cpp`.
 
 ## Données
 

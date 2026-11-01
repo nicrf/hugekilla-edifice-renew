@@ -2,6 +2,8 @@
 #ifndef GAMEPLAY_
 #define GAMEPLAY_
 
+#include "win32compat.h"   //DWORD
+
 #define DOME 1
 #define WATERPUMP 2
 #define FLAG 3
@@ -41,5 +43,7 @@ struct GameData
 	DWORD gameendtime;
 	int gameon;
 };
+
+extern GameData gd;   //GamePlay.cpp
 
 #endif

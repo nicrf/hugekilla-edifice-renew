@@ -1,32 +1,30 @@
 // hugekilla.cpp : Defines the entry point for the application.
 //
 
-#include "StdAfx.h"
+#include "platform.h"
+#include "fileio.h"
+#include "hugekilla.h"
+#include "gameplay.h"
 #include "resource.h"
 #include "land.h"
 #include "redrawing.h"
 #include "vector.h"
 #include "playing.h"
-#include "mmsystem.h"
 #include "multiplay.h"
 #include "sound.h"
-#include "commdlg.h"
+#ifdef HK_WIN32_NATIVE   //the original Win32 window (never built): WGL and the file dialogs
+#include "gl.h"
+#include <commdlg.h>   //GetOpenFileName, left out by WIN32_LEAN_AND_MEAN
+#endif
 #include "ui.h"
 #include "wire.h"
 #include "landwire.h"
 #include "mapfile.h"
+#include <time.h>
 
 #define MAX_LOADSTRING 100
 #define WM_MOUSEWHEEL 0x020A
 
-
-extern PhysicsVars physics;
-extern int consolevisible;
-extern char menu;
-extern GraphicsPrefs graphicsprefs;
-extern Block blocks[BLOCKGRIDSIZE][BLOCKGRIDHEIGHT][BLOCKGRIDSIZE];
-extern char nextblock[BLOCKGRIDSIZE][BLOCKGRIDHEIGHT][BLOCKGRIDSIZE];
-extern DWORD curtime;
 
 void Save(char *filename);
 void Load(char *filename);

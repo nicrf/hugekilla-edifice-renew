@@ -24,7 +24,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include "landwire.h"   //needs land.h before
+#include "landwire.h"
 
 #define MAPMAGIC "EDIFICEMAP"
 #define MAPMAGICSIZE 10

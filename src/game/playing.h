@@ -1,6 +1,8 @@
 
 #ifndef PLAYINGH
 #define PLAYINGH
+#include "win32compat.h"
+#include "vector.h"
 #include "ase.h"
 
 int GetAmmoHold(int num);
@@ -190,4 +192,17 @@ void InitConsole();
 #define BUYACCESSORY 0x23
 #define BUILDING 0x40
 #define INFOMENU 0x80
+
+//playing.cpp
+extern DWORD curtime;       //game clock, ms
+extern ServerVars sv;
+extern PhysicsVars physics;
+extern Controls controls;
+extern Object object[MAXOBJS];
+extern ServerObject sobject[MAXSERVEROBJS];
+extern char menu;           //NOMENU, BUILD, BUY... BUILDING while placing a structure
+extern char menutext[5000];
+extern char talktext[1000];
+//structures.cpp
+extern char curstructurepath[1000];
 #endif

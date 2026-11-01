@@ -17,6 +17,8 @@
 #ifndef NETLINKH
 #define NETLINKH
 
+#include "win32compat.h"   //WORD
+
 class DatagramLink;
 struct LobbySession;
 

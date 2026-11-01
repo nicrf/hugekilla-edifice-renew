@@ -166,16 +166,14 @@ set(SOURCES
   src/compat/win32compat.cpp
 )
 
-# The legacy sources include headers by bare name ("vector.h", "redrawing.h",
-# <StdAfx.h>...), so every module directory is on the include path.
+# The sources include headers by bare name ("vector.h", "redrawing.h"...), so every
+# module directory is on the include path. Each file includes what it uses: the
+# Win32 names through "win32compat.h" (the real API on Windows, an emulation
+# elsewhere), OpenGL through "gl.h" (src/platform).
 set(INCLUDE_DIRS
   ${SRC}/game ${SRC}/render ${SRC}/net ${SRC}/ui ${SRC}/audio ${SRC}/platform ${SRC}/compat
   ${SRC}/third_party   # "stb/stb_image.h" (public domain / MIT, see its LICENSE)
   ${CMAKE_CURRENT_SOURCE_DIR}/win32)   # resource.h (dialog/icon IDs used by the code)
-if(NOT WIN32)
-  # Stand-ins for <windows.h>, "gl/gl.h"... (on Windows the real headers are used)
-  list(APPEND INCLUDE_DIRS ${SRC}/compat/include)
-endif()
 
 # ---- Target ------------------------------------------------------------------
 if(APPLE)
@@ -298,10 +296,7 @@ add_test(NAME hmac COMMAND hmac_test)
 add_executable(fileio_test tests/fileio_test.cpp src/platform/fileio.cpp)
 target_include_directories(fileio_test PRIVATE ${SRC}/platform)
 add_test(NAME fileio COMMAND fileio_test)
-set(HK_TEST_INCLUDES ${SRC}/game ${SRC}/net ${SRC}/compat)
-if(NOT WIN32)
-  list(APPEND HK_TEST_INCLUDES ${SRC}/compat/include)   # "windows.h": DWORD...
-endif()
+set(HK_TEST_INCLUDES ${SRC}/game ${SRC}/net ${SRC}/compat)   # "win32compat.h": DWORD...
 add_executable(map_test tests/map_test.cpp src/game/mapfile.cpp)
 target_include_directories(map_test PRIVATE ${HK_TEST_INCLUDES})
 add_test(NAME map COMMAND map_test)

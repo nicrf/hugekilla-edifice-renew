@@ -1,6 +1,6 @@
 //GnsLink: DatagramLink over GameNetworkingSockets connections (see gnslink.h)
 
-#include <StdAfx.h>
+#include "win32compat.h"
 #include <deque>
 #include <string>
 #include <vector>

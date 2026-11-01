@@ -6,22 +6,13 @@
 
 #ifndef HK_WIN32_NATIVE
 
-#include "StdAfx.h"
+#include "gl.h"
+#include "platform.h"
 #include "redrawing.h"
 #include "playing.h"
 #include "gameplay.h"
 #include "multiplay.h"
 #include "ui.h"
-
-extern ServerVars sv;
-extern Vector mousepos;
-extern RemoteGameData rgd;
-extern Controls controls;
-extern int numplayers;
-extern int consolevisible;
-extern char curscore[1000];
-extern NetSettings netsettings;
-void LockCursor(int lock);
 
 #define PANELX1 -.9f
 #define PANELX2 .9f
