@@ -167,6 +167,7 @@ Chaque PR rejoue la recette et garde la CI MSVC verte.
   3. Remplacer les shims Win32 par des abstractions plateforme. SDL devient le main partout, `DirectSound` est retiré.
   4. Chemins d'assets : supprimer les 122 lignes avec `\\`, passer à `std::filesystem` et à stb_image.
   5. `IRenderer` : `glGenTextures` à la place des IDs codés en dur (1, 2, 4, 6, 300, 400+i, 600, 800, 1300+), avec une validation par pixel-diff.
+     *Partiel :* registre de textures (`src/render/textures.h`, backend OpenGL seul dans `texture_gl.cpp`) : les emplacements nommés (`TEX_FONT`, `TEX_CLOUDS`, `TEX_GROUND0+i`, `TEX_MENU0+i`…) gardent les anciens numéros, mais leurs noms GL viennent de `glGenTextures` à la première utilisation et sont libérés à la fermeture (`TexShutdown`). Plus aucun `glBindTexture`, `gluBuild2DMipmaps` ni ID littéral hors du registre ; les chargeurs (`LoadTexture`, `LoadRaw`) décodent le fichier puis appellent `TexUpload`. Validé par pixel-diff (`tests/pixel_diff.py`) : écrans 2D identiques au pixel près, écrans en jeu comparés hors bruit d'une exécution à l'autre. Restent pour `IRenderer` (M13.1) : la mesure de la police relit la texture par `glGetTexImage` (`src/ui/ui.cpp`) et les états GL autour des textures (`glEnable(GL_TEXTURE_2D)`, `glTexEnv`).
   6. Passe UB finale : retirer `-Wno-return-type`, `-fwrapv` et `-fno-strict-aliasing` (CMakeLists.txt:59-62), et passer en `-Werror`.
 
 ### M13 - Rendu moderne avec sokol_gfx (L, à mener par petites PR)
