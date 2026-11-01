@@ -367,6 +367,7 @@ void TickObjects(float sf)
 				}
 				if(curtime>object[i].timeout)
 				{
+					AcGrenade(&object[i]);   //server: remote players hit (M11)
 					SetSoundPosition(181,object[i].pos);
 					PlaySound(181,0);
 				
@@ -435,6 +436,7 @@ void TickObjects(float sf)
 				}
 				
 				object[i].pos+=Normalize(object[i].vel)*20*mysf;
+				AcBulletTick(&object[i]);   //server: remote players hit (M11)
 				if((GetPlayer(object[i].pnum)->team!=GetLocalPlayer()->team)||GetPlayer(object[i].pnum)->team==0)
 				if(object[i].pnum!=GetLocalNum())
 				{
