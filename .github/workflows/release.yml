@@ -74,7 +74,8 @@ jobs:
         shell: bash
         run: .github/scripts/vcpkg-setup.sh
 
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
+        id: vcpkg-cache
         with:
           path: vcpkg-cache
           key: vcpkg-release-${{ matrix.name }}-${{ env.VCPKG_COMMIT }}-${{ hashFiles('vcpkg.json', 'cmake/triplets/*') }}
@@ -86,6 +87,13 @@ jobs:
         # libraries, cmake/triplets/universal-osx.cmake); Linux: static too;
         # Windows: GameNetworkingSockets and its DLLs + the C++ runtime DLLs
         run: python build.py --config Release --gns --package --test ${{ matrix.name == 'macos' && '--universal' || '' }}
+
+      # saved right after the build, so that a failing check below keeps it
+      - uses: actions/cache/save@v4
+        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
+        with:
+          path: vcpkg-cache
+          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
 
       - name: Check the archive (contents, dependencies, a short run)
         shell: bash
