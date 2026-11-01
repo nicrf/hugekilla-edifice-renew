@@ -18,7 +18,8 @@ import (
 //	PUT    /v1/servers/{id}      -> refresh it (Authorization: Bearer token)
 //	DELETE /v1/servers/{id}      -> remove it (Authorization: Bearer token)
 //	GET    /v1/servers?protocol=N -> public games
-//	GET    /v1/servers/{id}      -> one game (private games are shared by id)
+//	GET    /v1/servers/{id}      -> one game (private games are shared by id, a
+//	                                6-character game code)
 //	GET    /healthz
 type API struct {
 	registry   *Registry
@@ -92,8 +93,10 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok\n"))
 		return
 	}
-	// writes are rate limited per IP; reads are cheap
-	if r.Method != http.MethodGet && !a.limiter.allow(a.clientIP(r)) {
+	// writes are rate limited per IP, and so are lookups by game code (they
+	// would otherwise let anyone enumerate the private games); the list is cheap
+	lookup := r.Method == http.MethodGet && strings.HasPrefix(path, "/v1/servers/")
+	if (r.Method != http.MethodGet || lookup) && !a.limiter.allow(a.clientIP(r)) {
 		writeError(w, http.StatusTooManyRequests, "slow down")
 		return
 	}

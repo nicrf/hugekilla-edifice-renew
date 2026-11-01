@@ -62,6 +62,51 @@ FetchContent_Declare(opus
   URL_HASH SHA256=65c1d2f78b9f2fb20082c38cbe47c951ad5839345876e46941612ee87f9a7ce1)
 FetchContent_MakeAvailable(opus)
 
+# ---- libcurl (Internet game list: edifice-lobby over HTTPS, roadmap M7c) ------
+# The system's libcurl on macOS and Linux (Debian/Ubuntu: libcurl4-openssl-dev).
+# On Windows (MSVC), where there is none, curl is built statically from source with
+# the system TLS (Schannel), like SDL2 and Opus. Without libcurl the game builds
+# anyway, and the join screen's Internet tab says it isn't available.
+option(EDIFICE_LOBBY "Internet game list (needs libcurl)" ON)
+set(HK_CURL_LIB)
+if(EDIFICE_LOBBY)
+  find_package(CURL QUIET)
+  if(CURL_FOUND)
+    set(HK_CURL_LIB CURL::libcurl)
+  elseif(MSVC)
+    set(BUILD_CURL_EXE OFF CACHE BOOL "" FORCE)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(BUILD_STATIC_LIBS ON CACHE BOOL "" FORCE)
+    set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    set(BUILD_LIBCURL_DOCS OFF CACHE BOOL "" FORCE)
+    set(BUILD_MISC_DOCS OFF CACHE BOOL "" FORCE)
+    set(ENABLE_CURL_MANUAL OFF CACHE BOOL "" FORCE)
+    set(CURL_DISABLE_INSTALL ON CACHE BOOL "" FORCE)
+    set(CURL_ENABLE_EXPORT_TARGET OFF CACHE BOOL "" FORCE)
+    set(CURL_STATIC_CRT ON CACHE BOOL "" FORCE)        # same static CRT as the game
+    set(CURL_USE_SCHANNEL ON CACHE BOOL "" FORCE)
+    set(CURL_USE_LIBPSL OFF CACHE BOOL "" FORCE)
+    set(CURL_USE_LIBSSH2 OFF CACHE BOOL "" FORCE)
+    set(USE_LIBIDN2 OFF CACHE BOOL "" FORCE)
+    set(USE_NGHTTP2 OFF CACHE BOOL "" FORCE)
+    set(CURL_ZLIB OFF CACHE STRING "" FORCE)
+    set(CURL_BROTLI OFF CACHE BOOL "" FORCE)
+    set(CURL_ZSTD OFF CACHE BOOL "" FORCE)
+    set(HTTP_ONLY ON CACHE BOOL "" FORCE)
+    set(PICKY_COMPILER OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(curl
+      URL https://github.com/curl/curl/releases/download/curl-8_10_1/curl-8.10.1.tar.xz
+      URL_HASH SHA256=73a4b0e99596a09fa5924a4fb7e4b995a85fda0d18a2c02ab9cf134bebce04ee)
+    FetchContent_MakeAvailable(curl)
+    set(HK_CURL_LIB CURL::libcurl)
+  endif()
+  if(HK_CURL_LIB)
+    message(STATUS "Internet game list: libcurl")
+  else()
+    message(STATUS "Internet game list: disabled (libcurl not found)")
+  endif()
+endif()
+
 find_package(OpenGL REQUIRED)
 
 # ---- Sources -----------------------------------------------------------------
@@ -80,6 +125,8 @@ set(SOURCES
   src/game/playing.cpp
   src/game/structures.cpp
   src/game/Vector.cpp
+  src/net/lobby.cpp
+  src/net/lobbygame.cpp
   src/net/multiplay.cpp
   src/net/sock.cpp
   src/net/udplink.cpp
@@ -188,6 +235,10 @@ else()
 endif()
 
 target_link_libraries(Edifice PRIVATE ${HK_SDL_LIBS} Opus::opus OpenGL::GL)
+if(HK_CURL_LIB)
+  target_link_libraries(Edifice PRIVATE ${HK_CURL_LIB})
+  target_compile_definitions(Edifice PRIVATE EDIFICE_LOBBY_CURL)
+endif()
 if(APPLE)
   target_link_libraries(Edifice PRIVATE "-framework OpenGL")
 elseif(WIN32)
@@ -220,6 +271,14 @@ endif()
 add_executable(map_test tests/map_test.cpp src/game/mapfile.cpp)
 target_include_directories(map_test PRIVATE ${HK_TEST_INCLUDES})
 add_test(NAME map COMMAND map_test)
+# with HK_LOBBY_URL set (a running server/), also talks to the lobby (tests/net_lobby.py)
+add_executable(lobby_test tests/lobby_test.cpp src/net/lobby.cpp)
+target_include_directories(lobby_test PRIVATE ${SRC}/net)
+if(HK_CURL_LIB)
+  target_link_libraries(lobby_test PRIVATE ${HK_CURL_LIB})
+  target_compile_definitions(lobby_test PRIVATE EDIFICE_LOBBY_CURL)
+endif()
+add_test(NAME lobby COMMAND lobby_test)
 
 # ---- GameNetworkingSockets (experimental, roadmap M7) --------------------------
 # Encrypted connections and P2P. Off by default: configure with the vcpkg
@@ -308,6 +367,7 @@ if(EDIFICE_FUZZ)
   hk_fuzzer(voice tests/fuzz/fuzz_voice.cpp)
   hk_fuzzer(map tests/fuzz/fuzz_map.cpp src/game/mapfile.cpp)
   hk_fuzzer(map_legacy tests/fuzz/fuzz_map_legacy.cpp src/game/mapfile.cpp)
+  hk_fuzzer(lobby tests/fuzz/fuzz_lobby.cpp src/net/lobby.cpp)
   # regenerates the seeds of tests/fuzz/corpus (see tests/fuzz/make_seeds.cpp)
   add_executable(fuzz_make_seeds tests/fuzz/make_seeds.cpp src/net/sock.cpp src/net/version.cpp
     src/game/mapfile.cpp src/game/Vector.cpp)

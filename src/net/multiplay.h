@@ -26,7 +26,8 @@ void JoinNetOpen();
 void JoinNetClose();
 void JoinNetClearList();
 void JoinNetSearchLAN();
-int JoinNetQuery(const char *host);
+int JoinNetQuery(const char *host,int port=0);
+int JoinNetFind(const char *address,int port);
 int JoinNetConnect(int index,char *reason,int reasonsize);
 int JoinGameCount();
 JoinGame *JoinGameAt(int i);
@@ -35,6 +36,7 @@ void JoinNetDebugAdd(const char *name,const char *addr,const char *version,int p
 void OpenJoinScreen();
 int IsJoinScreenOpen();
 void JoinScreenShowError(const char *text);
+void JoinScreenJoinCode(const char *code);
 int HandleJoinScreenKey(int sdlkey);
 void HandleJoinScreenText(const char *text);
 void JoinScreenClick(int clicks);

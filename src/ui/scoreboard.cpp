@@ -1,12 +1,14 @@
 //scoreboard shown while the "showscores" key is held and at the end of a game:
 //game mode and objective, team score, then one row per player (kills, deaths, K/D,
-//ping, packet loss), sorted by team and kills.
+//ping, packet loss), sorted by team and kills. A host listed on the lobby also sees
+//its game code.
 
 #include "StdAfx.h"
 #include "redrawing.h"
 #include "playing.h"
 #include "multiplay.h"
 #include "ui.h"
+#include "lobbygame.h"
 
 extern ServerVars sv;
 extern char curscore[1000];
@@ -100,6 +102,12 @@ void DrawScoreboard()
 	DrawText(BOARDX1+.08f,top-.18f,line);
 	sprintf(text,"%d player%s",count,count==1?"":"s");
 	DrawText(BOARDX2-.08f-strlen(text)*.04f,top-.1f,text);
+	if(LobbyHostCode()[0])   //hosting on the Internet: the code to give to friends
+	{
+		sprintf(text,"Game code %s",LobbyHostCode());
+		glColor3f(1,1,.5f);
+		DrawText(BOARDX2-.08f-strlen(text)*.04f,top-.18f,text);
+	}
 
 	float y=top-.33f;
 	glColor3f(.6f,.6f,.6f);

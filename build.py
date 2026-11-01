@@ -41,9 +41,11 @@ HINTS = {
              "    brew install cmake ninja",
     "linux": "  Debian/Ubuntu: sudo apt install build-essential cmake ninja-build libglu1-mesa-dev \\\n"
              "                 libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev \\\n"
-             "                 libwayland-dev libxkbcommon-dev libasound2-dev libpulse-dev\n"
+             "                 libwayland-dev libxkbcommon-dev libasound2-dev libpulse-dev \\\n"
+             "                 libcurl4-openssl-dev\n"
              "  Fedora:        sudo dnf install gcc-c++ cmake ninja-build mesa-libGLU-devel libX11-devel \\\n"
-             "                 libXext-devel libXrandr-devel libXcursor-devel libXi-devel alsa-lib-devel pulseaudio-libs-devel",
+             "                 libXext-devel libXrandr-devel libXcursor-devel libXi-devel alsa-lib-devel pulseaudio-libs-devel \\\n"
+             "                 libcurl-devel",
     "windows": "  Install Visual Studio (Desktop development with C++ workload) and CMake\n"
                "  (CMake ships with Visual Studio; or: winget install Kitware.CMake).",
 }

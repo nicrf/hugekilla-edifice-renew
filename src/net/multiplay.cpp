@@ -24,6 +24,7 @@
 #include "netmsg.h"
 #include "ui.h"
 #include "voice.h"
+#include "lobbygame.h"
 #define MAXLOCALLIST 128
 #ifndef HK_WIN32_NATIVE
 #ifndef _WIN32
@@ -267,6 +268,7 @@ void StartServer()
 #ifndef HKDS
 	GPlayerEnterGame(GetLocalNum());
 #endif
+	LobbyHostStart();   //announced on the Internet list if net.ini says so
 }
 
 //closes sockets
@@ -274,6 +276,7 @@ void StartServer()
 void Disconnect()
 {
 	LockCursor(0);
+	LobbyHostStop();
 	infosock.Close();
 	datasock.Close();
 	for(int i=1;i<numplayers;i++)
@@ -287,6 +290,7 @@ void Disconnect()
 void CloseSocks()
 {
 	Disconnect();
+	LobbyQuit();
 	WSACleanup();
 }
 
@@ -454,6 +458,7 @@ void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pn
 void ServerLoop()
 {
 	GTick();
+	LobbyHostLoop(numplayers);
 	static Message msg;
 	SOCKADDR_IN source;
 	infosock.CheckReliableResend();
@@ -1186,8 +1191,9 @@ void JoinNetSearchLAN()
 }
 
 //asks one server (IP or host name) for its info; it shows up in the list when it
-//answers. Returns 0 if the host name can't be resolved.
-int JoinNetQuery(const char *host)
+//answers. port: its info port (host order), 0 for ours (net.ini infosendport).
+//Returns 0 if the host name can't be resolved.
+int JoinNetQuery(const char *host,int port)
 {
 	in_addr_t addr=inet_addr(host);
 	if(addr==INADDR_NONE)
@@ -1201,10 +1207,21 @@ int JoinNetQuery(const char *host)
 		addr=((sockaddr_in *)res->ai_addr)->sin_addr.s_addr;
 		freeaddrinfo(res);
 	}
-	SOCKADDR_IN dest=MakeSockAddr(0,0,0,0,netsettings.infosendport);
+	SOCKADDR_IN dest=MakeSockAddr(0,0,0,0,port?htons((WORD)port):netsettings.infosendport);
 	dest.sin_addr.s_addr=addr;
 	SendInfoRequest(dest);
 	return 1;
+}
+
+//index in the list of the server that answered from address:port (an Internet
+//game being joined), -1 if none yet
+int JoinNetFind(const char *address,int port)
+{
+	in_addr_t addr=inet_addr(address);
+	for(int i=0;i<numlocallistaddr;i++)
+		if(locallistaddr[i].sin_addr.s_addr==addr&&ntohs(locallistaddr[i].sin_port)==port)
+			return i;
+	return -1;
 }
 
 //sends the join request to a listed server. Returns 0 (and the reason) if it

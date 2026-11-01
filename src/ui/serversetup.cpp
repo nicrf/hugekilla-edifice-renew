@@ -2,7 +2,8 @@
 //server name, game mode, capture and time limits, sky, terrain and scenery, each of the
 //world settings having a "Random" choice, and the map: a new random land or one saved
 //with the console's savemap (maps/<name>.map in the user folder, which then gives the
-//sky, terrain, scenery and buildings). Choices are kept in sv.ini and net.ini.
+//sky, terrain, scenery and buildings), and whether the game is announced on the
+//Internet list (edifice-lobby, lobbygame.cpp). Choices are kept in sv.ini and net.ini.
 
 #ifndef HK_WIN32_NATIVE
 
@@ -11,6 +12,7 @@
 #include "playing.h"
 #include "multiplay.h"
 #include "ui.h"
+#include "lobbygame.h"
 
 extern Vector mousepos;
 extern ServerVars sv;
@@ -33,6 +35,8 @@ static int mapchoice=-1;      //-1 new random land, else index in mapnames
 static int nummaps;
 static char mapnames[MAXMAPS][MAXMAPNAME+1];
 static char setuperror[200];  //why the chosen map couldn't be loaded
+static int visibility;        //index in visibilities
+static int lobbyok;           //a lobby is configured (net.ini lobby=)
 
 static const char *terrainnames[]={"Flat","Hills","Mountains"};
 static const float terrainscales[]={.35f,1,1.8f};
@@ -40,12 +44,17 @@ static const float terrainscales[]={.35f,1,1.8f};
 static const char *scenerynames[]={"None","Few","Normal","Lots"};
 static const int scenerycounts[]={0,4,10,25};
 #define NUMSCENERIES 4
+//net.ini servervisibility: lan, or announced to the lobby (lobbygame.h)
+static const char *visibilities[]={"lan","public","friends","private"};
+static const char *visibilitynames[]={"LAN only","Public (listed)","Friends (game code)","Private (game code)"};
+#define NUMVISIBILITIES 4
 
-#define SETUPROWS 8
+#define SETUPROWS 9
 #define MAPROW 7
+#define INTERNETROW 8
 static const char *rowlabels[SETUPROWS]=
 {
-	"Server name","Game mode","Captures to win","Time limit","Sky","Terrain","Scenery","Map"
+	"Server name","Game mode","Captures to win","Time limit","Sky","Terrain","Scenery","Map","Internet"
 };
 
 #define PANELX1 -.95f
@@ -122,6 +131,8 @@ void OpenServerSetup()
 	nummaps=ListSavedMaps(mapnames,MAXMAPS);
 	mapchoice=-1;
 	setuperror[0]=0;
+	lobbyok=LobbyReady();
+	visibility=0;
 	CfgFile net;
 	servername[0]=0;
 	if(net.Load(UserFile("net.ini")))
@@ -134,6 +145,13 @@ void OpenServerSetup()
 		if(const char *map=net.GetValues("servermap"))   //a name, "*" for a random land
 			for(int i=0;i<nummaps;i++)
 				if(!strcmp(mapnames[i],map)) mapchoice=i;
+		char vis[16];
+		if(net.GetValues("servervisibility"))
+		{
+			CopyIniString(vis,net.GetValues("servervisibility"),sizeof(vis));
+			for(int i=0;i<NUMVISIBILITIES;i++)
+				if(!strcmp(vis,visibilities[i])) visibility=i;
+		}
 	}
 	if(!servername[0]) strcpy(servername,"Edifice Server");
 	if(skychoice<-1||skychoice>=numskies) skychoice=-1;
@@ -159,9 +177,9 @@ static void SaveSetup()
 	sprintf(mode,"%d",sv.gamemode);
 	sprintf(captures,"%d",sv.capturelimit);
 	sprintf(timelimit,"%d",sv.timelimit);
-	const char *netkeys[5]={"servername","serversky","serverterrain","serverscenery","servermap"};
-	const char *netvalues[5]={servername,sky,terrain,scenery,mapchoice>=0?mapnames[mapchoice]:"*"};
-	SetIniValues(UserFile("net.ini"),netkeys,netvalues,5);
+	const char *netkeys[6]={"servername","serversky","serverterrain","serverscenery","servermap","servervisibility"};
+	const char *netvalues[6]={servername,sky,terrain,scenery,mapchoice>=0?mapnames[mapchoice]:"*",visibilities[visibility]};
+	SetIniValues(UserFile("net.ini"),netkeys,netvalues,6);
 	const char *svkeys[3]={"gamemode","capturelimit","timelimit"};
 	const char *svvalues[3]={mode,captures,timelimit};
 	SetIniValues(UserFile("sv.ini"),svkeys,svvalues,3);
@@ -231,6 +249,9 @@ static void ChangeRow(int row,int dir)
 	case 5: Cycle(terrainchoice,NUMTERRAINS,dir); break;
 	case 6: Cycle(scenerychoice,NUMSCENERIES,dir); break;
 	case MAPROW: Cycle(mapchoice,nummaps,dir); setuperror[0]=0; break;
+	case INTERNETROW:
+		if(lobbyok) visibility=(visibility+dir+NUMVISIBILITIES)%NUMVISIBILITIES;
+		break;
 	}
 }
 
@@ -246,6 +267,10 @@ static void RowText(int row,char *text)
 	case 5: sprintf(text,"< %s >",terrainchoice>=0?terrainnames[terrainchoice]:"Random"); break;
 	case 6: sprintf(text,"< %s >",scenerychoice>=0?scenerynames[scenerychoice]:"Random"); break;
 	case MAPROW: sprintf(text,"< %s >",mapchoice>=0?mapnames[mapchoice]:"New random"); break;
+	case INTERNETROW:
+		if(lobbyok) sprintf(text,"< %s >",visibilitynames[visibility]);
+		else strcpy(text,"No lobby set (net.ini)");
+		break;
 	}
 	//a saved map brings its own sky, terrain and scenery
 	if(mapchoice>=0&&row>=4&&row<=6) strcpy(text,"From the map");

@@ -91,6 +91,21 @@ func TestPrivateGamesAreNotListed(t *testing.T) {
 	}
 }
 
+func TestGameCodes(t *testing.T) {
+	r := NewRegistry(time.Minute, 4, 100)
+	id, _, err := r.Register("8.8.8.8", announcement("coded"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(id) != 6 || strings.Trim(id, codeAlphabet) != "" {
+		t.Fatalf("game code %q", id)
+	}
+	typed := strings.ToLower(id[:3]) + "-" + id[3:] + " "
+	if s, ok := r.Get(typed); !ok || s.ID != id {
+		t.Fatalf("lookup of %q failed", typed)
+	}
+}
+
 func TestTURNCredentialsMatchPion(t *testing.T) {
 	secret := "s3cret"
 	s := NewSessions(time.Hour, 10, []string{"stun:x:3478"}, []string{"turn:x:3478?transport=udp"}, secret)

@@ -31,6 +31,7 @@ func main() {
 	turnSecret := flag.String("turn-secret", env("EDIFICE_TURN_SECRET", ""), "shared secret for TURN credentials (random if empty)")
 	trustProxy := flag.Bool("trust-proxy", os.Getenv("EDIFICE_TRUST_PROXY") == "1", "take the client IP from X-Forwarded-For (behind a reverse proxy)")
 	ttl := flag.Duration("ttl", 60*time.Second, "a game disappears when its host hasn't refreshed it for this long")
+	rateLimit := flag.Int("rate-limit", 30, "write requests and game code lookups allowed per minute and per IP (burst: a third)")
 	healthcheck := flag.Bool("healthcheck", false, "check that the HTTP API of a running instance answers, then exit (for Docker)")
 	flag.Parse()
 
@@ -84,7 +85,7 @@ func main() {
 	}()
 
 	api := &API{registry: registry, sessions: sessions, trustProxy: *trustProxy,
-		limiter: newRateLimiter(30, 10), refresh: *ttl / 3}
+		limiter: newRateLimiter(*rateLimit, (*rateLimit+2)/3), refresh: *ttl / 3}
 	srv := &http.Server{
 		Addr:              *httpAddr,
 		Handler:           api,
