@@ -2,6 +2,7 @@
 
 
 #include "gl.h"
+#include "renderer.h"
 #include "platform.h"
 #include "fileio.h"
 #include "models.h"
@@ -831,8 +832,8 @@ static void DrawRadarBuildZones(float cx,float cy,float w,float h)
 {
 	if(sv.gamemode!=0) return;
 	const float scale=1.f/250;
-	GLint vp[4];
-	glGetIntegerv(GL_VIEWPORT,vp);
+	int vp[4];
+	RGetViewport(vp);
 	glEnable(GL_SCISSOR_TEST);
 	glScissor(vp[0]+(GLint)((cx-w+1)/2*vp[2]),vp[1]+(GLint)((cy-h+1)/2*vp[3]),
 		(GLsizei)(w*vp[2]),(GLsizei)(h*vp[3]));
@@ -885,12 +886,10 @@ void DrawText3D(Vector facing,Vector pos,float scale,char *text)
 	{z.x*scale,z.y*scale,z.z*scale,0}, 
 	{pos.x,pos.y,pos.z,1}
 	};
-	glMatrixMode(GL_MODELVIEW);
-	glPushMatrix();
-	glMultMatrixf((float *)&mx);
-
+	Mat4 modelview=RModelView();
+	RSetModelView(Mat4Mul(modelview,Mat4From(mx)));
 	DrawText(-(float)strlen(text)*.040/2,0,text);
-	glPopMatrix();
+	RSetModelView(modelview);
 	glCullFace(GL_FRONT);
 }
 
@@ -1108,8 +1107,6 @@ void DrawGunSelection()
 	if(bright<0) return;
 	if(bright>1) bright=1;
 	glPushAttrib(GL_ENABLE_BIT|GL_FOG_BIT|GL_COLOR_BUFFER_BIT|GL_POLYGON_BIT);
-	glMatrixMode(GL_MODELVIEW);
-	glPushMatrix();
 	glDisable(GL_CULL_FACE);
 	float targrot=-(float)GetLocalPlayer()->weapon/8*pi*2-pi-.3;
 	curgunselrotvel+=(targrot-curgunselrot)/20;
@@ -1140,7 +1137,6 @@ void DrawGunSelection()
 		glVertex2f(offx+.8/z,offy+y/z);
 	}
 	glEnd();
-	glPopMatrix();
 	glPopAttrib();
 }
 
@@ -1182,14 +1178,14 @@ void ScreenShot()
 	if(GetLocalPlayer()->takescreenshot)
 	{
 		int vp[4];
-		glGetIntegerv(GL_VIEWPORT,vp);
+		RGetViewport(vp);
 		int planesize=(vp[2]-vp[0])*(vp[3]-vp[1]);
 		int bufsize=planesize*3+sizeof(BMoPHdr);
 		char *filebuf=new char[bufsize];
 		/*glReadPixels(vp[0],vp[1],vp[2],vp[3],GL_RED,GL_UNSIGNED_BYTE,&filebuf[128]);
 		glReadPixels(vp[0],vp[1],vp[2],vp[3],GL_GREEN,GL_UNSIGNED_BYTE,&filebuf[128+planesize]);
 		glReadPixels(vp[0],vp[1],vp[2],vp[3],GL_BLUE,GL_UNSIGNED_BYTE,&filebuf[128+planesize*2]);*/
-		glReadPixels(vp[0],vp[1],vp[2],vp[3],GL_BGR_EXT,GL_UNSIGNED_BYTE,&filebuf[sizeof(BMoPHdr)]);
+		RReadPixels(vp[0],vp[1],vp[2],vp[3],1,(unsigned char *)&filebuf[sizeof(BMoPHdr)]);
 		BMoPHdr *hdr=(BMoPHdr *)filebuf;
 		hdr->id[0]='B';
 		hdr->id[1]='M';
@@ -1226,31 +1222,11 @@ void ScreenShot()
 void Redraw()
 {
 	HKSwapWindow();
-	glMatrixMode(GL_PROJECTION);
-	glLoadIdentity();
-	glMatrixMode(GL_MODELVIEW);
-	glLoadIdentity();
-	
-	
-	Player *cur=GetLocalPlayer();
-	float zoom=powf(1.1,cur->fzoom);
+	RSet2D();
 	int viewport[4];
-	glGetIntegerv(GL_VIEWPORT,(int *)viewport);
-	
-	float yscale=(float)(viewport[2]-viewport[0])/(float)(viewport[3]-viewport[1]);
-	float xscale=(float)(viewport[3]-viewport[1])/(float)(viewport[2]-viewport[0]);
-	int pvp[4]={0,0,1,1};
-	if (xscale>yscale)xscale=1; else yscale=1;
-	
-	float xyscalemx[4][4]=
-	{
-		{xscale*zoom,0,0,0},
-		{0,yscale*zoom,0,0},
-		{0,0,1,0},
-		{0,0,0,1}
-	};
-	glMatrixMode(GL_PROJECTION); 
-	glMultMatrixf((float *)xyscalemx);
+	RGetViewport(viewport);
+	//(an aspect and zoom scale was multiplied into the projection here, which Draw
+	//replaced before drawing anything)
 	cloudposx+=GetSkySettings()->cloudvelx;
 	cloudposy+=GetSkySettings()->cloudvely;
 	cloudmistposx+=GetSkySettings()->cloudmistvelx;
@@ -1266,17 +1242,14 @@ void Redraw()
 			Draw(0);
 		else
 		{
-			glViewport(viewport[0],viewport[1],viewport[2]/2,viewport[3]);	
+			RViewport(viewport[0],viewport[1],viewport[2]/2,viewport[3]);
 			Draw(-graphicsprefs.stereoseparation);
-			glViewport(viewport[2]/2,viewport[1],viewport[2]/2,viewport[3]);	
+			RViewport(viewport[2]/2,viewport[1],viewport[2]/2,viewport[3]);
 			Draw(graphicsprefs.stereoseparation);
-			glViewport(viewport[0],viewport[1],viewport[2],viewport[3]);	
+			RViewport(viewport[0],viewport[1],viewport[2],viewport[3]);
 		}
 	}
-	glMatrixMode(GL_PROJECTION);
-	glLoadIdentity();
-	glMatrixMode(GL_MODELVIEW);
-	glLoadIdentity();
+	RSet2D();
 	static int curframe;
 	curframe++;
 	static DWORD dlasttime;
@@ -1539,7 +1512,7 @@ void Draw(float offset)
 	frame++;
 	
 	int viewport[4];
-	glGetIntegerv(GL_VIEWPORT,(int *)viewport);
+	RGetViewport(viewport);
 	glBlendFunc(GL_SRC_ALPHA,GL_ZERO );
 	glEnable(GL_BLEND);
 	//glTexEnvi(GL_TEXTURE_ENV,GL_TEXTURE_ENV_MODE,GL_MODULATE);
@@ -1570,21 +1543,14 @@ void Draw(float offset)
 	glHint(GL_PERSPECTIVE_CORRECTION_HINT,GL_FASTEST);
 	//glHint(GL_FOG_HINT,GL_NICEST);
 	
-	glPushMatrix();
-	
-	glLoadIdentity();
-	
 	//the zoom narrows the field of view. Redraw multiplied it into the projection
-	//before calling Draw, but the glLoadIdentity above (projection is the current
-	//matrix here) wiped it: the camera never zoomed, even in the original game.
-	glMatrixMode(GL_PROJECTION);
+	//before calling Draw, which then reset it: the camera never zoomed, even in
+	//the original game.
 	float zoom=powf(1.1f,cur->fzoom);
-	glScalef(zoom,zoom,1);
-	gluPerspective(70,1.2,.4,1700); 
-	glMatrixMode(GL_MODELVIEW);
-	glRotatef(GetLocalPlayer()->roll*2,0,0,1);
+	Mat4 view=Mat4Mul(Mat4Identity(),Mat4Rotate(GetLocalPlayer()->roll*2,0,0,1));
+	RSetProjection(Mat4Mul(Mat4Scale(zoom,zoom,1),Mat4Perspective(70,1.2,.4,1700)));
 	camup=GetRight(VectMult(cur->tilt,cur->fwd,Vector(0,1,0),CrossProduct(cur->dir,Vector(0,1,0))),Vector(0,1,0));
-	gluLookAt(cur->pos.x,cur->pos.y,cur->pos.z,cur->pos.x+cur->dir.x,cur->pos.y+cur->dir.y,cur->pos.z+cur->dir.z,camup.x,camup.y,camup.z);
+	RSetModelView(Mat4LookAt(view,cur->pos.x,cur->pos.y,cur->pos.z,cur->pos.x+cur->dir.x,cur->pos.y+cur->dir.y,cur->pos.z+cur->dir.z,camup.x,camup.y,camup.z));
 	
 	glEnable(GL_FOG);
 	glFogf(GL_FOG_END,400);
@@ -1663,17 +1629,10 @@ void Draw(float offset)
 	glEnable(GL_CULL_FACE);
 	glEnable(GL_DEPTH_TEST);
 	
-	glClear(GL_DEPTH_BUFFER_BIT);	
-	glPopMatrix();
-	glPushMatrix();
+	glClear(GL_DEPTH_BUFFER_BIT);
 	
-	glMatrixMode(GL_PROJECTION);
-	glLoadIdentity();
-	glScalef(zoom,zoom,1);   //same zoom as the sky projection above
-	gluPerspective(70,1.2,.15,fogend);
-	glMatrixMode(GL_MODELVIEW);
-	glLoadIdentity();
-	//glLoadIdentity();
+	RSetProjection(Mat4Mul(Mat4Scale(zoom,zoom,1),Mat4Perspective(70,1.2,.15,fogend)));   //same zoom as the sky
+
 	/*float xyoffsetmx[4][4]=
 	{
 		{1,0,0,0},
@@ -1683,10 +1642,9 @@ void Draw(float offset)
 	};
 	
 	glMultMatrixf((float *)xyoffsetmx);*/
-	glRotatef(GetLocalPlayer()->roll*2,0,0,1);
 	eyepos=cur->pos+offset*Normalize(CrossProduct(cur->dir,Vector(0,1,0)));
 
-	gluLookAt(eyepos.x,eyepos.y,eyepos.z,eyepos.x+cur->dir.x,eyepos.y+cur->dir.y,eyepos.z+cur->dir.z,camup.x,camup.y,camup.z);
+	RSetModelView(Mat4LookAt(view,eyepos.x,eyepos.y,eyepos.z,eyepos.x+cur->dir.x,eyepos.y+cur->dir.y,eyepos.z+cur->dir.z,camup.x,camup.y,camup.z));
 	
 	
 	Vector drawpos=eyepos+cur->dir*(17*2-5);
@@ -1818,18 +1776,14 @@ void Draw(float offset)
 		}
 	}
 	
-	double modelview[4][4];
-	double projection[4][4];
-	
 	double cposx,cposy,cposz;
 	double sposx,sposy,sposz;
-	glGetDoublev(GL_PROJECTION_MATRIX,(double *)projection);
-	glGetDoublev(GL_MODELVIEW_MATRIX,(double *)modelview);
 	cposx=cur->pos.x;
 	cposy=cur->pos.y+50*GetSkySettings()->sunheight;  //find the position of the sun
 	cposz=cur->pos.z+50;
-	int success=gluProject(cposx,cposy,cposz,(double *)modelview,(double *)projection,(int *)viewport,&sposx,&sposy,&sposz);
-			//find the screen coordinates of the sun
+	Mat4Project(cposx,cposy,cposz,RModelView(),RProjection(),viewport,&sposx,&sposy,&sposz);
+				//find the screen coordinates of the sun
+
 
 	
 	glEnable(GL_DEPTH_TEST);
@@ -1846,10 +1800,11 @@ void Draw(float offset)
 		scenery[curscenery->type].Draw(curscenery->pos,curscenery->side,curscenery->top);
 	}
 	
-	float depth;
-	
-	glReadPixels(sposx,sposy,1,1,GL_DEPTH_COMPONENT,GL_FLOAT,&depth);  
-	//reads the depth of where the sun is going to be, if there is nothing there, depth=1
+	//reads the depth of where the sun is going to be, if there is nothing there, depth=1.
+	//Off the window nothing is read: the old code then tested an uninitialized local,
+	//in practice what an earlier frame left there; static keeps the last frame's.
+	static float depth=1;
+	if(fabs(sposx)<1e6&&fabs(sposy)<1e6) RReadDepth((int)sposx,(int)sposy,&depth);
 	
 	glPushAttrib(GL_ENABLE_BIT);
 	glDisable(GL_TEXTURE_2D);
@@ -2066,11 +2021,8 @@ void Draw(float offset)
 	
 	glBlendFunc(GL_SRC_ALPHA,GL_ONE);
 	TexBind(TEX_CROSSHAIR);
-	glPopMatrix();
-	glLoadIdentity();
-	glMatrixMode(GL_PROJECTION);
-	glLoadIdentity();
-	glTranslatef(offset*-.5,0,0);
+	RSetModelView(Mat4Identity());
+	RSetProjection(Mat4Mul(Mat4Identity(),Mat4Translate(offset*-.5,0,0)));
 	glBegin(GL_TRIANGLE_STRIP);
 	glColor4f(1,1,1,1);
 	glTexCoord2f(0,0);
@@ -2095,11 +2047,10 @@ void Draw(float offset)
 
 void RedrawSplash(int texnum,char *text,int drawlogo)
 {
-	glMatrixMode(GL_MODELVIEW);
 	texnum=TEX_SPLASH;   //always the splash, whatever the caller passes
 	glEnable(GL_TEXTURE_2D);
 	TexBind(texnum);
-	glLoadIdentity();
+	RSetModelView(Mat4Identity());
 	glDisable(GL_DEPTH_TEST);
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_ONE,GL_ZERO);

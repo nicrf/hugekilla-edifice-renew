@@ -3,7 +3,7 @@
 // virtual-key values of the original code).
 
 
-#include "gl.h"
+#include "renderer.h"
 #include "platform.h"
 #include "hkkeys.h"
 #include "hktime.h"
@@ -52,13 +52,11 @@ static void DebugScreenshot()
 	if (!shot) return;
 	int target = getenv("HK_SHOT_FRAME") ? atoi(getenv("HK_SHOT_FRAME")) : 120;
 	if (++frame != target) return;
-	GLint vp[4];
-	glGetIntegerv(GL_VIEWPORT, vp);
+	int vp[4];
+	RGetViewport(vp);
 	int w = vp[2], h = vp[3];
 	unsigned char *px = new unsigned char[(size_t)w * h * 3];
-	glPixelStorei(GL_PACK_ALIGNMENT, 1);
-	glReadBuffer(GL_BACK);
-	glReadPixels(vp[0], vp[1], w, h, GL_RGB, GL_UNSIGNED_BYTE, px);
+	RReadPixels(vp[0], vp[1], w, h, 0, px);
 	FILE *f = fopen(shot, "wb");
 	if (f)
 	{
@@ -73,6 +71,7 @@ static void DebugScreenshot()
 void HKSwapWindow()
 {
 	DebugScreenshot();
+	HKFrameDrawn();
 	if (window) SDL_GL_SwapWindow(window);
 }
 
@@ -87,7 +86,7 @@ static void UpdateViewport()
 	SDL_GL_GetDrawableSize(window, &w, &h);
 	SDL_GetWindowSize(window, &ww, &wh);
 	pixelscale = ww > 0 && w > ww ? (float)w / ww : 1;
-	glViewport(0, 0, w, h);
+	RViewport(0, 0, w, h);
 }
 
 // pixels per point of the window: line widths and point sizes are in pixels

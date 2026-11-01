@@ -8,6 +8,7 @@
 #include "redrawing.h"
 #include "textures.h"
 #include "stdio.h"
+#include <vector>
 
 #define MAXSPRITETEX 100
 
@@ -22,6 +23,29 @@ int numtex;
 
 int numpost;
 
+static std::vector<unsigned char> fontalpha;
+static int fontw,fonth;
+
+//TexUpload, keeping the font's alpha for TexFontAlpha
+static void Upload(unsigned slot,int width,int height,int channels,const unsigned char *pixels,TexFilter filter)
+{
+	TexUpload(slot,width,height,channels,pixels,filter);
+	if(slot!=TEX_FONT) return;
+	fontw=width;
+	fonth=height;
+	fontalpha.assign((size_t)width*height,255);   //no alpha channel: opaque, as GL reads it back
+	if(channels==2||channels==4)
+		for(size_t i=0;i<fontalpha.size();i++)
+			fontalpha[i]=pixels[i*channels+channels-1];
+}
+
+const unsigned char *TexFontAlpha(int *width,int *height)
+{
+	*width=fontw;
+	*height=fonth;
+	return fontalpha.empty()?0:fontalpha.data();
+}
+
 int LoadTexture(char *filename,unsigned num)
 {
 	if(strcasecmp(&filename[strlen(filename)-4],".pxr")==0)
@@ -34,7 +58,7 @@ int LoadTexture(char *filename,unsigned num)
 	int width,height;
 	unsigned char *pixels=LoadImagePixels(filename,&width,&height,3);
 	if(!pixels) return 0;
-	TexUpload(num,width,height,3,pixels,TEXF_MIPNEAREST);
+	Upload(num,width,height,3,pixels,TEXF_MIPNEAREST);
 	FreeImagePixels(pixels);
 #ifndef PLMODEL
 	char consolemessage[5000];
@@ -67,7 +91,7 @@ int LoadRaw(char *filename,unsigned num)
 		channels/=4;
 		size*=2;
 	}while(channels>4);
-	TexUpload(num,size,size,channels,bits,TEXF_MIPLINEAR);
+	Upload(num,size,size,channels,(const unsigned char *)bits,TEXF_MIPLINEAR);
 	delete []file;
 #ifndef PLMODEL
 	char consolemessage[5000];
