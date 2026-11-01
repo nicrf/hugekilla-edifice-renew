@@ -59,6 +59,7 @@ struct FxPrefs
 {
 	int viewmodel;        //the gun in its own pass: never inside walls or terrain
 	int explosions;       //grenades: fireball, flash, sparks, debris (effects.cpp)
+	int smoke;            //smoke after explosions, trails of grenades in flight
 };
 
 struct Particle

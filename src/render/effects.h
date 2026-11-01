@@ -9,7 +9,8 @@
 
 #include "vector.h"
 
-//a grenade going off at pos: flash, fireball, sparks, debris, light on the ground
+//a grenade going off at pos: flash, fireball, sparks, debris, light on the ground,
+//and the smoke that stays (fxprefs.smoke; grenades in flight leave a trail too)
 void FxExplosion(const Vector &pos);
 
 //procedural textures of the effects (LoadTextures)
