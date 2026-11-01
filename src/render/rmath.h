@@ -1,17 +1,18 @@
 //4x4 matrices of the renderer (M13): what the GL matrix stack and GLU computed, on the
 //CPU, so a backend only receives finished matrices (sokol_gfx has no matrix stack).
-//Column-major like OpenGL: m[col*4+row]. The formulas and the float/double mix
-//follow the GL driver and the SGI GLU that the original code called, so the game
-//draws with the same matrices to the last bit (pixel-diff, M13.2).
+//Column-major like OpenGL: m[col*4+row]. The formulas and the float/double mix are
+//those of the SGI GLU the original code called. GL drivers have their own: Apple's
+//multiplies with fused multiply-adds and builds gluPerspective with glFrustum, so
+//an entry may differ in its last bit (a few pixels of one unit in the clouds).
 
 #ifndef RMATHH
 #define RMATHH
 
 #include <math.h>
 
-//a*b+c*d... stay two roundings, as in the GL driver: a fused multiply-add (clang
-//contracts by default on arm64) would move vertices by a fraction of an ulp. Per
-//function, so the code that includes this header keeps its own float behaviour.
+//a*b+c*d... stay two roundings on every compiler (clang contracts to fused
+//multiply-adds by default on arm64, GCC on x86 doesn't): the same matrices on every
+//platform. Per function, so the code that includes this header keeps its own.
 #if defined(__clang__)
 #define RMATH_NOCONTRACT _Pragma("clang fp contract(off)")
 #else
