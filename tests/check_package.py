@@ -247,6 +247,8 @@ def run_game(exe, gns, tmp, lobby=None):
     try:
         end = time.time() + 90
         want = "gns: listening on port" if gns else None
+        if not gns:
+            time.sleep(20)     # nothing to wait for: let the server start
         while want and time.time() < end:
             if p.poll() is not None:
                 break
