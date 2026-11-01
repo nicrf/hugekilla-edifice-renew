@@ -5,8 +5,9 @@
 //
 //Glows (fire, flash, sparks) add their light (RBLEND_ADD): their order doesn't
 //matter, and the fog color is set to black for them, so they fade into the fog
-//instead of turning the fog's color. Solid things (debris) blend by alpha with the
-//scene's fog, sorted back to front. None writes depth: the particles don't hide
+//instead of turning the fog's color. Solid things (debris, smoke) blend by alpha
+//with the scene's fog, sorted back to front together, so a stone flies in front
+//of or behind a puff as it should. None writes depth: the particles don't hide
 //each other, and the scene behind them still tests against what was there.
 
 #include "effects.h"
@@ -30,7 +31,8 @@ enum
 	TEX_FX_GLOW=TEX_FX0,    //soft round spot: flash, fire core, sparks' heads
 	TEX_FX_FIRE,            //a puff of flame, noisy edges
 	TEX_FX_STREAK,          //a soft line, along u: sparks (antialiased by the texture)
-	TEX_FX_CHUNK            //a jagged stone: debris
+	TEX_FX_CHUNK,           //a jagged stone: debris
+	TEX_FX_SMOKE            //a soft, lumpy puff: smoke
 };
 
 //value noise on a 2D lattice that wraps every period cells (seamless sprites)
@@ -77,12 +79,12 @@ static float Clamp01(float v)
 	return v<0?0:v>1?1:v;
 }
 
-#define FXTEXSIZE 64
+#define FXTEXSIZE 128
 
 void FxLoadTextures()
 {
 	static unsigned char px[FXTEXSIZE*FXTEXSIZE*4];
-	for(int tex=TEX_FX_GLOW;tex<=TEX_FX_CHUNK;tex++)
+	for(int tex=TEX_FX_GLOW;tex<=TEX_FX_SMOKE;tex++)
 	{
 		for(int y=0;y<FXTEXSIZE;y++)
 			for(int x=0;x<FXTEXSIZE;x++)
@@ -125,6 +127,18 @@ void FxLoadTextures()
 						lum=.75f+.25f*(dx-dy)*.5f+.2f*(Fbm(u,v,29)-.5f);
 					}
 					break;
+				case TEX_FX_SMOKE:
+					{
+						//billows: a noisy outline over a denser core, shaded as
+						//if lit from above (the noise sampled a little lower is
+						//the shadow side of each lump)
+						float n=Fbm(u,v,37);
+						float edge=Clamp01(((1-r)+(n-.5f)*.9f-.18f)*2.6f);
+						alpha=edge*edge*(3-2*edge)*(.6f+.4f*n);
+						float below=Fbm(u,v-.04f,37);
+						lum=Clamp01(.62f+.2f*dy+(n-below)*5+.25f*(n-.5f));
+					}
+					break;
 				}
 				unsigned char *p=&px[(y*FXTEXSIZE+x)*4];
 				p[0]=p[1]=p[2]=(unsigned char)(lum*255+.5f);
@@ -141,14 +155,15 @@ enum FxKind
 	FX_FLASH,               //the blast's first light, a big glow for a few frames
 	FX_FIRE,                //fireball puffs: expand, slow down, cool from white to red
 	FX_SPARK,               //hot streaks thrown out, falling and bouncing
-	FX_DEBRIS               //dark chunks of earth, falling and bouncing
+	FX_DEBRIS,              //dark chunks of earth, falling and bouncing
+	FX_SMOKE                //puffs that grow, rise, drift and thin out
 };
 
 struct FxParticle
 {
 	int kind;
 	Vector pos,vel;
-	float age,life;         //seconds
+	float age,life;         //seconds; a negative age waits (smoke after the fire)
 	float size0,size1;      //size at birth, at the end (half width, world units)
 	float rot,spin;         //billboard rotation, radians and radians a second
 	float r,g,b,a;
@@ -202,6 +217,17 @@ static FxParticle *Spawn(int kind,const Vector &pos,const Vector &vel,float life
 	return &parts.back();
 }
 
+//a puff of smoke: delay seconds before it shows, grey level, opacity
+static void Smoke(const Vector &pos,const Vector &vel,float delay,float life,float size0,float size1,float grey,float alpha)
+{
+	FxParticle *p=Spawn(FX_SMOKE,pos,vel,life,size0,size1);
+	if(!p) return;
+	p->age=-delay;
+	p->spin=Rnd(-.4f,.4f);
+	p->r=p->g=p->b=grey;
+	p->a=alpha;
+}
+
 void FxExplosion(const Vector &at)
 {
 	Vector pos=at+Vector(0,.4f,0);   //grenades lie on the ground
@@ -236,6 +262,37 @@ void FxExplosion(const Vector &at)
 		FxLight l={pos,0,.4f,8};
 		lights.push_back(l);
 	}
+	//the smoke that stays: sooty puffs taking over from the fire as it dies down
+	if(fxprefs.smoke)
+		for(int i=0;i<10;i++)
+		{
+			Vector d=RndDir();
+			d.y=fabsf(d.y)*.5f;
+			Smoke(pos+d*Rnd(.2f,1.6f),d*Rnd(.3f,1.2f)+Vector(0,Rnd(.5f,1.1f),0),Rnd(.15f,.5f),Rnd(3.5f,6),
+				Rnd(.7f,1.1f),Rnd(2.4f,3.6f),Rnd(.42f,.58f),Rnd(.55f,.75f));
+		}
+}
+
+//the trail of grenades in flight, from where the game moved them (object[], type 4),
+//a puff every 30 ms of each: drawn side, so it follows the frame rate, not the ticks
+static void GrenadeTrails(float dt)
+{
+	static float since[MAXOBJS];
+	for(int i=0;i<MAXOBJS;i++)
+	{
+		const Object &o=object[i];
+		if(o.type!=4||o.wasfroze||Magnitude(o.vel)<.02f)
+		{
+			since[i]=0;
+			continue;
+		}
+		since[i]+=dt;
+		while(since[i]>=.03f)
+		{
+			since[i]-=.03f;
+			Smoke(o.pos+RndDir()*.05f,RndDir()*.15f+Vector(0,.25f,0),0,Rnd(1.1f,1.7f),.15f,Rnd(.6f,.9f),Rnd(.7f,.82f),.5f);
+		}
+	}
 }
 
 //moves everything by dt seconds and drops what is over
@@ -245,6 +302,11 @@ static void Update(float dt)
 	{
 		FxParticle &p=parts[i];
 		p.age+=dt;
+		if(p.age<0)
+		{
+			i++;
+			continue;
+		}
 		if(p.age>=p.life)
 		{
 			p=parts.back();
@@ -257,6 +319,10 @@ static void Update(float dt)
 		case FX_FIRE:
 			p.vel*=expf(-3.5f*dt);   //the air brakes the puffs, the heat lifts them
 			p.vel.y+=1.5f*dt;
+			break;
+		case FX_SMOKE:
+			p.vel*=expf(-1.2f*dt);   //slows down to the rise of warm air and a light wind
+			p.vel+=(Vector(.35f,.45f,.15f)-p.vel)*(1-expf(-.6f*dt));
 			break;
 		case FX_SPARK:
 		case FX_DEBRIS:
@@ -404,6 +470,7 @@ void DrawEffects()
 		if(dt>.1f) dt=.1f;          //a pause (menu, loading) doesn't jump everything
 		started=1;
 		lasttime=curtime;
+		if(fxprefs.smoke) GrenadeTrails(dt);
 		Update(dt);
 	}
 	if(parts.empty()&&lights.empty()) return;
@@ -478,7 +545,7 @@ void DrawEffects()
 	static std::vector<SortItem> order;
 	order.clear();
 	for(size_t i=0;i<parts.size();i++)
-		if(parts[i].kind==FX_DEBRIS)
+		if((parts[i].kind==FX_DEBRIS||parts[i].kind==FX_SMOKE)&&parts[i].age>=0)
 		{
 			SortItem s={DotProduct(parts[i].pos-cameye,camfwd),(int)i};
 			order.push_back(s);
@@ -493,13 +560,27 @@ void DrawEffects()
 	RDisable(RCAP_CULL);
 	REnable(RCAP_BLEND|RCAP_DEPTHTEST|RCAP_TEXTURE);
 	RBlendFunc(RBLEND_ALPHA);
-	TexBind(TEX_FX_CHUNK);
-	RBegin(RP_QUADS);
+	int bound=-1;
 	for(size_t k=0;k<order.size();k++)
 	{
 		const FxParticle &p=parts[order[k].index];
 		float t=p.age/p.life;
-		Billboard(p.pos,p.size0,p.rot,p.r,p.g,p.b,t<.8f?1:(1-t)*5);
+		int tex=p.kind==FX_SMOKE?TEX_FX_SMOKE:TEX_FX_CHUNK;
+		if(tex!=bound)
+		{
+			if(bound>=0) REnd();
+			TexBind(tex);
+			RBegin(RP_QUADS);
+			bound=tex;
+		}
+		if(p.kind==FX_SMOKE)
+		{
+			//fades in quickly, then thins out as it spreads
+			float a=p.a*Clamp01(t*8)*(1-t)*(1-t*.5f);
+			Billboard(p.pos,p.size0+(p.size1-p.size0)*Ease(t),p.rot,p.r,p.g,p.b,a);
+		}
+		else
+			Billboard(p.pos,p.size0,p.rot,p.r,p.g,p.b,t<.8f?1:(1-t)*5);
 	}
 	REnd();
 	RPopAttrib();

@@ -51,7 +51,7 @@ AseObj projectile[10];
 AseObj servercobs[50][3];
 AseObj hangglider;
 GraphicsPrefs graphicsprefs;
-FxPrefs fxprefs={1,1};
+FxPrefs fxprefs={1,1,1};
 GunDrawInfo gun[10];
 
 int landfaces;
