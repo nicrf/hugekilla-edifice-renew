@@ -14,29 +14,71 @@ extern char menu;
 
 char curstructurepath[1000];
 
-//placement of the preview, set with the mouse wheel: extra quarter turns, and blocks
-//forward from the player (kept well within the server's ac_builddist)
+//placement of the preview: where the player aims, up to MAXBUILDDIST blocks away
+//(kept well within the server's ac_builddist), then turned by the wheel (extra
+//quarter turns) and raised or lowered with Ctrl/Cmd + wheel (blocks)
 #define MAXBUILDDIST 15
+#define MAXBUILDHEIGHT 10
 static int buildrot;
-static int builddist;
+static int buildheight;
 
-//the help shown while placing, with the current turn and distance
+//the help shown while placing, with the current turn and height
 void BuildPreviewText()
 {
 	sprintf(menutext,"Left click: build here\rRight click: cancel\r"
-		"Wheel: rotate (%d)\rCtrl/Cmd + wheel: distance (%d)",buildrot*90,builddist);
+		"Wheel: rotate (%d)\rCtrl/Cmd + wheel: height (%+d)",buildrot*90,buildheight);
 }
 
-void BuildPreviewWheel(int dir,int distance)
+void BuildPreviewWheel(int dir,int height)
 {
-	if(distance)
+	if(height)
 	{
-		builddist+=dir;
-		if(builddist<0) builddist=0;
-		if(builddist>MAXBUILDDIST) builddist=MAXBUILDDIST;
+		buildheight+=dir;
+		if(buildheight<-MAXBUILDHEIGHT) buildheight=-MAXBUILDHEIGHT;
+		if(buildheight>MAXBUILDHEIGHT) buildheight=MAXBUILDHEIGHT;
 	}
 	else buildrot=(buildrot+(dir>0?1:3))&3;
 	BuildPreviewText();
+}
+
+//the land, or the top of the highest block, under (x,y,z)
+static float GroundBelow(float x,float y,float z)
+{
+	float land=GetLandSmooth(x,z);
+	int bx=(int)floorf(x/BLOCKSIZE),bz=(int)floorf(z/BLOCKSIZE);
+	for(int by=(int)floorf(y/BLOCKSIZE);by>=-1&&(by+1)*BLOCKSIZE>land;by--)
+	if(GetBlock(bx,by,bz)->type)
+	{
+		//GetHeight knows the slope of ramps
+		float h=GetHeight(Vector(x,by*BLOCKSIZE+BLOCKSIZE*.99f,z));
+		return h>land?h:land;
+	}
+	return land;
+}
+
+//where the player aims: along the view from the eye (the renderer's eyepos is the
+//player's position) to the first land or block, at most MAXBUILDDIST blocks away.
+//The last free point before the hit is dropped to the ground, so looking at a wall
+//builds against it, not inside. Returns 0 (and the ground at max range) if nothing
+//is hit in range.
+static int BuildAim(Vector *aim)
+{
+	Vector eye=GetLocalPlayer()->pos;
+	Vector dir=Normalize(GetLocalPlayer()->dir);
+	const float step=.25f,range=MAXBUILDDIST*BLOCKSIZE;
+	Vector last=eye;
+	for(float d=step;d<=range;d+=step)
+	{
+		Vector p=eye+dir*d;
+		if(p.y<=GetHeight(p))
+		{
+			*aim=Vector(last.x,GroundBelow(last.x,last.y,last.z),last.z);
+			return 1;
+		}
+		last=p;
+	}
+	*aim=Vector(last.x,GroundBelow(last.x,last.y,last.z),last.z);
+	return 0;
 }
 
 
@@ -184,9 +226,10 @@ static void FootprintCenter(char s[MAXSTRUCTSIZE][MAXSTRUCTSIZE][MAXSTRUCTSIZE],
 	*cz=(minz+maxz)/2.f;
 }
 
-//has two purposes: one, draw the structure as a wireframe.  two, place the structure permenantly
+//has two purposes: one, draw the structure as a wireframe (red where it can't be
+//built).  two, place the structure permenantly; returns 0 if it can't be built there
 
-void PlaceStructure(int task)
+int PlaceStructure(int task)
 {
 	int offx,offy,offz;
 	int x,y,z;
@@ -195,6 +238,10 @@ void PlaceStructure(int task)
 	char tmpstructure[MAXSTRUCTSIZE][MAXSTRUCTSIZE][MAXSTRUCTSIZE];
 	Vector pdir=GetLocalPlayer()->dir;
 	Vector ppos=GetLocalPlayer()->pos;
+	Vector aim;
+	int inrange=BuildAim(&aim);
+	if(task==1&&!inrange) return 0;
+	char red=!inrange||!CanBuild();
 	if(fabs(pdir.x)>fabs(pdir.z))
 	{
 		if(pdir.x>0) rot=0;
@@ -205,52 +252,33 @@ void PlaceStructure(int task)
 		if(pdir.z>0) rot=1;
 		else rot=3;
 	}
-	//forward from the player, along the axis the structure faces
-	static const int fwdx[4]={1,0,-1,0},fwdz[4]={0,1,0,-1};
-	int fwd=rot;
-	//facing the player first: its 'r' blocks say where it goes
+	//facing the player, then turned by the wheel
 	CopyMemory(rotstructure,curstructure,sizeof(curstructure));
-	for(int i=0;i<rot;i++)
+	for(int i=0;i<rot+buildrot;i++)
 	{
 		RotateStructure(rotstructure,tmpstructure);
 		CopyMemory(rotstructure,tmpstructure,sizeof(rotstructure));
 	}
-	float refx,refy,refz;
+	//its 'r' blocks give its height: as high above the aimed ground as they were
+	//above the ground under a standing player (eye about 1.5 over it)
+	float refy=0;
 	int numref=0;
-	refx=refy=refz=0;
 	for(x=0;x<MAXSTRUCTSIZE;x++)
 	for(y=0;y<MAXSTRUCTSIZE;y++)
 	for(z=0;z<MAXSTRUCTSIZE;z++)
 	if(rotstructure[x][y][z]=='r')
 	{
-		refx+=x;
 		refy+=y;
-		refz+=z;
 		numref++;
 	}
-	refx/=numref;
-	refy/=numref;
-	refz/=numref;
-	offx=ppos.x/BLOCKSIZE-refx+BLOCKGRIDSIZE;
-	offy=ppos.y/BLOCKSIZE-refy-.5;
-	offz=ppos.z/BLOCKSIZE-refz+BLOCKGRIDSIZE;
-	offx+=fwdx[fwd]*builddist;
-	offz+=fwdz[fwd]*builddist;
-	//then turned by the wheel about the middle of its footprint, which stays put
-	//(about the 'r' blocks, often at an edge, it swung around the player)
-	if(buildrot)
-	{
-		float cx0,cz0,cx1,cz1;
-		FootprintCenter(rotstructure,&cx0,&cz0);
-		for(int i=0;i<buildrot;i++)
-		{
-			RotateStructure(rotstructure,tmpstructure);
-			CopyMemory(rotstructure,tmpstructure,sizeof(rotstructure));
-		}
-		FootprintCenter(rotstructure,&cx1,&cz1);
-		offx+=(int)floorf(cx0-cx1+.5f);
-		offz+=(int)floorf(cz0-cz1+.5f);
-	}
+	if(numref) refy/=numref;
+	//the middle of its footprint on the aimed point, so the wheel turns it in place
+	float cx,cz;
+	FootprintCenter(rotstructure,&cx,&cz);
+	offx=(int)floorf(aim.x/BLOCKSIZE-cx)+BLOCKGRIDSIZE;
+	offy=(aim.y+1.5f)/BLOCKSIZE-refy-.5;
+	offz=(int)floorf(aim.z/BLOCKSIZE-cz)+BLOCKGRIDSIZE;
+	offy+=buildheight;
 	int px,py,pz;
 	px=ppos.x;
 	py=ppos.y;
@@ -272,25 +300,25 @@ void PlaceStructure(int task)
 				{
 					for(int i=y+offy;i>=0;i--)
 					{
-						DrawBlock(x+offx-BLOCKGRIDSIZE,i,z+offz-BLOCKGRIDSIZE,255,1,px,py,pz);
+						DrawBlock(x+offx-BLOCKGRIDSIZE,i,z+offz-BLOCKGRIDSIZE,255,1,px,py,pz,red);
 						if(GetBlock(x+offx-BLOCKGRIDSIZE,i,z+offz-BLOCKGRIDSIZE)->type==1) break;
 					}
 				}
 
 			case 'x':		
-			DrawBlock(x+offx-BLOCKGRIDSIZE,y+offy,z+offz-BLOCKGRIDSIZE,255,1,px,py,pz);
+			DrawBlock(x+offx-BLOCKGRIDSIZE,y+offy,z+offz-BLOCKGRIDSIZE,255,1,px,py,pz,red);
 			break;
 			case '>':
-				DrawBlock(x+offx-BLOCKGRIDSIZE,y+offy,z+offz-BLOCKGRIDSIZE,255,4,px,py,pz);
+				DrawBlock(x+offx-BLOCKGRIDSIZE,y+offy,z+offz-BLOCKGRIDSIZE,255,4,px,py,pz,red);
 			break;
 			case 'v':
-				DrawBlock(x+offx-BLOCKGRIDSIZE,y+offy,z+offz-BLOCKGRIDSIZE,255,3,px,py,pz);
+				DrawBlock(x+offx-BLOCKGRIDSIZE,y+offy,z+offz-BLOCKGRIDSIZE,255,3,px,py,pz,red);
 			break;
 			case '<':
-				DrawBlock(x+offx-BLOCKGRIDSIZE,y+offy,z+offz-BLOCKGRIDSIZE,255,2,px,py,pz);
+				DrawBlock(x+offx-BLOCKGRIDSIZE,y+offy,z+offz-BLOCKGRIDSIZE,255,2,px,py,pz,red);
 			break;
 			case '^':
-				DrawBlock(x+offx-BLOCKGRIDSIZE,y+offy,z+offz-BLOCKGRIDSIZE,255,5,px,py,pz);
+				DrawBlock(x+offx-BLOCKGRIDSIZE,y+offy,z+offz-BLOCKGRIDSIZE,255,5,px,py,pz,red);
 			break;
 		}
 		int submersed=1;
@@ -344,7 +372,7 @@ void PlaceStructure(int task)
 	{
 		SendBlockBuffer();
 	}
-
+	return 1;
 }
 
 

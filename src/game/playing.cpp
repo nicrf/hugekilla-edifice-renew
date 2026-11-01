@@ -1182,7 +1182,12 @@ int HandleMenuKey(DWORD key)
 			}
 			if(number==1)
 			{
-				PlaceStructure(1);
+				//aimed at the sky or past MAXBUILDDIST: the preview is red, keep placing
+				if(!PlaceStructure(1))
+				{
+					ConsoleDisplayText("Too far to build");
+					return 1;
+				}
 				menutext[0]=0;
 				menu=NOMENU;
 				return 1;
