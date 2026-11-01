@@ -44,7 +44,11 @@ def start(name, args, env=None):
 def get(path):
     try:
         with urllib.request.urlopen(URL + path, timeout=5) as r:
-            return r.status, json.loads(r.read() or b"null")
+            body = r.read()
+            try:
+                return r.status, json.loads(body or b"null")
+            except ValueError:   # /healthz: plain text
+                return r.status, body
     except urllib.error.HTTPError as e:
         return e.code, None
     except OSError:
