@@ -5,14 +5,28 @@
 #include "hkkeys.h"
 #include "platform.h"
 #include <SDL.h>
+#include <stdlib.h>
 
 uint32_t HKTicks()
 {
 	return SDL_GetTicks();
 }
 
+// Debug aid: HK_FIXEDCLOCK=N makes the game clock (HKPerfCounter, HKPerfMillis) advance
+// N ms per frame drawn instead of following real time, so camera, clouds and
+// animations are the same from one run to the next (renderer pixel-diffs, M13)
+static int fixedstep = getenv("HK_FIXEDCLOCK") ? atoi(getenv("HK_FIXEDCLOCK")) : 0;
+static int64_t fixedframes;
+
+void HKFrameDrawn()
+{
+	fixedframes++;
+}
+
 int64_t HKPerfCounter()
 {
+	if (fixedstep > 0)
+		return (int64_t)(1000000 + fixedframes * fixedstep) * HKPerfFrequency() / 1000;
 	return (int64_t)SDL_GetPerformanceCounter();
 }
 
@@ -25,6 +39,8 @@ int64_t HKPerfFrequency()
 //bits, and the double -> DWORD conversion the game did was undefined from then on
 uint32_t HKPerfMillis()
 {
+	if (fixedstep > 0)
+		return (uint32_t)(1000000 + fixedframes * fixedstep);
 	return (uint32_t)(uint64_t)((double)HKPerfCounter() / (double)HKPerfFrequency() * 1000);
 }
 

@@ -120,15 +120,10 @@ static void MeasureFont()
 	}
 	glyphleft[0]=.35f;   //space
 	glyphright[0]=.6f;
-	GLint w=0,h=0;
-	TexBind(TEX_FONT);
-	glGetTexLevelParameteriv(GL_TEXTURE_2D,0,GL_TEXTURE_WIDTH,&w);
-	glGetTexLevelParameteriv(GL_TEXTURE_2D,0,GL_TEXTURE_HEIGHT,&h);
-	if(w<16||h<16||w>4096||h>4096) return;   //not loaded yet: measured on a later call
+	int w=0,h=0;
+	const unsigned char *alpha=TexFontAlpha(&w,&h);
+	if(!alpha||w<16||h<16||w>4096||h>4096) return;   //not loaded yet: measured on a later call
 	fontmeasured=1;
-	unsigned char *px=new unsigned char[(size_t)w*h*4];
-	glPixelStorei(GL_PACK_ALIGNMENT,1);
-	glGetTexImage(GL_TEXTURE_2D,0,GL_RGBA,GL_UNSIGNED_BYTE,px);
 	int cw=w/16,ch=h/16;
 	for(int c=1;c<96;c++)
 	{
@@ -136,7 +131,7 @@ static void MeasureFont()
 		int left=cw,right=-1;
 		for(int y=0;y<ch;y++)
 			for(int x=0;x<cw;x++)
-				if(px[(((size_t)(y0+y))*w+x0+x)*4+3]>48)
+				if(alpha[((size_t)(y0+y))*w+x0+x]>48)
 				{
 					if(x<left) left=x;
 					if(x>right) right=x;
@@ -146,7 +141,6 @@ static void MeasureFont()
 		glyphleft[c]=(float)left/cw;
 		glyphright[c]=(float)(right+1)/cw;
 	}
-	delete []px;
 }
 
 static int GlyphIndex(char c)

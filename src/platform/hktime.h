@@ -11,5 +11,6 @@ int64_t HKPerfCounter();      //high resolution counter, HKPerfFrequency() per s
 int64_t HKPerfFrequency();
 uint32_t HKPerfMillis();      //HKPerfCounter in ms, wrapped to 32 bits like the game clock
 void HKSleep(uint32_t ms);
+void HKFrameDrawn();          //each presented frame: the clock of HK_FIXEDCLOCK
 
 #endif

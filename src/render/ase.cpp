@@ -1,6 +1,7 @@
 //AseObj is a class that can load .cob (truespace) objects, including textures.  It also includes the functions to draw them
 
 #include "gl.h"
+#include "renderer.h"
 #include "fileio.h"
 #include "vector.h"
 #include "ase.h"
@@ -474,9 +475,8 @@ void AseObj::Draw(Vector pos,Vector x,Vector y)
 	{z.x*sv.scale,z.y*sv.scale,z.z*sv.scale,0}, 
 	{pos.x,pos.y,pos.z,1}
 	};
-	glMatrixMode(GL_MODELVIEW);
-	glPushMatrix();
-	glMultMatrixf((float *)&m);
+	Mat4 modelview=RModelView();
+	RSetModelView(Mat4Mul(modelview,Mat4From(m)));
 
 	glBegin(GL_TRIANGLES);
 	int curtex=0;
@@ -552,5 +552,5 @@ void AseObj::Draw(Vector pos,Vector x,Vector y)
 	}
 	
 	glEnd();
-	glPopMatrix();
+	RSetModelView(modelview);
 }

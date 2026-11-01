@@ -1,6 +1,7 @@
 
 
 #include "gl.h"
+#include "renderer.h"
 #include "platform.h"
 #include "fileio.h"
 #include "cfgfile.h"
@@ -778,12 +779,8 @@ void DrawConsolePanel(int fullscreen)
 	int width=cols-2;           //2 columns of gutter for the > of commands
 	consoleoverlay=!fullscreen;
 
-	glMatrixMode(GL_PROJECTION);
-	glPushMatrix();
-	glLoadIdentity();
-	glMatrixMode(GL_MODELVIEW);
-	glPushMatrix();
-	glLoadIdentity();
+	Mat4 projection=RProjection(),modelview=RModelView();   //over the game: back to them after
+	RSet2D();
 	glPushAttrib(GL_ENABLE_BIT|GL_CURRENT_BIT|GL_COLOR_BUFFER_BIT|GL_TEXTURE_BIT);
 	glDisable(GL_DEPTH_TEST);
 	glDisable(GL_FOG);
@@ -913,10 +910,8 @@ void DrawConsolePanel(int fullscreen)
 	ConsoleText(x,y,&consolecommand[first],room);
 
 	glPopAttrib();
-	glMatrixMode(GL_PROJECTION);
-	glPopMatrix();
-	glMatrixMode(GL_MODELVIEW);
-	glPopMatrix();
+	RSetProjection(projection);
+	RSetModelView(modelview);
 	glColor3f(1,1,1);
 }
 

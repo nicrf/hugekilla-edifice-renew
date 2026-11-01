@@ -48,6 +48,11 @@ void TexShutdown();             //frees every texture, before the GL context goe
 unsigned char *LoadImagePixels(const char *filename,int *width,int *height,int channels);
 void FreeImagePixels(unsigned char *pixels);
 
+//alpha of the font (TEX_FONT), one byte a pixel, rows as uploaded: kept from the
+//upload so the UI measures its glyphs (ui.cpp) without reading the texture back,
+//which sokol_gfx can't. 255 everywhere for a font without alpha; 0 before it loads.
+const unsigned char *TexFontAlpha(int *width,int *height);
+
 //file loaders (textures.cpp): an image file, or .pxr (raw, may carry alpha)
 int LoadTexture(char *filename,unsigned slot);
 int LoadRaw(char *filename,unsigned slot);
