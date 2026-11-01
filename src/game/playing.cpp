@@ -1037,7 +1037,7 @@ int CanBuild()
 			if(sobject[i].type==WATERPUMP&&sobject[i].team==GetLocalPlayer()->team&&sobject[i].attached==-1)
 			{
 				MakeClose(&sobject[i].pos);
-				if(Magnitude(GetLocalPlayer()->pos-sobject[i].pos)<40)
+				if(Magnitude(GetLocalPlayer()->pos-sobject[i].pos)<BUILDZONE)
 				{
 					return 1;
 				}
