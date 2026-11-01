@@ -1472,7 +1472,7 @@ void HandleKey(DWORD key,DWORD flags)
 #endif
 	}
 	if(key==VK_F1) LoadGuns();
-	if(key==VK_F2) LoadRandom("textures\\ground\\",1);
+	if(key==VK_F2) LoadRandom("textures\\ground\\",TEX_LAND);
 	if(key==VK_F5) LoadControls();
 	if(key==controls.forward) GetLocalPlayer()->up=1;
 	if(key==controls.back) GetLocalPlayer()->down=1;

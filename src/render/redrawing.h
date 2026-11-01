@@ -5,7 +5,8 @@
 #define RND ((float)rand()/RAND_MAX)
 #define MAXPARTICLES 3000
 
-int LoadTexture(char *filename,UINT num);
+#include "textures.h"
+
 void LoadTextures();
 void Redraw();
 int GetTexID(LPCTSTR name);
@@ -14,7 +15,6 @@ void LoadGuns();
 void RedrawSplash(int texnum,char *text);
 void LoadSpriteTextures();
 void LoadBlockTextures();
-int LoadRaw(char *filename,UINT num);
 void LoadHighTextures();
 void LoadLogoTextures();
 void RedrawSplash(int texnum,char *text,int drawlogo);

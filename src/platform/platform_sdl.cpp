@@ -575,8 +575,7 @@ int main(int argc, char **argv)
 		ConsoleDisplayText(version);
 	}
 
-	LoadTexture("textures\\fonts\\courier.pxr", 300);
-	LoadTexture("textures\\startup.bmp", 800);
+	LoadStartupTextures();
 
 	consolevisible = 1;
 	InitSound(hWnd);
@@ -597,7 +596,7 @@ int main(int argc, char **argv)
 	}
 	LoadControls();
 	LoadOptions();
-	RedrawSplash(1, 0, 1);
+	RedrawSplash(TEX_SPLASH, 0, 1);
 	PlaySound(0, 1);
 
 	// Debug aid: HK_AUTOSTART=1 starts a local server right away.
@@ -764,6 +763,7 @@ int main(int argc, char **argv)
 	CloseSocks();
 	VoiceShutdown();
 	UnInitSound();
+	TexShutdown();
 	SDL_GL_DeleteContext(glcontext);
 	SDL_DestroyWindow(window);
 	SDL_Quit();

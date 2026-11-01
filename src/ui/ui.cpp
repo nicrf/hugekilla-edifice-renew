@@ -123,7 +123,7 @@ static void MeasureFont()
 	glyphleft[0]=.35f;   //space
 	glyphright[0]=.6f;
 	GLint w=0,h=0;
-	glBindTexture(GL_TEXTURE_2D,300);
+	TexBind(TEX_FONT);
 	glGetTexLevelParameteriv(GL_TEXTURE_2D,0,GL_TEXTURE_WIDTH,&w);
 	glGetTexLevelParameteriv(GL_TEXTURE_2D,0,GL_TEXTURE_HEIGHT,&h);
 	if(w<16||h<16||w>4096||h>4096) return;   //not loaded yet: measured on a later call
@@ -182,7 +182,7 @@ float UIText(float x,float y,const char *text,float h,int len)
 	if(len<0||len>(int)strlen(text)) len=strlen(text);
 	const float cell=1.f/16;
 	float cw=h*CELLASPECT;
-	glBindTexture(GL_TEXTURE_2D,300);
+	TexBind(TEX_FONT);
 	glBegin(GL_QUADS);
 	for(int i=0;i<len;i++)
 	{
@@ -388,7 +388,7 @@ void DrawMenu()
 	int over=ButtonOver();	
 	glClearColor(0,0,0,0);
 	if(GetLocalPlayer()->playstate==0)
-		RedrawSplash(800,0,1);
+		RedrawSplash(TEX_SPLASH,0,1);
 	else
 		glClear(GL_COLOR_BUFFER_BIT);
 	MainMenuButtons();
@@ -404,7 +404,7 @@ void DrawMenu()
 #endif
 	for(int i=0;i<numbuttons&&!covered;i++)
 	{
-		glBindTexture(GL_TEXTURE_2D,1300+button[i].tex);
+		TexBind(TEX_MENU0+button[i].tex);
 		if(i==over)
 			glColor3f(1,1,1);
 		else
@@ -508,7 +508,7 @@ void HandleButton(int handler)
 
 		Disconnect();
 		GetLocalPlayer()->playstate=0;
-		LoadTexture("textures\\startup.bmp",800);
+		LoadSplashTexture();
 		break;
 	case 4: //quit
 		DestroyWindow(hWnd);

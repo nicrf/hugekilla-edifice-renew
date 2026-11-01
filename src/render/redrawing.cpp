@@ -151,12 +151,12 @@ glVertex3f(x,curheight,y);
 #define LANDVERTEX(x,y) LV((x),(y))			
 #define TEXTURESWITCHRD(x,y,type,x1,y1,x2,y2)\
 if(curtex!=landtex[(x&LANDGRIDSIZE-1)/LANDTEXBLOCKSIZE][(y&LANDGRIDSIZE-1)/LANDTEXBLOCKSIZE])\
-{glEnd();glBindTexture(GL_TEXTURE_2D,(curtex=landtex[(x&LANDGRIDSIZE-1)/LANDTEXBLOCKSIZE][(y&LANDGRIDSIZE-1)/LANDTEXBLOCKSIZE])+800);glBegin(type);\
+{glEnd();TexBind((curtex=landtex[(x&LANDGRIDSIZE-1)/LANDTEXBLOCKSIZE][(y&LANDGRIDSIZE-1)/LANDTEXBLOCKSIZE])+TEX_GROUND0);glBegin(type);\
 LANDVERTEX(x1,y1);LANDVERTEX(x2,y2);}\
 
 #define TEXTURESWITCH(x,y,type)\
 if(curtex!=landtex[(x&LANDGRIDSIZE-1)/LANDTEXBLOCKSIZE][(y&LANDGRIDSIZE-1)/LANDTEXBLOCKSIZE])\
-{glEnd();glBindTexture(GL_TEXTURE_2D,(curtex=landtex[(x&LANDGRIDSIZE-1)/LANDTEXBLOCKSIZE][(y&LANDGRIDSIZE-1)/LANDTEXBLOCKSIZE])+800);glBegin(type);}\
+{glEnd();TexBind((curtex=landtex[(x&LANDGRIDSIZE-1)/LANDTEXBLOCKSIZE][(y&LANDGRIDSIZE-1)/LANDTEXBLOCKSIZE])+TEX_GROUND0);glBegin(type);}\
 
 
 //draws a block of land with a hole in the middle to allow for less detail far away by calling this function a few times
@@ -197,7 +197,7 @@ void DrawMip(float fcx,float fcy,float fhcx,float fhcy,int prevsize,int newsize,
 	int x,y;
 	y=maxy;
 	x=minx;
-	glBindTexture(GL_TEXTURE_2D,1);
+	TexBind(TEX_LAND);
 	glCullFace(GL_BACK);
 	glBegin(GL_TRIANGLES);
 	y=maxy;
@@ -390,7 +390,7 @@ void DrawCloudBox(Vector pos)
 	
 	opos=pos;
 	glCullFace(GL_BACK);
-	glBindTexture(GL_TEXTURE_2D,2);
+	TexBind(TEX_CLOUDS);
 	glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
 		
 	glColor4f(1,1,1,.5);
@@ -417,7 +417,7 @@ void DrawCloudBox(Vector pos)
 	{
 		highest-=60;
 		glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
-		glBindTexture(GL_TEXTURE_2D,6);
+		TexBind(TEX_CLOUDMIST);
 		glColor4f(1,1,1,GetSkySettings()->mistopacity);
 		for(x=-repeats;x<repeats;x++)
 		{
@@ -790,7 +790,7 @@ void DrawBlocks(int px,int py,int pz,int size)
 	}
 	for(i=0;i<32;i++)
 	{
-		glBindTexture(GL_TEXTURE_2D,400+i);
+		TexBind(TEX_BLOCK0+i);
 		glBegin(GL_QUADS);
 		for(int i2=0;i2<numblockbuf[i];i2++)
 		{
@@ -814,7 +814,7 @@ void DrawBlocks(int px,int py,int pz,int size)
 float DrawText(float x,float y,const char *text)
 {
 	
-	glBindTexture(GL_TEXTURE_2D,300);
+	TexBind(TEX_FONT);
 	glBegin(GL_QUADS);
 	int xp,yp;
 	float xtp,ytp;
@@ -941,7 +941,7 @@ void DrawWater(int size,float cx,float cy)
 	if(woy>4) woy-=4;
 	glDisable(GL_CULL_FACE);
 	int belowwater=GetLocalPlayer()->pos.y<WATERHEIGHT;
-	glBindTexture(GL_TEXTURE_2D,2);
+	TexBind(TEX_CLOUDS);
 	glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
 	float vpx=GetLocalPlayer()->pos.x/-64;
 	float vpy=GetLocalPlayer()->pos.z/-64;
@@ -1001,7 +1001,7 @@ void DrawWater(int size,float cx,float cy)
 			glEnd();
 		}
 	}
-	glBindTexture(GL_TEXTURE_2D,600);
+	TexBind(TEX_LILLYPAD);
 	glColor4f(1,1,1,1);
 	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE); 
 	glBegin(GL_QUADS);
@@ -1038,7 +1038,7 @@ void DrawSun()
 	glDisable(GL_FOG);
 	//glDisable(GL_DEPTH_TEST);
 	glBlendFunc(GL_SRC_ALPHA,GL_ONE );
-	glBindTexture(GL_TEXTURE_2D,4);
+	TexBind(TEX_SUNBACK);
 	glDisable(GL_DEPTH_TEST);
 	glBegin(GL_TRIANGLE_STRIP);
 	glColor4f(1,1,1,GetSkySettings()->suneyelight*sunflarebright);
@@ -1052,7 +1052,7 @@ void DrawSun()
 	glVertex3f(cur->pos.x+50,cur->pos.y+60*GetSkySettings()->sunheight-50,cur->pos.z+60);
 	glEnd();
 
-	glBindTexture(GL_TEXTURE_2D,3);
+	TexBind(TEX_SUN);
 	glEnable(GL_DEPTH_TEST);
 	glBegin(GL_TRIANGLE_STRIP);
 	glColor4f(1,1,1,1);
@@ -1107,7 +1107,7 @@ void DrawGunExplosions()
 			glEnable(GL_DEPTH_TEST);
 			glDisable(GL_FOG);
 			glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA );
-			glBindTexture(GL_TEXTURE_2D,100+pl->weapon*2);
+			TexBind(TEX_EXPLOSION0+pl->weapon*2);
 
 			glBegin(GL_TRIANGLE_STRIP);
 			glColor4f(1,1,1,(float)(10-timesincefire)/5);
@@ -1150,7 +1150,7 @@ void DrawGunSelection()
 	curgunselrot+=curgunselrotvel;
 	float rot=curgunselrot;
 	glEnable(GL_TEXTURE_2D);
-	glBindTexture(GL_TEXTURE_2D,15);
+	TexBind(TEX_GUNNAMES);
 	glBegin(GL_TRIANGLE_STRIP);
 	
 	
@@ -1510,7 +1510,7 @@ void Redraw()
 	UITextLines(-.4f,-.75f,curobjective);
 	UITextLines(-.4f,-.95f,curscore);
 	
-	glBindTexture(GL_TEXTURE_2D,10);
+	TexBind(TEX_AMMOICON);
 	float bf=(float)GetLocalPlayer()->ammoingun[GetLocalPlayer()->weapon]/GetAmmoHold(GetLocalPlayer()->weapon);
 	glColor4f(bf/2+.5,bf/2+.5,bf/2+.5,bf/2+.5);
 	glBegin(GL_QUADS);
@@ -1520,7 +1520,7 @@ void Redraw()
 	glTexCoord2f(1,1);glVertex2f(.28+offset,-.95);
 	glEnd();
 	
-	glBindTexture(GL_TEXTURE_2D,11);
+	TexBind(TEX_HEALTHICON);
 	bf=(float)GetLocalPlayer()->life/100;
 	glColor4f(bf/2+.5,bf/2+.5,bf/2+.5,bf/2+.5);
 	glBegin(GL_QUADS);
@@ -1535,7 +1535,7 @@ void Redraw()
 		int credits=GetLocalPlayer()->credits[curcredit];
 		if(credits)
 		{
-			glBindTexture(GL_TEXTURE_2D,20+curcredit);
+			TexBind(TEX_CREDIT0+curcredit);
 			float yoffset=(float)curcredit*.15-.25;
 			glColor4f(1,1,1,1);
 			glBegin(GL_QUADS);
@@ -1713,7 +1713,7 @@ void Draw(float offset)
 		glDisable(GL_FOG);
 		glDisable(GL_DEPTH_TEST);
 		glBlendFunc(GL_SRC_ALPHA,GL_ONE );
-		glBindTexture(GL_TEXTURE_2D,4);
+		TexBind(TEX_SUNBACK);
 		glBegin(GL_TRIANGLE_STRIP);
 		float color=RND*.5+.1;
 		glColor4f(1,1,1,color);
@@ -2039,7 +2039,7 @@ void Draw(float offset)
 		{
 			glEnd();
 			glEnable(GL_TEXTURE_2D);
-			glBindTexture(GL_TEXTURE_2D,3);
+			TexBind(TEX_SUN);
 			glDisable(GL_FOG);
 			glBlendFunc(GL_SRC_ALPHA,GL_ONE);
 			glBegin(GL_TRIANGLE_STRIP);
@@ -2179,7 +2179,7 @@ void Draw(float offset)
 	glCullFace(GL_BACK);
 	
 	glBlendFunc(GL_SRC_ALPHA,GL_ONE);
-	glBindTexture(GL_TEXTURE_2D,5);
+	TexBind(TEX_CROSSHAIR);
 	glPopMatrix();
 	glLoadIdentity();
 	glMatrixMode(GL_PROJECTION);
@@ -2210,9 +2210,9 @@ void Draw(float offset)
 void RedrawSplash(int texnum,char *text,int drawlogo)
 {
 	glMatrixMode(GL_MODELVIEW);
-	texnum=800;
+	texnum=TEX_SPLASH;   //always the splash, whatever the caller passes
 	glEnable(GL_TEXTURE_2D);
-	glBindTexture(GL_TEXTURE_2D,texnum);
+	TexBind(texnum);
 	glLoadIdentity();
 	glDisable(GL_DEPTH_TEST);
 	glEnable(GL_BLEND);

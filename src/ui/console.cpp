@@ -714,13 +714,13 @@ void DrawConsoleNonGL()
 #define CONX1 -.985f            //text left edge
 #define CONSCROLLW .012f
 
-//draws len characters (all if -1) with the font of DrawText (texture 300, 16x16
+//draws len characters (all if -1) with the font of DrawText (TEX_FONT, 16x16
 //cells from ' '), overlapping the cells so the text is dense
 static void ConsoleText(float x,float y,const char *text,int len=-1)
 {
 	if(len<0||len>(int)strlen(text)) len=strlen(text);
 	const float cell=1.f/16;
-	glBindTexture(GL_TEXTURE_2D,300);
+	TexBind(TEX_FONT);
 	glBegin(GL_QUADS);
 	for(int i=0;i<len;i++,x+=CONCHARW)
 	{
