@@ -171,8 +171,10 @@ int LoadStructure(char *filename);
 void DisplayBuildingType(char *path);
 //game mode 0: a team builds within this of its water pump (not carried)
 #define BUILDZONE 40
-void PlaceStructure(int task);
-void BuildPreviewWheel(int dir,int distance);   //wheel while placing: rotate, or move away
+int PlaceStructure(int task);   //0: out of reach, nothing built
+void BuildPreviewWheel(int dir,int height);   //wheel while placing: rotate, or raise/lower
+int CanBuild();
+float GetHeight(Vector pos);
 void BuildPreviewText();
 void InitConsole();
 

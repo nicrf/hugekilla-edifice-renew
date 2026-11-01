@@ -554,9 +554,16 @@ inline void DrawBlockSide(BlockBuf *cb)
 	}
 }
 
-//draws an individual block
+//the shade of a face of the build preview: grey, or red where it can't be built
+static inline void BlockColor(float c,char red)
+{
+	if(red) glColor3f(.5f+c*.5f,c*.15f,c*.15f);
+	else glColor3f(c,c,c);
+}
 
-void DrawBlock(int x,int y,int z,char ds,char type,int &px,int &py,int &pz)
+//draws an individual block (the wireframe of the build preview)
+
+void DrawBlock(int x,int y,int z,char ds,char type,int &px,int &py,int &pz,char red)
 {
 	x*=BLOCKSIZE;
 	y*=BLOCKSIZE;
@@ -579,7 +586,7 @@ void DrawBlock(int x,int y,int z,char ds,char type,int &px,int &py,int &pz)
 	if (type==5){t1=1;t2=0;t3=0;t4=1;}
 	if(x>px&&ds&SIDEXN)
 	{
-		glColor3f(XNC,XNC,XNC);
+		BlockColor(XNC,red);
 		glTexCoord2f(xtexoffset,ytexoffset);				glVertex3f(x,y,z);
 		glTexCoord2f(BTEXMULT+xtexoffset,ytexoffset);		glVertex3f(x,y,z+BLOCKSIZE);
 		glTexCoord2f(xtexoffset,BTEXMULT*t1+ytexoffset);		glVertex3f(x,y+BLOCKSIZE*t1,z);
@@ -589,7 +596,7 @@ void DrawBlock(int x,int y,int z,char ds,char type,int &px,int &py,int &pz)
 	}
 	 if(x<px&&ds&SIDEXP)
 	{
-		glColor3f(XPC,XPC,XPC);
+		BlockColor(XPC,red);
 		glTexCoord2f(BTEXMULT+xtexoffset,ytexoffset);				glVertex3f(x+BLOCKSIZE,y,z);
 		glTexCoord2f(BTEXMULT+xtexoffset,BTEXMULT*t4+ytexoffset);		glVertex3f(x+BLOCKSIZE,y+BLOCKSIZE*t4,z);
 		glTexCoord2f(xtexoffset,ytexoffset);		glVertex3f(x+BLOCKSIZE,y,z+BLOCKSIZE);
@@ -602,7 +609,7 @@ void DrawBlock(int x,int y,int z,char ds,char type,int &px,int &py,int &pz)
 	ytexoffset=ytexoffset/4+stdyoff;
 	if(y>py&&ds&SIDEYN)
 	{
-		glColor3f(YNC,YNC,YNC);
+		BlockColor(YNC,red);
 		glTexCoord2f(xtexoffset,ytexoffset);				glVertex3f(x,y,z);
 		glTexCoord2f(BTEXMULT+xtexoffset,ytexoffset);		glVertex3f(x+BLOCKSIZE,y,z);
 		glTexCoord2f(xtexoffset,BTEXMULT+ytexoffset);		glVertex3f(x,y,z+BLOCKSIZE);
@@ -619,19 +626,19 @@ void DrawBlock(int x,int y,int z,char ds,char type,int &px,int &py,int &pz)
 		switch(type)
 		{
 		case 1:
-			glColor3f(YPC,YPC,YPC);
+			BlockColor(YPC,red);
 			break;
 		case 2:
-			glColor3f(TC2,TC2,TC2);
+			BlockColor(TC2,red);
 			break;
 		case 3:
-			glColor3f(TC3,TC3,TC3);
+			BlockColor(TC3,red);
 			break;
 		case 4:
-			glColor3f(TC4,TC4,TC4);
+			BlockColor(TC4,red);
 			break;
 		case 5:
-			glColor3f(TC5,TC5,TC5);
+			BlockColor(TC5,red);
 			break;
 		}
 		
@@ -647,7 +654,7 @@ void DrawBlock(int x,int y,int z,char ds,char type,int &px,int &py,int &pz)
 	ytexoffset=ytexoffset/4+stdyoff;
 	if(z>pz&&ds&SIDEZN)
 	{
-		glColor3f(ZNC,ZNC,ZNC);
+		BlockColor(ZNC,red);
 		glTexCoord2f(BTEXMULT+xtexoffset,ytexoffset);		glVertex3f(x,y,z);
 		glTexCoord2f(BTEXMULT+xtexoffset,BTEXMULT*t1+ytexoffset);glVertex3f(x,y+BLOCKSIZE*t1,z);
 		glTexCoord2f(xtexoffset,ytexoffset);				glVertex3f(x+BLOCKSIZE,y,z);
@@ -657,7 +664,7 @@ void DrawBlock(int x,int y,int z,char ds,char type,int &px,int &py,int &pz)
 	}
 	if(z<pz&&ds&SIDEZP)
 	{
-		glColor3f(ZPC,ZPC,ZPC);
+		BlockColor(ZPC,red);
 		glTexCoord2f(xtexoffset,ytexoffset);				glVertex3f(x,y,z+BLOCKSIZE);
 		glTexCoord2f(BTEXMULT+xtexoffset,ytexoffset);		glVertex3f(x+BLOCKSIZE,y,z+BLOCKSIZE);
 		glTexCoord2f(xtexoffset,BTEXMULT*t2+ytexoffset);		glVertex3f(x,y+BLOCKSIZE*t2,z+BLOCKSIZE);

@@ -427,7 +427,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			int ud=(short)HIWORD(wParam)/120;
 			if(menu==BUILDING&&ud)
 			{
-				BuildPreviewWheel(ud,(GetKeyState(VK_CONTROL)&0x8000)!=0);
+				BuildPreviewWheel(ud,(GetKeyState(VK_CONTROL)&0x8000)!=0);   //Ctrl: raise/lower
 				break;
 			}
 			if(ud==-1) SwitchGun(50);
