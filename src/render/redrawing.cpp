@@ -1767,6 +1767,10 @@ void Draw(float offset)
 				us.numavoid++;
 			}
 		us.blocked=UltraBlocked;
+		us.landtex=&landtex[0][0];
+		us.landtexsize=LANDTEXGRIDSIZE;
+		for(int t=0;t<GetDefs()->numgroundtex&&t<16;t++)
+			us.snowground[t]=!strncmp(GetDefs()->groundtex[t],"snow.",5);
 		RUltraBegin(us);
 		ultrascene=1;
 	}

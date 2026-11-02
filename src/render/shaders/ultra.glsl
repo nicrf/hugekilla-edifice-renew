@@ -31,6 +31,13 @@ float vnoise(vec2 p) {
 		mix(hash12(i + vec2(0.0, 1.0)), hash12(i + vec2(1.0, 1.0)), u.x), u.y);
 }
 
+// NaN or infinite (a degenerate normal, a division by zero) becomes black, and
+// nothing goes past 64: one bad pixel must not blow the bloom up into a flash
+vec3 hdr_safe(vec3 c) {
+	if (any(isnan(c)) || any(isinf(c))) return vec3(0.0);
+	return clamp(c, vec3(0.0), vec3(64.0));
+}
+
 vec3 srgb_to_linear(vec3 c) {
 	return c * (c * (c * 0.305306011 + 0.682171111) + 0.012522878);
 }
@@ -506,7 +513,7 @@ void main() {
 	float shadow = shadow_at(wpos, n, eyedepth);
 	vec3 c = shade(albedo, rough, metal, ao, n, v, shadow);
 	c = apply_fog(c, wpos);
-	frag_color = vec4(c, base.a * color.a);
+	frag_color = vec4(hdr_safe(c), base.a * color.a);
 }
 @end
 
@@ -924,7 +931,9 @@ layout(binding=0) uniform down_params {
 out vec4 frag_color;
 
 vec3 s(vec2 uv) {
-	return min(textureLod(sampler2D(src, linsmp), uv, 0.0).rgb, vec3(opts.y));
+	vec3 c = textureLod(sampler2D(src, linsmp), uv, 0.0).rgb;
+	if (any(isnan(c)) || any(isinf(c))) return vec3(0.0);
+	return clamp(c, vec3(0.0), vec3(opts.y));
 }
 
 float karis(vec3 c) {
@@ -1059,6 +1068,8 @@ void main() {
 	vec2 uv = gl_FragCoord.xy * texel.xy;
 	vec3 c = textureLod(sampler2D(hdr, linsmp), uv, 0.0).rgb;
 	vec3 b = textureLod(sampler2D(bloom, linsmp), uv, 0.0).rgb;
+	if (any(isnan(c)) || any(isinf(c))) c = vec3(0.0);
+	if (any(isnan(b)) || any(isinf(b))) b = vec3(0.0);
 	c = mix(c, b, params.y);
 	if (params.z > 0.5) c += textureLod(sampler2D(rays, linsmp), uv, 0.0).rgb;
 	// ghosts of the bright spots, mirrored through the center
@@ -1070,7 +1081,9 @@ void main() {
 			vec2 q = g + gv * float(i);
 			float w = pow(1.0 - length(vec2(0.5) - q) / 0.7071, 6.0);
 			vec3 tint = i == 1 ? vec3(0.3, 0.6, 1.0) : (i == 2 ? vec3(1.0, 0.6, 0.3) : vec3(0.7, 1.0, 0.6));
-			fl += max(textureLod(sampler2D(bloom, linsmp), q, 0.0).rgb - 1.5, 0.0) * w * tint;
+			vec2 qs = (vec2(1.0) - q - sun.xy) * vec2(sun.w, 1.0);
+			float nearsun = exp(-dot(qs, qs) * 40.0);
+			fl += max(textureLod(sampler2D(bloom, linsmp), q, 0.0).rgb - 1.5, 0.0) * w * tint * nearsun;
 		}
 		c += fl * sun.z;
 	}
