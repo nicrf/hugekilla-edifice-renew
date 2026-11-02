@@ -1417,3 +1417,51 @@ void main() {
 @end
 
 @program clouds post_vs clouds_fs
+
+//---------------------------------------------------------------- smoke
+
+// the effects' smoke puffs (effects.cpp), billboards drawn as round lumps: lit by
+// the sun (wrapped, shadowed, brighter towards it) and the sky, soft where they
+// cross the scene (the scene's eye depth so far)
+@fs smoke_fs
+@include_block common
+@include_block scene_ub
+layout(binding=0) uniform texture2D tex;
+layout(binding=0) uniform sampler smp;
+layout(binding=1) uniform texture2D skylut;
+layout(binding=1) uniform sampler lutsmp;
+layout(binding=9) uniform texture2D scenedepth;
+layout(binding=6) uniform sampler pointsmp;
+layout(binding=7) uniform texture2D shadowmap;
+layout(binding=4) uniform sampler shadowsmp;
+layout(binding=1) uniform smoke_fs_params {
+	vec4 screen;        // xy: 1/size of the frame
+};
+@include_block sky_fn
+@include_block shadow_fn
+
+in vec2 uv;
+in vec4 color;
+in vec3 eye;
+
+out vec4 frag_color;
+
+void main() {
+	vec4 c = texture(sampler2D(tex, smp), uv) * clamp(color, 0.0, 1.0);
+	vec2 q = (uv - 0.5) * 2.0;
+	vec3 ne = normalize(vec3(q.x, q.y, sqrt(max(1.0 - dot(q, q), 0.0)) + 0.35));
+	vec3 n = normalize((invview * vec4(ne, 0.0)).xyz);
+	vec3 wpos = (invview * vec4(eye, 1.0)).xyz;
+	vec3 v = normalize(eyepos.xyz - wpos);
+	float shadow = shadow_at(wpos, vec3(0.0, 1.0, 0.0), -eye.z);
+	float wrap = max(dot(n, sundir.xyz) * 0.6 + 0.4, 0.0);
+	float phase = hg_phase(dot(-v, sundir.xyz), 0.45) * 4.0 * PI;
+	vec3 albedo = srgb_to_linear(c.rgb);
+	vec3 lit = albedo * (suncolor.rgb * wrap * shadow * (0.25 + 0.2 * phase) + hemi_sky() * 0.85);
+	float sd = textureLod(sampler2D(scenedepth, pointsmp), gl_FragCoord.xy * screen.xy, 0.0).r;
+	float soft = clamp((sd - (-eye.z)) / 0.8, 0.0, 1.0);
+	frag_color = vec4(apply_fog(lit, wpos), c.a * soft);
+}
+@end
+
+@program smoke hdrdraw_vs smoke_fs

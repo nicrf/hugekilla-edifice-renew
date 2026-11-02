@@ -30,6 +30,10 @@ void FxBulletImpact(const Vector &hit,const Vector &dir,int onblock);
 //the muzzle sprite, bright 0..1, turned by rot (radians) so it flickers
 void FxMuzzleGlow(const Vector &pos,float size,float bright,float rot);
 
+//a bullet's way through the air, one tick's segment (Ultra graphics only): it
+//pushes the smoke it crosses aside, leaving a tunnel that closes again
+void FxBulletThroughSmoke(const Vector &from,const Vector &to);
+
 //procedural textures of the effects (LoadTextures)
 void FxLoadTextures();
 //moves and draws the effects: Draw (redrawing.cpp), with the scene's camera; layer

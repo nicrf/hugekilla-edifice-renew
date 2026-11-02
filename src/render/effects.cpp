@@ -786,6 +786,7 @@ void DrawEffects(int layer)
 		{
 			if(bound>=0) REnd();
 			TexBind(tex);
+			RSetMaterial(tex==TEX_FX_SMOKE?RMAT_SMOKE:RMAT_NONE);   //Ultra only
 			RBegin(RP_QUADS);
 			bound=tex;
 		}
@@ -830,6 +831,33 @@ void DrawEffects(int layer)
 		}
 	}
 	REnd();
+	RSetMaterial(RMAT_NONE);
 	RPopAttrib();
 	RDepthMask(1);
+}
+
+void FxBulletThroughSmoke(const Vector &from,const Vector &to)
+{
+	if(!RUltra()) return;   //Classic keeps its smoke as it was
+	Vector seg=to-from;
+	float len2=DotProduct(seg,seg);
+	if(len2<1e-6f) return;
+	for(size_t i=0;i<parts.size();i++)
+	{
+		FxParticle &p=parts[i];
+		if(p.kind!=FX_SMOKE||p.age<0) continue;
+		float t=DotProduct(p.pos-from,seg)/len2;
+		if(t<0) t=0;
+		if(t>1) t=1;
+		Vector off=p.pos-(from+seg*t);
+		float d=sqrtf(DotProduct(off,off));
+		float size=p.size0+(p.size1-p.size0)*Ease(p.age/p.life);
+		float r=size*.6f+.3f;
+		if(d>=r) continue;
+		//pushed out of the bullet's way, harder near it, and a little thinner
+		Vector dir=d>1e-3f?off*(1/d):Normalize(CrossProduct(seg,Vector(0,1,0)));
+		float k=1-d/r;
+		p.vel+=dir*(2.5f*k);
+		p.a*=1-.15f*k;
+	}
 }

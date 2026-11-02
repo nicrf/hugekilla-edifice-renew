@@ -114,7 +114,8 @@ static unsigned short Half(float f)
 
 static sg_shader shhdr,shlit,shshadow,shsky,shwater,shgrass,shcopy,shdown,shup,shrays,shcomposite,shfxaa;
 #define NUMKEYS (2*6*2*2*3*2)     //renderer_sokol.cpp's classic pipeline keys
-static sg_pipeline hdrpipes[NUMKEYS],litpipes[NUMKEYS];
+static sg_pipeline hdrpipes[NUMKEYS],litpipes[NUMKEYS],smokepipes[NUMKEYS];
+static sg_shader shsmoke;
 static sg_pipeline shadowpipe,skypipe,waterpipe,grasspipe,copypipe,downpipe,uppipe,rayspipe,compositepipe,fxaapipe;
 static sg_sampler linclamp,pointclamp,linrepeat,hdsampler,shadowsampler,lutsampler;
 static int inited,failed;
@@ -225,6 +226,17 @@ static sg_pipeline HdrPipe(int key)
 	d.label="ultra classic";
 	hdrpipes[key]=sg_make_pipeline(&d);
 	return hdrpipes[key];
+}
+
+static sg_pipeline SmokePipe(int key)
+{
+	if(smokepipes[key].id) return smokepipes[key];
+	sg_pipeline_desc d=RSokolPipeDesc(key);
+	d.shader=shsmoke;
+	d.colors[0].pixel_format=SG_PIXELFORMAT_RGBA16F;
+	d.label="ultra smoke";
+	smokepipes[key]=sg_make_pipeline(&d);
+	return smokepipes[key];
 }
 
 static sg_pipeline LitPipe(int key)
@@ -369,6 +381,7 @@ void RUltraInit()
 	d=Fullscreen(shcomposite,SG_PIXELFORMAT_RGBA8,"ultra composite");
 	compositepipe=sg_make_pipeline(&d);
 	//into the frame, which has a depth buffer (cleared for the HUD)
+	shsmoke=sg_make_shader(smoke_shader_desc(b));
 	shclouds=sg_make_shader(clouds_shader_desc(b));
 	d=Fullscreen(shclouds,SG_PIXELFORMAT_RGBA16F,"ultra clouds");
 	cloudspipe=sg_make_pipeline(&d);
@@ -1176,7 +1189,7 @@ static int SameMat(const Mat4 &a,const Mat4 &b)
 
 static int IsLit(const RSokolCmd &c)
 {
-	return c.mark<0&&c.material!=RMAT_NONE&&KeyPrim(c.pipe)==0;
+	return c.mark<0&&c.material!=RMAT_NONE&&c.material!=RMAT_SMOKE&&KeyPrim(c.pipe)==0;
 }
 
 static scene_params_t sp;
@@ -1295,6 +1308,55 @@ struct Drawer
 			sg_apply_uniforms(UB_lit_fs_params,&r);
 			material=c.material;
 			texslot=c.texslot;
+		}
+		sg_draw(c.first,c.count,1);
+	}
+
+	//smoke: lit, soft against the scene's depth (copied before it)
+	void Smoke(const RSokolCmd &c,const Target &depthcopy)
+	{
+		sg_pipeline p=SmokePipe(c.pipe);
+		int newpipe=p.id!=pipe.id;
+		if(newpipe)
+		{
+			sg_apply_pipeline(p);
+			pipe=p;
+			uniforms=material=texslot=-1;
+			view=0;
+		}
+		Viewport(c);
+		if(newpipe||c.view.id!=view)
+		{
+			sg_bindings b;
+			memset(&b,0,sizeof(b));
+			b.vertex_buffers[0]=f->vbuf;
+			b.views[VIEW_tex]=c.view;
+			b.views[VIEW_skylut]=skylut;
+			b.views[VIEW_scenedepth]=depthcopy.tex;
+			b.views[VIEW_shadowmap]=shadowatlas.tex;
+			b.samplers[SMP_smp]=f->samplers[c.sampler];
+			b.samplers[SMP_lutsmp]=lutsampler;
+			b.samplers[SMP_pointsmp]=pointclamp;
+			b.samplers[SMP_shadowsmp]=shadowsampler;
+			sg_apply_bindings(&b);
+			view=c.view.id;
+		}
+		if(newpipe)
+		{
+			sg_range r={&sp,sizeof(sp)};
+			sg_apply_uniforms(UB_scene_params,&r);
+			smoke_fs_params_t fs;
+			Set4(fs.screen,1.0f/w,1.0f/h,0,0);
+			r.ptr=&fs;
+			r.size=sizeof(fs);
+			sg_apply_uniforms(UB_smoke_fs_params,&r);
+		}
+		if(newpipe||c.uniforms!=uniforms)
+		{
+			const RSokolUniforms &u=f->uniforms[c.uniforms];
+			sg_range vs={&u.proj,sizeof(hdrdraw_vs_params_t)};
+			sg_apply_uniforms(UB_hdrdraw_vs_params,&vs);
+			uniforms=c.uniforms;
 		}
 		sg_draw(c.first,c.count,1);
 	}
@@ -1728,6 +1790,21 @@ void RUltraDrawScene(const RSokolFrame &f,const RSokolCmd *cmds,int n)
 			continue;
 		}
 		if(c.mark>=0) continue;
+		if(c.material==RMAT_SMOKE&&KeyPrim(c.pipe)==0)
+		{
+			//the scene's depth so far, for the smoke's soft edges
+			if(!copied)
+			{
+				sg_end_pass();
+				CopyScene(f,proj);
+				copied=1;
+				p=Pass(&hdr,1,&hdrdepth,0,"ultra scene, smoke");
+				sg_begin_pass(&p);
+				d.Reset();
+			}
+			d.Smoke(c,lindepth);
+			continue;
+		}
 		if(IsLit(c)) d.Lit(c);
 		else d.Classic(c);
 	}

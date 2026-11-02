@@ -216,7 +216,8 @@ enum RMaterial
 	RMAT_TERRAIN,         //heightmap land: splatted grass, rock, sand, snow, dirt
 	RMAT_BLOCK,           //building blocks (TEX_BLOCK0+i: HD wall<i> if there is one)
 	RMAT_MODEL,           //.cob models, with their normals
-	RMAT_FOLIAGE          //models that sway in the wind (trees, flowers)
+	RMAT_FOLIAGE,         //models that sway in the wind (trees, flowers)
+	RMAT_SMOKE            //smoke puffs: lit by the sun and the sky, soft where they meet the scene
 };
 void RSetMaterial(int material);
 

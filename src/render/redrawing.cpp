@@ -1669,6 +1669,24 @@ static Player *DebugCamera(Player *cur)
 void Draw(float offset)
 {
 	Player *cur=DebugCamera(GetLocalPlayer());
+	//debug aid: HK_FXTEST=1, a grenade's explosion 14 units ahead every 3 s, and a
+	//burst of bullets through its smoke (captures of the effects)
+	static const char *fxtest=getenv("HK_FXTEST");
+	static DWORD nextfx;
+	if(fxtest&&curtime>nextfx)
+	{
+		Vector at=cur->pos+cur->fwd*14;
+		at.y=GetLandSmooth(at.x,at.z)+.5f;
+		FxExplosion(at);
+		nextfx=curtime+3000;
+	}
+	if(fxtest&&curtime%3000>2200&&curtime%3000<2400)
+	{
+		Vector at=cur->pos+cur->fwd*14;
+		Vector side=CrossProduct(cur->fwd,Vector(0,1,0));
+		Vector from=at-side*8+Vector(0,GetLandSmooth(at.x,at.z)-at.y+1.5f,0);
+		FxBulletThroughSmoke(from,from+side*16);
+	}
 	
 	
 	static int frame;
