@@ -54,9 +54,11 @@ public:
 	{
 		memset(&object,0,sizeof(aseobj));
 		loaded=0;
+		foliage=0;
 	}
 	int Load(const char *file);
 	int loaded;
+	int foliage;      //sways in the wind (Ultra graphics): trees, flowers
 	void Unload();
 	void Draw(Vector pos,Vector top,Vector right);
 	~AseObj();
