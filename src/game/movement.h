@@ -18,6 +18,7 @@ struct MoveInput
 	int pad;             //walks with a stick (SetPadMove), how far it is pushed:
 	float padfwd,padstrafe;
 	float speedpenalty;  //GetSOSpeedPenalty: carrying a flag, a water pump...
+	MoveInput():local(0),pad(0),padfwd(0),padstrafe(0),speedpenalty(0) {}
 };
 
 //the land: GetHeight (the ground or a block under a point), PropsPushPlayer (rocks
