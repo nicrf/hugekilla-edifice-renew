@@ -421,7 +421,10 @@ void main() {
 		vec4 sp = texture(sampler2D(landsplat, landsmp), lp);
 		// the map's own ground: its average color sets the hue, a white one is snow
 		vec3 classic = srgb_to_linear(textureLod(sampler2D(tex, smp), uv, 7.0).rgb);
-		float snowy = smoothstep(0.45, 0.7, min(classic.r, min(classic.g, classic.b)));
+		// (bright and grey: a light yellow-green grass is not snow)
+		float cmin = min(classic.r, min(classic.g, classic.b));
+		float cmax = max(classic.r, max(classic.g, classic.b));
+		float snowy = smoothstep(0.5, 0.75, cmin) * (1.0 - smoothstep(0.06, 0.16, (cmax - cmin) / max(cmax, 1e-3)));
 		vec2 p = wpos.xz;
 		// two grasses, mixed at a large scale: no field looks the same twice
 		Mat grass = mat_mix(hd_layer(p, 0.0, 0.17), hd_layer(p, 16.0, 0.15), smoothstep(0.35, 0.8, vnoise(p * 0.021 + 7.3)) * 0.7);
