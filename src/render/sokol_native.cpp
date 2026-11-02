@@ -179,6 +179,11 @@ int RSokolOriginTopLeft()
 	return 1;
 }
 
+int RSokolSoftwareRenderer()
+{
+	return 0;
+}
+
 //copies a region of a (private) texture to a shared buffer and waits: the frame was
 //committed before, and the queue runs command buffers in order
 static void ReadTexture(sg_image image,int x,int y,int w,int h,int pixelsize,unsigned char *out)
@@ -390,6 +395,12 @@ int RSokolOriginTopLeft()
 	return 1;
 }
 
+//WARP (no GPU) draws the Ultra graphics at a fair speed: not counted as one
+int RSokolSoftwareRenderer()
+{
+	return 0;
+}
+
 void RSokolReadColor(sg_image image,int x,int y,int w,int h,unsigned char *rgba)
 {
 	ID3D11Texture2D *src=(ID3D11Texture2D *)sg_d3d11_query_image_info(image).tex2d;
@@ -563,6 +574,14 @@ void RSokolPresentNative()
 int RSokolOriginTopLeft()
 {
 	return 0;
+}
+
+//Mesa's llvmpipe, softpipe (swrast): their anisotropic filtering takes seconds a
+//frame (measured: 42 s against 13 ms without, llvmpipe, 400x300)
+int RSokolSoftwareRenderer()
+{
+	const char *r=(const char *)glGetString(GL_RENDERER);
+	return r&&(strstr(r,"llvmpipe")||strstr(r,"softpipe")||strstr(r,"swrast"));
 }
 
 //glReadPixels through a framebuffer of our own on the image (sokol_gfx then
