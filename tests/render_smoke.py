@@ -6,7 +6,9 @@ Each scene runs in a fresh user folder (HK_USERDIR; net.ini with servervisibilit
 and no lobby, so nothing is announced), saves one frame (HK_SHOT, HK_FIXEDCLOCK=16)
 and is stopped. A scene fails when the game exits or saves nothing within 60 s, when
 its log has a sokol_gfx error or validation message (a Debug build validates every
-call; warnings are only shown), or when the frame is one flat color. --ref compares with the same captures of
+call; warnings are only shown), or when the frame is one flat color. The last two
+scenes draw with the Ultra graphics (HK_GRAPHICS=ultra), the second at a lake's shore.
+--ref compares with the same captures of
 another build (tests/pixel_diff.py), for information: what the CI's runners draw
 (software GL, WARP, a virtual GPU) differs from a real GPU. Linux needs a display
 (xvfb-run). Used by the CI's sokol job."""
@@ -32,6 +34,11 @@ SCENES = [
     # renderer); the console is drawn over the game and in the menus anyway
     ("spawn", dict(HK_AUTOSTART="1", HK_SHOT_FRAME="300", HK_FIXEDCLOCK="16")),
     ("game", dict(HK_AUTOSTART="1", HK_PLAY="1", HK_SHOT_FRAME="600", HK_FIXEDCLOCK="16")),
+    # the Ultra graphics (renderer.h): HDR, shadows, water, grass, post-processing; a
+    # backend without them (the fixed-function GL one) draws the game as Classic
+    ("ultra", dict(HK_AUTOSTART="1", HK_PLAY="1", HK_SHOT_FRAME="300", HK_FIXEDCLOCK="16", HK_GRAPHICS="ultra")),
+    ("ultralake", dict(HK_AUTOSTART="1", HK_PLAY="1", HK_SHOT_FRAME="300", HK_FIXEDCLOCK="16", HK_GRAPHICS="ultra",
+                       HK_CAMERA="lake")),
 ]
 
 
