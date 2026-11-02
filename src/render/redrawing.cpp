@@ -1206,7 +1206,10 @@ void DrawGunSelection()
 	if(bright>1) bright=1;
 	RPushAttrib(RATTR_ENABLE|RATTR_FOG|RATTR_COLOR|RATTR_POLYGON);
 	RDisable(RCAP_CULL);
-	float targrot=-(float)GetLocalPlayer()->weapon/8*pi*2-pi-.3;
+	//gunnames.pxr: a row a weapon, the smoke grenade's after the grenade's
+	int w=GetLocalPlayer()->weapon;
+	int slot=w<4?w:w>4?w+1:4+SmokeModeOn();
+	float targrot=-(float)slot/8*pi*2-pi-.3;
 	curgunselrotvel+=(targrot-curgunselrot)/20;
 	if(fabs(curgunselrot-targrot)<.3)
 	{

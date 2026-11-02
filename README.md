@@ -35,6 +35,8 @@ Téléchargez l'archive de votre système dans les [Releases](https://github.com
 
 **Jouer par Internet** : l'hôte choisit une visibilité « Internet » dans *Server Setup* (publique, ou amis/privée avec un code de partie à partager), les autres ouvrent l'onglet *Internet* de l'écran *Join* (ou tapent le code). La connexion est directe et chiffrée entre joueurs, ou passe par le relais du serveur de parties quand rien d'autre ne passe : aucun port à ouvrir sur la box.
 
+Grenade fumigène : `5` une seconde fois la grenade en main, ou la molette (elle s'arrête sur *Smoke grenade* juste après *Grenade*).
+
 `F6` plein écran · `` ` `` console · `Échap` libérer/capturer la souris. En mode bac à sable, la console permet de construire sans limite : tapez `gamemode 1`.
 
 **Manette** (réglages et boutons dans *Options → Pad / Touch*) : stick gauche se déplacer, stick droit regarder, `RT` tirer, `LT` jetpack/planeur, `A` sauter, `B` prendre/poser un objet (station, drapeau), `X` recharger, `Y` construire, `LB`/`RB` arme précédente/suivante (en posant une structure : la tourner), `R3` zoom, `Back` scores, croix haut/gauche/bas parler/parler à l'équipe/push-to-talk, croix droite grenade ou fumigène, `Start` menu. Dans les menus : croix ou stick gauche pour choisir, `A` valider, `B` retour. Une manette inconnue de SDL se déclare dans un `gamecontrollerdb.txt` du dossier des réglages (voir BUILD.md).

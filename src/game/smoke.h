@@ -126,6 +126,7 @@ struct Player;
 //server can't have smoke grenades
 int SmokeModeOn();
 void SmokeToggleMode();
+void SmokeSetMode(int on);   //quietly (the weapon wheel: the smoke grenade is a step of its own)
 //client: whether the server takes smoke grenades now (SMOKEMODE); the host decides itself
 void SmokeSetAllowed(int allowed);
 int SmokeAllowed();
