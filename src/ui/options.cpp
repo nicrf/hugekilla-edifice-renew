@@ -15,6 +15,8 @@
 #include "hkkeys.h"
 #include "gamepad.h"
 #include "touch.h"
+#include <stdlib.h>
+#include <string.h>
 
 int showoptions;
 static int optionstab;     //0 controls, 1 video/audio, 2 player, 3 gamepad
@@ -51,12 +53,14 @@ static Binding bindings[]=
 };
 #define NUMBINDINGS (int)(sizeof(bindings)/sizeof(bindings[0]))
 
-#define NUMSETTINGS 14
+#define NUMSETTINGS 18
 static const char *settinglabels[NUMSETTINGS]=
 {
 	"Fullscreen","VSync","Draw distance","Mouse sensitivity","Invert mouse","Volume",
-	"Voice volume","Microphone","Gun over walls","Explosions","Smoke","Impacts and splashes","Muzzle flash","Net stats"
+	"Voice volume","Microphone","Gun over walls","Explosions","Smoke","Impacts and splashes","Muzzle flash","Net stats",
+	"Graphics","Ultra: shadows","Ultra: grass","Ultra: water"
 };
+static int ultrawanted;    //Graphics: Ultra (renderer.h), when the renderer can
 
 //layout, in screen units (-1..1), like the server setup screen (serversetup.cpp)
 
@@ -244,7 +248,7 @@ void SetIniValues(const char *filename,const char *keys[],const char *values[],i
 
 static void SaveOptions()
 {
-#define NUMNUMBERS 14
+#define NUMNUMBERS 18
 #define MAXPADVALUES 32
 	const char *keys[NUMBINDINGS+NUMNUMBERS+MAXPADVALUES];
 	const char *values[NUMBINDINGS+NUMNUMBERS+MAXPADVALUES];
@@ -274,8 +278,13 @@ static void SaveOptions()
 	sprintf(numbers[11],"%d",fxprefs.impacts);
 	sprintf(numbers[12],"%d",fxprefs.muzzleflash);
 	sprintf(numbers[13],"%d",fxprefs.netstats);
+	strcpy(numbers[14],ultrawanted?"ultra":"classic");
+	sprintf(numbers[15],"%d",rultraprefs.shadows);
+	sprintf(numbers[16],"%d",rultraprefs.grass);
+	sprintf(numbers[17],"%d",rultraprefs.water);
 	const char *numberkeys[NUMNUMBERS]={"changeres","vsync","drawdistance","mousesensitivity","mousereverse","volume",
-		"voicevolume","voicemic","fxviewmodel","fxexplosions","fxsmoke","fximpacts","fxmuzzleflash","netstats"};
+		"voicevolume","voicemic","fxviewmodel","fxexplosions","fxsmoke","fximpacts","fxmuzzleflash","netstats",
+		"graphics","ultrashadows","ultragrass","ultrawater"};
 	for(int i=0;i<NUMNUMBERS;i++)
 	{
 		keys[n]=numberkeys[i];
@@ -297,10 +306,48 @@ static void SaveOptions()
 
 //reads the settings LoadControls doesn't know about (called at startup)
 
+static int Clampi(int v,int lo,int hi);
+//the fourth value of HK_ULTRA_PREFS, the trees and rocks (a later sub-option)
+#define ULTRA_EXTRA_PREFS(v) (void)(v)
+
+//Graphics: Classic or Ultra (renderer.h), as control.ini or HK_GRAPHICS says
+static void ApplyGraphics()
+{
+	const char *env=getenv("HK_GRAPHICS");   //debug aid: ultra or classic, over control.ini
+	if(env) ultrawanted=!strcmp(env,"ultra");
+	//debug aid: HK_ULTRA_PREFS="shadows,grass,water[,trees]" over control.ini (render_smoke)
+	const char *prefs=getenv("HK_ULTRA_PREFS");
+	if(prefs)
+	{
+		int v[4]={rultraprefs.shadows,rultraprefs.grass,rultraprefs.water,-1};
+		sscanf(prefs,"%d,%d,%d,%d",&v[0],&v[1],&v[2],&v[3]);
+		rultraprefs.shadows=Clampi(v[0],0,2);
+		rultraprefs.grass=Clampi(v[1],0,2);
+		rultraprefs.water=Clampi(v[2],0,1);
+		ULTRA_EXTRA_PREFS(v[3]);
+	}
+	RSetUltra(ultrawanted);
+}
+
+//"ultra" or "classic" (ini values run to the line's end)
+static int IsUltra(const char *v)
+{
+	return v&&!strncmp(v,"ultra",5);
+}
+
+static int Clampi(int v,int lo,int hi)
+{
+	return v<lo?lo:v>hi?hi:v;
+}
+
 void LoadOptions()
 {
 	CfgFile ini;
-	if(!ini.Load(UserFile("control.ini"))) return;
+	if(!ini.Load(UserFile("control.ini")))
+	{
+		ApplyGraphics();
+		return;
+	}
 	float dd=ini.GetValuef("drawdistance");
 	if(dd>0) graphicsprefs.drawdistance=dd;
 	if(ini.GetValues("vsync")) HKSetVSync(ini.GetValuei("vsync"));
@@ -314,6 +361,11 @@ void LoadOptions()
 	if(ini.GetValues("fximpacts")) fxprefs.impacts=ini.GetValuei("fximpacts")!=0;
 	if(ini.GetValues("fxmuzzleflash")) fxprefs.muzzleflash=ini.GetValuei("fxmuzzleflash")!=0;
 	if(ini.GetValues("netstats")) fxprefs.netstats=ini.GetValuei("netstats")!=0;
+	if(ini.GetValues("graphics")) ultrawanted=IsUltra(ini.GetValues("graphics"));
+	if(ini.GetValues("ultrashadows")) rultraprefs.shadows=Clampi(ini.GetValuei("ultrashadows"),0,2);
+	if(ini.GetValues("ultragrass")) rultraprefs.grass=Clampi(ini.GetValuei("ultragrass"),0,2);
+	if(ini.GetValues("ultrawater")) rultraprefs.water=Clampi(ini.GetValuei("ultrawater"),0,1);
+	ApplyGraphics();
 }
 
 void OpenOptions()
@@ -404,12 +456,19 @@ static void ChangeSetting(int row,int dir)
 	case 11: fxprefs.impacts=!fxprefs.impacts; break;
 	case 12: fxprefs.muzzleflash=!fxprefs.muzzleflash; break;
 	case 13: fxprefs.netstats=!fxprefs.netstats; break;
+	case 14:
+		ultrawanted=!ultrawanted;
+		RSetUltra(ultrawanted);
+		break;
+	case 15: rultraprefs.shadows=(rultraprefs.shadows+(dir<0?2:1))%3; break;
+	case 16: rultraprefs.grass=(rultraprefs.grass+(dir<0?2:1))%3; break;
+	case 17: rultraprefs.water=!rultraprefs.water; break;
 	}
 }
 
 static int IsStepper(int row)
 {
-	return row==2||row==3||row==5||row==6;
+	return row==2||row==3||row==5||row==6||row==15||row==16;
 }
 
 static void SettingText(int row,char *text)
@@ -430,6 +489,13 @@ static void SettingText(int row,char *text)
 	case 11: strcpy(text,fxprefs.impacts?"On":"Off"); break;
 	case 12: strcpy(text,fxprefs.muzzleflash?"On":"Off"); break;
 	case 13: strcpy(text,fxprefs.netstats?"On":"Off"); break;
+	case 14:
+		if(!RUltraSupported()) strcpy(text,ultrawanted?"Ultra (n/a here)":"Classic");
+		else strcpy(text,ultrawanted?"Ultra":"Classic");
+		break;
+	case 15: strcpy(text,rultraprefs.shadows==0?"Off":rultraprefs.shadows==1?"Low":"High"); break;
+	case 16: strcpy(text,rultraprefs.grass==0?"Off":rultraprefs.grass==1?"Low":"High"); break;
+	case 17: strcpy(text,rultraprefs.water?"Reflections":"Sky only"); break;
 	}
 }
 

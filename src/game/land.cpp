@@ -284,6 +284,8 @@ void LoadSky()
 	int numskies=skysets.GetValuei("numskies");
 	int sky=RND*numskies;
 	if(hkforcedsky>=0&&hkforcedsky<numskies) sky=hkforcedsky;
+	//debug aid: HK_SKY=N, this sky of skies.ini (comparing captures); the random draw stays
+	if(getenv("HK_SKY")&&atoi(getenv("HK_SKY"))>=0&&atoi(getenv("HK_SKY"))<numskies) sky=atoi(getenv("HK_SKY"));
 	char title[300];
 	strcpy(title,"sky");
 	sprintf(&title[strlen(title)],"%d",(int)sky);

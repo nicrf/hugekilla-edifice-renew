@@ -9,6 +9,7 @@
 #include "textures.h"
 #include "effects.h"
 #include "stdio.h"
+#include <string.h>
 #include <vector>
 
 #define MAXSPRITETEX 100
@@ -310,6 +311,7 @@ void LoadScenery()
 			strcpy(fullfilename,"objects/");
 			strcat(fullfilename,filename);
 			scenery[numscenery].Load(fullfilename);
+			scenery[numscenery].foliage=strstr(filename,"tree")||strstr(filename,"fleur");
 			numscenery++;
 		}
 	} while(filename);
