@@ -377,8 +377,10 @@ void RUltraInit()
 
 	linclamp=Sampler(SG_FILTER_LINEAR,SG_FILTER_NEAREST,SG_WRAP_CLAMP_TO_EDGE,1);
 	pointclamp=Sampler(SG_FILTER_NEAREST,SG_FILTER_NEAREST,SG_WRAP_CLAMP_TO_EDGE,1);
-	linrepeat=Sampler(SG_FILTER_LINEAR,SG_FILTER_LINEAR,SG_WRAP_REPEAT,4);
-	hdsampler=Sampler(SG_FILTER_LINEAR,SG_FILTER_LINEAR,SG_WRAP_REPEAT,8);
+	//no anisotropy on a software renderer, which takes seconds a frame with it
+	int soft=RSokolSoftwareRenderer();
+	linrepeat=Sampler(SG_FILTER_LINEAR,SG_FILTER_LINEAR,SG_WRAP_REPEAT,soft?1:4);
+	hdsampler=Sampler(SG_FILTER_LINEAR,SG_FILTER_LINEAR,SG_WRAP_REPEAT,soft?1:8);
 	sg_sampler_desc sd;
 	memset(&sd,0,sizeof(sd));
 	sd.min_filter=sd.mag_filter=SG_FILTER_LINEAR;
