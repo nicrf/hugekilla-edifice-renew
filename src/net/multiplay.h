@@ -85,6 +85,18 @@ void SendVoiceFrame(int seq,const unsigned char *data,int len);
 void AcBulletTick(Object *o,Vector prev);
 int ServerDecidesHits();   //1: don't count the local player's damage (M11 phase 3a)
 void AcGrenade(Object *o);
+//movement from input commands (docs/M16.md, phases 2 and 3), called by Play() each tick.
+//Server: player i is moved by its commands (a HELLOCAP_INPUTS client, sv_authmove 1);
+//NetServerMove runs this tick's (ev: the last one's), returns how many.
+//Client: the server moves us and we predict (NETSYNCMODE); NetPredictTick applies
+//this tick's command to the local player and sends it.
+struct MoveCmd;
+struct MoveEvents;
+int NetServerMoves(int i);
+int NetServerMove(int i,float speedpenalty,MoveEvents *ev);
+int NetPredicting();
+void NetPredictTick(const MoveCmd &c,float speedpenalty,MoveEvents *ev);
+extern int sv_authmove;     //server: moves the clients that can from their commands
 
 #define CMSG_BROADCAST 0
 #define CMSG_TEAM 1

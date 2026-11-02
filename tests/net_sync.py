@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """How far off the other players are drawn (docs/M16.md, phase 0):
     python3 tests/net_sync.py <Edifice binary or Edifice.app> [--netsim 100,20,2 ...] [--fps 60[,144]]
+        [--vars "sv_authmove=0"] [--legacy]
 
 Two instances of the game on this machine: a host (HK_AUTOSTART) and a client that
 joins it (HK_JOIN=127.0.0.1), each in a fresh user folder (CRLF copies of
@@ -19,6 +20,12 @@ Each --netsim value (HK_NETSIM, both instances: <latency ms>,<jitter ms>,<loss %
 per direction) is one run; "0" is a run without it. Default: 0 and 100,20,2.
 --fps: HK_MAXFPS of both, or of the host then the client (no VSync: the frames keep
 coming without the focus); the script's frames follow it (written for 60).
+The client's own player, when the server moves it from its commands (docs/M16.md,
+phases 2 and 3, HELLOCAP_INPUTS): each state from the server against what the client
+predicted for that command (HK_SYNCLOG "syncpredict"): the gap, the corrections (a
+gap of .01 unit or more: replayed and smoothed) per second, the snaps (> 3 units).
+--vars: the host's server settings (HK_AC_VARS, e.g. sv_authmove=0); --legacy: the
+client joins as a 0.7 build (HK_LEGACYMOVE=1), moving itself.
 Local only (two windows), not in the CI. Linux needs a display (xvfb-run)."""
 import argparse
 import bisect
@@ -85,8 +92,10 @@ def script(fps=60):
     return ";".join("%d:%s" % (round((START + f) * fps / 60), s) for f, s in PATH)
 
 
-def run(exe, netsim, fps, timeout):
-    """both logs (text); fps: of the host and the client"""
+def run(exe, netsim, fps, timeout, hostvars=None, legacy=False):
+    """both logs (text); fps: of the host and the client; hostvars: its HK_AC_VARS
+    (server settings, e.g. sv_authmove=1); legacy: the client joins as a 0.7 build
+    (HK_LEGACYMOVE, no input commands)"""
     common = dict(SDL_AUDIODRIVER="dummy", HK_SYNCLOG="1", HK_PLAY="1", HK_SHOT_FRAME="99999999", HK_CONSOLE_LOG="1")
     if netsim != "0":
         common["HK_NETSIM"] = netsim
@@ -101,8 +110,12 @@ def run(exe, netsim, fps, timeout):
                    HK_PADTEST=script(rfps))
         if role == "host":
             env.update(HK_AUTOSTART="1", HK_SEED="42")
+            if hostvars:
+                env["HK_AC_VARS"] = hostvars
         else:
             env.update(HK_JOIN="127.0.0.1", HK_SEED="43")
+            if legacy:
+                env["HK_LEGACYMOVE"] = "1"
         log = os.path.join(d, "log.txt")
         logs.append(log)
         with open(log, "wb") as f:
@@ -182,9 +195,14 @@ def measure(true, view):
         return None
     # from the scripted walk (its first horizontal motion): not the fall after the
     # spawn (which the other game draws rising, see docs/M16.md), nor a still start
-    moving = None
+    # (from where it last appeared: a client the server moves is put back where the
+    # server respawned it, docs/M16.md phase 2)
+    moving, base = None, 0
     for i in range(1, len(path.t)):
-        d = wrapdiff(path.p[0], path.p[i])
+        if norm(wrapdiff(path.p[i - 1], path.p[i])) > 5:
+            base = i
+            continue
+        d = wrapdiff(path.p[base], path.p[i])
         if math.hypot(d[0], d[2]) > 1:
             moving = path.t[i] - 0.5
             break
@@ -228,9 +246,39 @@ def measure(true, view):
     dist = sum(norm(wrapdiff(path.p[i], path.p[i + 1])) for i in range(i0, min(i1, len(path.p) - 1)))
     e.sort()
     jumps.sort()
-    return dict(n=len(e), dur=dur, mean=sum(e) / len(e), p95=e[int(len(e) * .95)], max=e[-1],
+    return dict(n=len(e), dur=dur, t0=view[0][0], t1=view[-1][0], mean=sum(e) / len(e), p95=e[int(len(e) * .95)], max=e[-1],
                 lag=best[1] * 1000, lagerr=best[0], snaps=snaps, snaprate=snaps / dur if dur else 0,
                 jump95=jumps[int(len(jumps) * .95)] if jumps else 0, speed=dist / dur if dur else 0)
+
+
+PREDICT = re.compile(r"^syncpredict (\d+) (\d+) ([\d.]+) ([\d.]+) (\d) (\d+) ([\d.]+)$", re.M)
+PREDICTSNAP = 3.0   # src/game/predict.h: a correction further than this isn't smoothed
+
+
+def prediction(text, t0, t1):
+    """the client's own player (docs/M16.md, phase 3): each state from the server
+    against what it had predicted for that command, between t0 and t1 (s)"""
+    errs, corr, snaps, shifts = [], 0, 0, []
+    for m in PREDICT.finditer(text):
+        t = int(m.group(1)) / 1e6
+        if not t0 <= t <= t1:
+            continue
+        errs.append(float(m.group(3)))
+        if m.group(5) == "1":
+            corr += 1
+            shift = float(m.group(7))
+            if shift > PREDICTSNAP:
+                snaps += 1
+            else:
+                shifts.append(shift)
+    if not errs:
+        return None
+    errs.sort()
+    shifts.sort()
+    dur = t1 - t0
+    return dict(n=len(errs), mean=sum(errs) / len(errs), p95=errs[int(len(errs) * .95)], max=errs[-1],
+                corr=corr, corrrate=corr / dur if dur else 0, snaps=snaps,
+                shift95=shifts[int(len(shifts) * .95)] if shifts else 0, shiftmax=shifts[-1] if shifts else 0)
 
 
 def main():
@@ -240,14 +288,16 @@ def main():
     ap.add_argument("--fps", default="60")
     ap.add_argument("--timeout", type=float, default=120)
     ap.add_argument("--keep", help="folder to keep both logs in")
+    ap.add_argument("--vars", help="the host's server settings (HK_AC_VARS), e.g. sv_authmove=1")
+    ap.add_argument("--legacy", action="store_true", help="the client joins as a 0.7 build (HK_LEGACYMOVE)")
     a = ap.parse_args()
     exe = os.path.abspath(executable(a.binary))
     fps = [int(f) for f in a.fps.split(",")]
     fps = (fps * 2)[:2]
-    rows, ok = [], True
+    rows, preds, ok = [], [], True
     for ns in a.netsim:
         print("== HK_NETSIM=%s, host %d fps, client %d fps" % (ns, fps[0], fps[1]), flush=True)
-        host, client = run(exe, ns, fps, a.timeout)
+        host, client = run(exe, ns, fps, a.timeout, a.vars, a.legacy)
         if a.keep:
             os.makedirs(a.keep, exist_ok=True)
             tag = ns.replace(",", "_")
@@ -267,6 +317,10 @@ def main():
                 ok = False
                 continue
             rows.append((ns, what, r))
+            if what == "client seen by host":
+                mode = "inputs" if re.search(r"^netsyncmode 256 ", client, re.M) else "legacy"
+                p = prediction(client, r["t0"], r["t1"])
+                preds.append((ns, mode, p))
     print()
     print("%-10s %-20s %6s %6s %6s %6s %6s %7s %6s %6s %6s" % ("netsim", "", "mean", "p95", "max", "lag", "@lag",
                                                              "snaps/s", "jmp95", "u/s", "secs"))
@@ -277,6 +331,19 @@ def main():
     print("(units; lag: delay that best explains the drawn path, @lag: mean error left once shifted;"
           " snaps: frames jumping > %.2f units more than the true motion; jmp95: p95 of that excess;"
           " u/s: the player's mean speed)" % SNAP)
+    print()
+    print("%-10s %-14s %6s %8s %8s %8s %7s %8s %6s %7s %7s" % ("netsim", "client's own", "states", "err", "err p95",
+                                                           "err max", "corr", "corr/s", "snaps", "shft95", "shftmax"))
+    for ns, mode, p in preds:
+        if not p:
+            print("%-10s %-14s (moves itself: nothing to predict)" % (ns, mode))
+            continue
+        print("%-10s %-14s %6d %8.4f %8.4f %8.4f %7d %8.2f %6d %7.3f %7.3f" % (
+            ns, mode, p["n"], p["mean"], p["p95"], p["max"], p["corr"], p["corrrate"], p["snaps"], p["shift95"],
+            p["shiftmax"]))
+    print("(phase 3: each state of the client's player from the server against its prediction for that command;"
+          " corr: corrected (gap >= .01 unit), replayed and smoothed; snaps: moved > %.0f units at once;"
+          " shft: how far a correction moved the player)" % PREDICTSNAP)
     return 0 if ok and rows else 1
 
 

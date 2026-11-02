@@ -105,6 +105,25 @@ int main(int argc,char **argv)
 	Bytes position=Msg<PlayerPosition,WritePosition>(pos);
 	Seed("fuzz_position","position.bin",position.data(),position.size());
 
+	//M16 (netsync.h): input commands, our player's state from the server
+	InputCmdMessage ic;
+	memset(&ic,0,sizeof(ic));
+	ic.type=INPUTCMD; ic.n=4; ic.firstcmd=1000;
+	for(int k=0;k<4;k++)
+	{
+		ic.cmd[k].keys=MOVEKEY_UP|(k==3?MOVEKEY_JUMP:0); ic.cmd[k].yaw=(unsigned short)(16384+k*10);
+		ic.cmd[k].pitch=-500; ic.cmd[k].weapon=3; ic.cmd[k].flags=MOVECMD_ALIVE; ic.cmd[k].msec=k%3?17:16;
+	}
+	Bytes inputcmd=Msg<InputCmdMessage,WriteInputCmd>(ic);
+	Seed("fuzz_inputcmd","inputcmd.bin",inputcmd.data(),inputcmd.size());
+	SnapshotMessage ss;
+	memset(&ss,0,sizeof(ss));
+	ss.type=SNAPSHOT; ss.tick=5000; ss.lastcmd=1003; ss.self=1;
+	ss.state.pos[0]=700.5f; ss.state.pos[1]=40.25f; ss.state.pos[2]=900.125f; ss.state.vel[2]=.2f;
+	ss.state.thrustfuel=1; ss.state.flags=SYNCSTATE_GROUND; ss.state.playstate=10; ss.state.life=100;
+	Bytes snapself=Msg<SnapshotMessage,WriteSnapshotSelf>(ss);
+	Seed("fuzz_snapshotself","snapshotself.bin",snapself.data(),snapself.size());
+
 	FireGunDirection fg;
 	memset(&fg,0,sizeof(fg));
 	fg.type=FIREGUN; fg.pnum=2; fg.reload=1;

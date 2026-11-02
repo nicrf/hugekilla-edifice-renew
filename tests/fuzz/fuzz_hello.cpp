@@ -19,10 +19,11 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data,size_t size)
 	FUZZ_CHECK(strlen(peer.version)<sizeof(peer.version));
 	for(const char *c=peer.version;*c;c++) FUZZ_CHECK(*c>=32&&*c<127);
 	FUZZ_CHECK(peer.present||peer.protocol==1);
-	//capabilities and join cookie after the trailer (M11 phase 2)
+	//capabilities and join cookie after the trailer (M11 phase 2), the second
+	//capability byte after them (M16)
 	HelloCaps caps;
 	ReadHelloCaps(trailer<=len?msg+trailer:msg,len-trailer,&caps);
-	FUZZ_CHECK(caps.caps>=0&&caps.caps<256);
+	FUZZ_CHECK(caps.caps>=0&&caps.caps<65536);   //two bytes (M16)
 	FUZZ_CHECK(peer.present||caps.caps==0);
 	char reason[120];
 	int ok=VersionCompatible(&peer,reason,sizeof(reason));

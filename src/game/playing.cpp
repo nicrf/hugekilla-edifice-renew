@@ -22,6 +22,7 @@
 #include "touch.h"
 #include "props.h"
 #include "movement.h"
+#include "predict.h"   //PREDICTSNAP
 #include <chrono>
 
 
@@ -589,8 +590,49 @@ static double tickleft;          //ms of real time not simulated yet
 static Vector tickprev[MAXPLAYERS];   //where each player was before the last tick
 static float tickalpha;          //how far the frame is between the last two ticks
 DWORD simtick;
+//phase 3: what the server corrected of the local player's prediction, still drawn
+//where it was and melting away (x .85 a tick, ~100 ms), see PlayCorrection
+static Vector correction;
+#define CORRECTIONDECAY .85f
 
 static void PlayLook(float framesf);
+
+//the local player was moved outside a tick by shift (the server's state and the
+//commands since, docs/M16.md phase 3): drawn where it was, then smoothly where it
+//is; further than PREDICTSNAP (a respawn, a teleport) at once
+void PlayCorrection(Vector shift)
+{
+	int i=GetLocalNum();
+	correction-=shift;
+	if(Magnitude(correction)>PREDICTSNAP)
+	{
+		correction=Vector(0,0,0);
+		tickprev[i]=GetPlayer(i)->pos;
+		return;
+	}
+	tickprev[i]+=shift;
+}
+
+void PlayCorrectionReset()
+{
+	correction=Vector(0,0,0);
+}
+
+static const MoveWorld moveworld={GetHeight,PropsPushPlayer};
+
+const MoveWorld &GetMoveWorld()
+{
+	return moveworld;
+}
+
+//where a player comes back to life: anywhere, not into a tree or a rock (props.h)
+Vector RandomSpawnPos()
+{
+	Vector pos=Vector(LANDGRIDSIZE+RND*LANDGRIDSIZE,100,LANDGRIDSIZE+RND*LANDGRIDSIZE);
+	for(int tries=0;tries<20&&!PropsSpawnFree(pos.x,pos.z);tries++)
+		pos=Vector(LANDGRIDSIZE+RND*LANDGRIDSIZE,100,LANDGRIDSIZE+RND*LANDGRIDSIZE);
+	return pos;
+}
 
 //called once per frame: as many ticks as the time that passed holds, then the frame
 //is drawn between the last two (PlayDrawBegin)
@@ -624,6 +666,8 @@ void Playloop()
 		lasttime=curtime;
 		sf=(float)(TICKMS/40);
 		for(i=0;i<MAXPLAYERS;i++) tickprev[i]=GetPlayer(i)->pos;
+		correction*=CORRECTIONDECAY;
+		if(Magnitude(correction)<1e-4f) correction=Vector(0,0,0);
 		Play();
 	}
 	tickalpha=(float)(tickleft/TICKMS);
@@ -664,7 +708,17 @@ void SyncLogFrame()
 	}
 }
 
-static const MoveWorld moveworld={GetHeight,PropsPushPlayer};
+//HK_SYNCLOG=1, M16 phase 3: each state of our player from the server compared with
+//the prediction: its command, the gaps, whether it was corrected (and how many
+//commands were played again, how far it moved the player)
+void SyncLogPredict(unsigned int cmd,float poserr,float velerr,int corrected,int replayed,float shift)
+{
+	static int on=getenv("HK_SYNCLOG")!=0;
+	if(!on) return;
+	long long us=(long long)std::chrono::duration_cast<std::chrono::microseconds>(
+		std::chrono::system_clock::now().time_since_epoch()).count();
+	fprintf(stderr,"syncpredict %lld %u %.5f %.5f %d %d %.4f\n",us,cmd,poserr,velerr,corrected,replayed,shift);
+}
 
 //the sounds and smoke of a player's move (MovePlayer)
 static void PlayerMoveEffects(Player *cur,const MoveEvents &ev)
@@ -736,6 +790,10 @@ void PlayDrawBegin()
 		Vector d=p->pos-tickprev[i];
 		if(Magnitude(d)<5)
 			p->pos=tickprev[i]+d*tickalpha;
+		if(i==GetLocalNum()) p->pos+=correction;
+		//a player the server moves from its commands stays where it is in the world
+		//(M16 phase 2): drawn near us, as the others
+		else MakeClose(&p->pos);
 	}
 	for(int i=0;i<MAXSERVEROBJS;i++)   //what players carry, with them
 		if(sobject[i].attached!=(-1))
@@ -842,10 +900,9 @@ void Play()
 		{
 			cur->firing=0;
 			cur->respawntime=0;
-			cur->pos=Vector(LANDGRIDSIZE+RND*LANDGRIDSIZE,100,LANDGRIDSIZE+RND*LANDGRIDSIZE);
-			//not into a tree or a rock (props.h)
-			for(int tries=0;tries<20&&!PropsSpawnFree(cur->pos.x,cur->pos.z);tries++)
-				cur->pos=Vector(LANDGRIDSIZE+RND*LANDGRIDSIZE,100,LANDGRIDSIZE+RND*LANDGRIDSIZE);
+			//a server that moves us (M16 phase 2) chooses its own place: we are put
+			//there when its state comes back
+			cur->pos=RandomSpawnPos();
 			cur->vel=Vector(0,0,0);
 			cur->life=100;
 			int i;
@@ -892,7 +949,11 @@ void Play()
 		
 
 		Player *cur=GetPlayer(i);
-		if(cur!=GetLocalPlayer())
+		int local=cur==GetLocalPlayer();
+		//the server moves this client's player from its commands (docs/M16.md, phase
+		//2): where they put it in the world, not moved near us (PlayDrawBegin is)
+		int bycmd=!local&&NetServerMoves(i);
+		if(!local&&!bycmd)
 			MakeClose(&cur->pos);
 		AimPlayer(cur);
 		
@@ -912,14 +973,27 @@ void Play()
 			}
 		
 		}
-		MoveInput in;
-		in.local=cur==GetLocalPlayer();
-		in.pad=in.local&&padmove.active;
-		in.padfwd=padmove.fwd;
-		in.padstrafe=padmove.strafe;
-		in.speedpenalty=speedpenalty;
 		MoveEvents ev;
-		MovePlayer(cur,in,sf,sv,moveworld,&ev);
+		if(bycmd)
+		{
+			if(!NetServerMove(i,speedpenalty,&ev)) continue;   //no command this tick
+		}
+		else if(local&&NetPredicting())
+		{
+			//phase 3: this tick's command, applied at once and sent to the server
+			MoveCmd c=MakeMoveCmd(cur,padmove.active,padmove.fwd,padmove.strafe,simtick);
+			NetPredictTick(c,speedpenalty,&ev);
+		}
+		else
+		{
+			MoveInput in;
+			in.local=local;
+			in.pad=in.local&&padmove.active;
+			in.padfwd=padmove.fwd;
+			in.padstrafe=padmove.strafe;
+			in.speedpenalty=speedpenalty;
+			MovePlayer(cur,in,sf,sv,moveworld,&ev);
+		}
 		PlayerMoveEffects(cur,ev);
 	}	
 }

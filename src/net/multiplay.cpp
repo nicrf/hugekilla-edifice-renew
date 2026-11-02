@@ -29,6 +29,9 @@
 #include "hmac.h"
 #include "hktime.h"
 #include "props.h"
+#include "movement.h"
+#include "predict.h"
+#include "netsync.h"
 #include <stdarg.h>
 #define MAXLOCALLIST 128
 #define PEERTIMEOUT 70000     //ms without a message before a peer is dropped
@@ -139,8 +142,10 @@ static void SendRequestEnter()
 	int len=2+nl+1;
 	len+=WriteVersionTrailer(&buf[len]);
 	int cookie=haveentercookie&&entercookieip==infosock.dest.sin_addr.s_addr;
+	//HK_LEGACYMOVE=1 (tests): joins as a 0.7 build moving itself (no HELLOCAP_INPUTS)
+	static int legacymove=getenv("HK_LEGACYMOVE")&&atoi(getenv("HK_LEGACYMOVE"));
 	len+=WriteHelloCaps(&buf[len],HELLOCAP_COOKIE|HELLOCAP_SERVERHITS|HELLOCAP_STABLESLOTS|HELLOCAP_POSSEQ|
-		HELLOCAP_PROPS|HELLOCAP_SMOKE,cookie?entercookie:0);
+		HELLOCAP_PROPS|HELLOCAP_SMOKE|(legacymove?0:HELLOCAP_INPUTS),cookie?entercookie:0);
 	infosock.Send(buf,len);
 	infosock.Flush();
 }
@@ -174,11 +179,15 @@ int ac_moveclamp=0;         //1: a player moving faster than ac_maxspeed is held
 //not a check either: the rocks and trees that block (props.h, docs/PROPS.md). On, clients
 //without them (HELLOCAP_PROPS) are refused: they would walk and shoot through them
 int sv_props=1;             //sv.ini props, Server Setup "Rocks and trees"
+//M16 phases 2 and 3 (docs/M16.md): the server moves the players of the clients that
+//send input commands (HELLOCAP_INPUTS), and bounds their rate
+int sv_authmove=1;          //1: it does (the others move themselves, as before)
+int ac_cmdslack=8;          //ticks of commands a client may be ahead of real time, -1: off
 
 //server answers an info request, with its version
 static void SendInfo(SOCKADDR_IN dest)
 {
-	char buf[2+100+VERSIONTRAILER_MAX+5];
+	char buf[2+100+VERSIONTRAILER_MAX+6];
 	int nl=strlen(netsettings.servername);
 	if(nl>99) nl=99;
 	buf[0]=INFO;
@@ -196,6 +205,7 @@ static void SendInfo(SOCKADDR_IN dest)
 	buf[len++]=(char)((ac_enable?HELLOCAP_COOKIE|(ac_requirecookie?HELLOCAP_REQUIRECOOKIE:0)|
 		(ac_serverhits?HELLOCAP_SERVERHITS:0):0)|(ac_stableslots?HELLOCAP_STABLESLOTS:0)|
 		(sv_props?HELLOCAP_PROPS:0)|HELLOCAP_SMOKE);
+	buf[len++]=(char)((sv_authmove?HELLOCAP_INPUTS:0)>>8);   //caps2 (M16)
 	infosock.dest=dest;
 	infosock.Send(buf,len);
 	infosock.Flush();
@@ -270,8 +280,32 @@ static void WritePlayerName(ByteWriter &w,int i)
 #define AC_STATE 7
 #define AC_ORIGIN 8
 #define AC_POSITION 9
-#define ACKINDS 10
-static const char *ackind[ACKINDS]={"kill","death","fire","ammo","move","build","ip","state","origin","position"};
+#define AC_CMD 10
+#define ACKINDS 11
+static const char *ackind[ACKINDS]={"kill","death","fire","ammo","move","build","ip","state","origin","position","cmd"};
+
+//M16 phase 2 (docs/M16.md): a client the server moves from its input commands. They
+//are queued as they come and run at the server's ticks, in order, one tick each.
+#define AUTHQUEUE 32
+#define AUTHSILENCE 6   //ticks without a command before its last one is played again,
+#define AUTHREPEAT 6    //at most this many times; then the player waits
+#define AUTHBUFFER 1    //commands left waiting for the next ticks, at most
+struct AcAuth
+{
+	int on;               //NETSYNCMODE said so: its PLAYERPOSITIONs are ignored
+	unsigned int lastcmd; //the last one run (ran: there is one)
+	int ran;
+	MoveCmd last;
+	unsigned int newest;  //the newest queued (queued: there is one)
+	int queued;
+	MoveCmd q[AUTHQUEUE];
+	unsigned int qnum[AUTHQUEUE];
+	int qn;
+	int silent,repeats;   //ticks without a command; repeats of the last one since
+	AcBucket budget;      //ticks of commands (ac_cmdslack)
+	int dropped;          //commands over the budget
+	DWORD lastsnap;       //simtick of the last SNAPSHOT sent
+};
 
 struct AcPlayer
 {
@@ -293,6 +327,7 @@ struct AcPlayer
 	AcSeq seq;
 	AcBucket posrate;
 	AcClamp clamp;
+	AcAuth auth;         //M16 phase 2: moved by the server from its commands
 };
 static AcPlayer acplayer[MAXPLAYERS];
 #define ACIPTABLE 64
@@ -353,7 +388,7 @@ static void AcInitVars()
 		{&ac_requirecookie,0,"ac_requirecookie"},{&ac_cookietime,0,"ac_cookietime"},
 		{&ac_serverhits,0,"ac_serverhits"},{0,&ac_hittolerance,"ac_hittolerance"},{&ac_lagcomp,0,"ac_lagcomp"},
 		{&ac_stableslots,0,"ac_stableslots"},{0,&ac_posrate,"ac_posrate"},{&ac_moveclamp,0,"ac_moveclamp"},
-		{&sv_props,0,"props"},
+		{&sv_props,0,"props"},{&sv_authmove,0,"sv_authmove"},{&ac_cmdslack,0,"ac_cmdslack"},
 	};
 	//debug (tests): HK_AC_VARS="ac_requirecookie=1 ac_cookietime=1000" wins over sv.ini
 	const char *env=getenv("HK_AC_VARS");
@@ -430,6 +465,91 @@ int ServerDecidesHits()
 {
 	if(server) return AcServerHits();
 	return connected&&clientserverhits;
+}
+
+//M16 phase 3 (docs/M16.md, predict.h): the server moves us from our commands
+//(NETSYNCMODE); we predict our player and send them
+static int clientauthmove;
+static Prediction prediction;
+static unsigned int lastsentcmd;   //newest command sent (sentany: there is one)
+static int sentany;
+
+static void ClientAuthMove(int on)
+{
+	if(on!=clientauthmove)
+	{
+		PredictReset(&prediction);
+		sentany=0;
+		PlayCorrectionReset();
+	}
+	clientauthmove=on;
+}
+
+int NetPredicting()
+{
+	return !server&&connected&&clientauthmove;
+}
+
+void NetPredictTick(const MoveCmd &c,float speedpenalty,MoveEvents *ev)
+{
+	PredictTick(&prediction,GetLocalPlayer(),simtick,c,speedpenalty,(float)(TICKMS/40),sv,GetMoveWorld(),ev);
+}
+
+//the commands not sent yet, each INPUTCMD with the three before it (a lost
+//datagram or three cost nothing); several if more ticks than that went by
+static void SendInputCmds()
+{
+	if(!prediction.any) return;
+	unsigned int latest=prediction.latest;
+	if(sentany&&!CmdNewer(latest,lastsentcmd)) return;
+	unsigned int start=sentany?lastsentcmd+1:latest;
+	if(latest-start>=PREDICTRING) start=latest-(PREDICTRING-1);
+	unsigned int end=latest;
+	while(PredictFind(&prediction,end))
+	{
+		unsigned int first=end;
+		int n=1;
+		while(n<INPUTCMDMAX&&PredictFind(&prediction,first-1))
+		{
+			first--;
+			n++;
+		}
+		InputCmdMessage m;
+		m.type=INPUTCMD;
+		m.n=(unsigned char)n;
+		m.firstcmd=first;
+		m.acksnap=0;   //phase 4
+		for(int k=0;k<n;k++) m.cmd[k]=PredictFind(&prediction,first+k)->cmd;
+		char buf[INPUTCMDHEADER+INPUTCMDMAX*MOVECMDSIZE];
+		int size=WriteInputCmd(buf,sizeof(buf),&m);
+		if(size) datasock.Send(buf,size);
+		if(!CmdNewer(first,start)) break;   //all the new ones went
+		end=first-1;
+	}
+	lastsentcmd=latest;
+	sentany=1;
+}
+
+//the server's state of our player after command s->lastcmd
+static void ClientReconcile(const SnapshotMessage *s)
+{
+	const SyncState &st=s->state;
+	for(int k=0;k<3;k++)   //not a number, or infinite: nothing to start from
+		if(!(fabsf(st.pos[k])<1e30f)||!(fabsf(st.vel[k])<1e30f)) return;
+	MoveState ms;
+	memset(&ms,0,sizeof(ms));
+	ms.pos=Vector(st.pos[0],st.pos[1],st.pos[2]);
+	ms.vel=Vector(st.vel[0],st.vel[1],st.vel[2]);
+	ms.thrustfuel=st.thrustfuel;
+	ms.roll=st.roll;
+	ms.runtime=st.runtime;
+	ms.hanggliding=(st.flags&SYNCSTATE_GLIDING)!=0;
+	ms.jump=(st.flags&SYNCSTATE_JUMP)!=0;
+	float penalty=st.speedpenalty>=0&&st.speedpenalty<100?st.speedpenalty:0;
+	PredictResult r=PredictReconcile(&prediction,GetLocalPlayer(),s->lastcmd,ms,penalty,(float)(TICKMS/40),sv,GetMoveWorld());
+	if(r.kind==PREDICT_STALE) return;
+	if(r.kind==PREDICT_CORRECTED) PlayCorrection(r.shift);
+	SyncLogPredict(s->lastcmd,r.poserr,r.velerr,r.kind==PREDICT_CORRECTED,r.replayed,Magnitude(r.shift));
 }
 
 //who a death reported by client i (KILLED, KILLEDPOSITION: "killed by claimed")
@@ -748,7 +868,9 @@ static int AcPositionAccepted(int i,const char *msg,int len)
 
 //a position of client i with state (10 alive, 11 dead) and weapon: returns the
 //state the server keeps. pos may be held back (ac_moveclamp).
-static int AcPosition(int i,int state,Vector *pos,int weapon)
+//the state (10 alive, 11 dead) and weapon client i says it has, from a position or
+//a command (M16): the state the server keeps
+static int AcState(int i,int state,int weapon)
 {
 	if(!ac_enable) return state;
 	AcPlayer *a=&acplayer[i];
@@ -762,6 +884,14 @@ static int AcPosition(int i,int state,Vector *pos,int weapon)
 	int hold[ACWEAPONS];
 	AcHolds(hold);
 	AcAmmoPosition(&a->ammo,weapon,hold);
+	return state;
+}
+
+static int AcPosition(int i,int state,Vector *pos,int weapon)
+{
+	if(!ac_enable) return state;
+	AcPlayer *a=&acplayer[i];
+	state=AcState(i,state,weapon);
 	if(state==10&&ac_maxspeed>0)
 	{
 		float speed=AcMoveSpeed(&a->move,pos->x,pos->y,pos->z,curtime,250,LANDGRIDSIZE);
@@ -827,10 +957,170 @@ static void SendSmokeMode(int i,int allowed)
 	clientsock[i].SendReliable(mode.b,sizeof(mode.b),0);
 }
 
+//---- M16 phases 2 and 3 (docs/M16.md): the server moves the players of clients that
+//send input commands ----
+
+//whether the server moves client i from its commands (NETSYNCMODE), if it can send
+//them: at the join and when sv_authmove changes
+static void SendNetSyncMode(int i)
+{
+	if(!(acplayer[i].caps&HELLOCAP_INPUTS)) return;
+	AcAuth *a=&acplayer[i].auth;
+	int on=sv_authmove!=0;
+	if(on&&!a->on) memset(a,0,sizeof(*a));   //its commands from now on
+	a->on=on;
+	SimpleBuf mode=MakeSimple(NETSYNCMODE,on?HELLOCAP_INPUTS:0,simtick);
+	clientsock[i].SendReliable(mode.b,sizeof(mode.b),0);
+}
+
+int NetServerMoves(int i)
+{
+	return server&&i>0&&i<MAXPLAYERS&&SlotUsed(i)&&acplayer[i].auth.on;
+}
+
+//an INPUTCMD of client i: the commands newer than what it has, queued
+static void AuthReceive(int i,const InputCmdMessage *m)
+{
+	AcAuth *a=&acplayer[i].auth;
+	if(!a->on) return;
+	for(int k=0;k<m->n;k++)
+	{
+		unsigned int num=m->firstcmd+k;
+		if(a->ran&&!CmdNewer(num,a->lastcmd)) continue;
+		if(a->queued&&!CmdNewer(num,a->newest)) continue;   //sent again (the losses)
+		if(a->qn==AUTHQUEUE)   //nobody waits that long: the oldest goes
+		{
+			memmove(a->q,a->q+1,sizeof(a->q[0])*(AUTHQUEUE-1));
+			memmove(a->qnum,a->qnum+1,sizeof(a->qnum[0])*(AUTHQUEUE-1));
+			a->qn--;
+		}
+		a->q[a->qn]=m->cmd[k];
+		a->qnum[a->qn]=num;
+		a->qn++;
+		a->newest=num;
+		a->queued=1;
+	}
+}
+
+//a tick of commands for client i: at most real time and ac_cmdslack ticks ahead of
+//it, over any stretch of time (a speed hack; banking time by staying quiet or slow
+//doesn't buy a burst later)
+static int AuthBudget(AcAuth *a)
+{
+	if(!ac_enable||ac_cmdslack<0) return 1;
+	return AcTake(&a->budget,curtime,TICKRATE/1000.f,(float)ac_cmdslack+1);
+}
+
+//client i's command num, one tick: its life or death as AcState allows (a respawn
+//at a place the server chooses), its weapon and view, its move
+static void AuthRun(int i,unsigned int num,const MoveCmd &c,float speedpenalty,MoveEvents *ev)
+{
+	AcAuth *a=&acplayer[i].auth;
+	Player *p=GetPlayer(i);
+	int weapon=ValidWeapon(c.weapon)?c.weapon:0;
+	int prev=p->playstate;
+	int state=AcState(i,(c.flags&MOVECMD_ALIVE)?10:11,weapon);
+	if(prev==11&&state==10)
+	{
+		p->pos=RandomSpawnPos();
+		p->vel=Vector(0,0,0);
+		p->hanggliding=0;
+	}
+	p->playstate=state;
+	p->weapon=weapon;
+	ApplyMoveCmd(p,c,speedpenalty,(float)(TICKMS/40),sv,GetMoveWorld(),ev,0);
+	a->lastcmd=num;
+	a->ran=1;
+	a->last=c;
+}
+
+int NetServerMove(int i,float speedpenalty,MoveEvents *ev)
+{
+	AcAuth *a=&acplayer[i].auth;
+	int ran=0;
+	//one a tick, as they were made; more when they pile up (a late packet, then the
+	//next with it): AUTHBUFFER at most stay for the next tick, so that the player
+	//moves smoothly here (and to the others) instead of by bursts
+	while(a->qn&&(!ran||a->qn>AUTHBUFFER))
+	{
+		MoveCmd c=a->q[0];
+		unsigned int num=a->qnum[0];
+		a->qn--;
+		memmove(a->q,a->q+1,sizeof(a->q[0])*a->qn);
+		memmove(a->qnum,a->qnum+1,sizeof(a->qnum[0])*a->qn);
+		if(a->ran&&!CmdNewer(num,a->lastcmd)) continue;   //played already (repeated)
+		if(!AuthBudget(a))
+		{
+			a->dropped++;
+			AcLog(AC_CMD,"%.31s (%d) sends commands faster than time, %d dropped",GetPlayer(i)->name,i,a->dropped);
+			continue;
+		}
+		AuthRun(i,num,c,speedpenalty,ev);
+		ran++;
+	}
+	if(ran)
+	{
+		a->silent=a->repeats=0;
+		return ran;
+	}
+	//quiet: its last command again for a moment (a late packet), then it waits
+	if(!a->ran||++a->silent<=AUTHSILENCE||a->repeats>=AUTHREPEAT) return 0;
+	if(!AuthBudget(a)) return 0;
+	a->repeats++;
+	AuthRun(i,a->lastcmd+1,a->last,speedpenalty,ev);
+	return 1;
+}
+
+//30 Hz: the exact state of its player after its last command run, to each client
+//the server moves (a SNAPSHOT with only itself, phase 2)
+static void SendSelfStates()
+{
+	for(int i=1;i<numplayers;i++)
+	{
+		AcAuth *a=&acplayer[i].auth;
+		if(!slotused[i]||!a->on||!a->ran||simtick-a->lastsnap<2) continue;
+		a->lastsnap=simtick;
+		Player *p=GetPlayer(i);
+		SnapshotMessage m;
+		memset(&m,0,sizeof(m));
+		m.type=SNAPSHOT;
+		m.tick=simtick;
+		m.lastcmd=a->lastcmd;
+		m.self=1;
+		SyncState &s=m.state;
+		s.pos[0]=p->pos.x;s.pos[1]=p->pos.y;s.pos[2]=p->pos.z;
+		s.vel[0]=p->vel.x;s.vel[1]=p->vel.y;s.vel[2]=p->vel.z;
+		s.thrustfuel=p->thrustfuel;
+		s.roll=p->roll;
+		s.runtime=p->runtime;
+		s.speedpenalty=GetSOSpeedPenalty(i);
+		//on the ground: about as MovePlayer sees it (the highest point under its feet)
+		float ground=GetHeight(p->pos-Vector(0,.4f,0));
+		const Vector around[4]={Vector(.4f,-.4f,0),Vector(-.4f,-.4f,0),Vector(0,-.4f,.4f),Vector(0,-.4f,-.4f)};
+		for(int k=0;k<4;k++)
+		{
+			float h=GetHeight(p->pos+around[k]);
+			if(h<p->pos.y+1.1f&&h>ground) ground=h;
+		}
+		s.flags=(p->hanggliding?SYNCSTATE_GLIDING:0)|(p->jump?SYNCSTATE_JUMP:0)|
+			(p->pos.y-2<WATERHEIGHT?SYNCSTATE_UNDERWATER:0)|(p->pos.y<ground+1.5f?SYNCSTATE_GROUND:0);
+		s.playstate=(unsigned char)p->playstate;
+		s.life=(short)(acplayer[i].life>0?acplayer[i].life+.5f:0);
+		char buf[SNAPSHOTSELFSIZE];
+		int size=WriteSnapshotSelf(buf,sizeof(buf),&m);
+		if(size) clientsock[i].Send(buf,size);
+	}
+}
+
 //every server frame: where each player is (the shooters' lag), and the hit mode
 //again to the clients when ac_serverhits or ac_enable change on the console
 static void AcServerFrame()
 {
+	static int lastauth=-1;   //M16: sv_authmove changed on the console
+	if(lastauth>=0&&(sv_authmove!=0)!=lastauth)
+		for(int i=1;i<numplayers;i++)
+			if(slotused[i]&&GetPlayer(i)->playstate>=10) SendNetSyncMode(i);
+	lastauth=sv_authmove!=0;
 	static int lastmode=-1;
 	int mode=AcServerHits();
 	if(mode!=lastmode&&lastmode>=0)
@@ -1064,6 +1354,7 @@ void Disconnect()
 	server=0;
 	connected=0;
 	clientserverhits=0;
+	ClientAuthMove(0);
 	PropsSetEnabled(1);   //no server to say otherwise: drawn (a land in the menus)
 	SmokeSetAllowed(0);
 	numplayers=0;
@@ -1190,7 +1481,8 @@ void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pn
 				AcSendHitMode(pnum);
 				SendPropsMode(pnum);
 				SendSmokeMode(pnum,ServerSmokeAllowed());
-				
+				SendNetSyncMode(pnum);   //moved from its commands (M16)
+
 				ConsoleDisplayText("received blockinfo acknowledgement, sending objects and join game");
 				break;
 			}
@@ -1445,7 +1737,14 @@ void ServerLoop()
 			{
 				case PLAYERPOSITION:
 					{
-						ReceivePosition((char *)&msg,clen,i);   //a client only moves itself
+						//a client only moves itself; not one the server moves (M16)
+						if(!acplayer[i].auth.on) ReceivePosition((char *)&msg,clen,i);
+						break;
+					}
+				case INPUTCMD:
+					{
+						InputCmdMessage in;
+						if(ReadInputCmd(&msg,clen,&in)) AuthReceive(i,&in);
 						break;
 					}
 				case VOICE:
@@ -1519,6 +1818,8 @@ void ServerLoop()
 					AcCredited(i,kp.killer,killer);
 					kp.killer=killer;
 					kp.killed=i;
+					//where it died: where the server has it, if it moves it (M16)
+					if(acplayer[i].auth.on) kp.pos=GetPlayer(i)->pos;
 					GetPlayer(i)->pos=kp.pos;
 					ReceiveKillMessage(i,kp.killer);
 					if(server)
@@ -1562,11 +1863,12 @@ void ServerLoop()
 		}
 		nextresend=curtime+sv.positionresendtime;
 	}
+	SendSelfStates();   //M16: to the clients it moves
 	for(i=1;i<numplayers;i++)
 		{
 			if(slotused[i]) clientsock[i].Flush();
 		}
-	
+
 }
 
 //quick way to send a simplemessage
@@ -1644,6 +1946,7 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 					connected=1;
 					SetLocalNum(msg2);
 					clientserverhits=0;   //until this server says otherwise (HITMODE)
+					ClientAuthMove(0);    //and NETSYNCMODE
 					PropsSetEnabled(0);   //and none until it says it has them (PROPSMODE)
 					SmokeSetAllowed(0);   //and SMOKEMODE
 					GetLocalPlayer()->playstate=1;
@@ -1730,6 +2033,17 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 			{
 				//this server takes smoke grenades now, or no longer (smoke.h)
 				if(connected) SmokeSetAllowed(msg);
+				break;
+			}
+		case NETSYNCMODE:
+			{
+				//the server moves us from our commands, or no longer (M16)
+				if(!connected) break;
+				int on=(msg&HELLOCAP_INPUTS)!=0;
+				if(on!=clientauthmove)
+					ConsoleDisplayText((char *)(on?"the server moves us from our commands":"we move ourselves"));
+				ClientAuthMove(on);
+				if(getenv("HK_SYNCLOG")) fprintf(stderr,"netsyncmode %u %u\n",(unsigned)msg,(unsigned)msg2);
 				break;
 			}
 		case HITMODE:
@@ -1849,6 +2163,14 @@ void ClientLoop()
 					{
 						ReceivePosition((char *)&msg,msglen,-1);
 					}
+					break;
+				}
+			case SNAPSHOT:
+				{
+					//our player as the server moved it (M16 phase 2)
+					static SnapshotMessage snap;
+					if(connected&&clientauthmove&&ReadSnapshotSelf(&msg,msglen,&snap)&&snap.self)
+						ClientReconcile(&snap);
 					break;
 				}
 			case VOICE:
@@ -1977,7 +2299,8 @@ void ClientLoop()
 	if(connected&&GetLocalPlayer()->playstate>=10&&(curtime+(PEERTIMEOUT-SERVERSILENCE)>GetPlayer(0)->timeout||
 		datasock.reliablefailed))
 		ServerGone("Lost the connection to the server");
-	if(curtime>nextresend)
+	if(NetPredicting()) SendInputCmds();   //instead of our position (M16)
+	else if(curtime>nextresend)
 	{
 		if(GetLocalPlayer()->playstate>=10)SendPosition(GetLocalNum(),-1);
 		nextresend=curtime+sv.positionresendtime;
