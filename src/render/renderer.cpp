@@ -363,7 +363,7 @@ void RReadDepth(int x,int y,float *depth)
 
 //---- Ultra graphics ----
 
-RUltraPrefs rultraprefs={2,2,1};
+RUltraPrefs rultraprefs={2,2,1,2};
 static int ultrawanted;
 static int inscene;           //between RUltraBegin and RUltraEnd
 
