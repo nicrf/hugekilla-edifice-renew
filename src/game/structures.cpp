@@ -5,6 +5,7 @@
 #include "land.h"
 #include "redrawing.h"
 #include "multiplay.h"
+#include "props.h"
 
 #define MAXSTRUCTSIZE 40
 char curstructure[MAXSTRUCTSIZE][MAXSTRUCTSIZE][MAXSTRUCTSIZE];
@@ -196,8 +197,15 @@ static void FootprintCenter(char s[MAXSTRUCTSIZE][MAXSTRUCTSIZE][MAXSTRUCTSIZE],
 	*cz=(minz+maxz)/2.f;
 }
 
+//a block of the structure at grid x, y, z would stand in a rock or a tree (props.h)
+static int BlockInProp(int x,int y,int z)
+{
+	return PropsBoxBlocked(x*BLOCKSIZE,y*BLOCKSIZE,z*BLOCKSIZE,(x+1)*BLOCKSIZE,(y+1)*BLOCKSIZE,(z+1)*BLOCKSIZE);
+}
+
 //has two purposes: one, draw the structure as a wireframe (red where it can't be
-//built).  two, place the structure permenantly; returns 0 if it can't be built there
+//built).  two, place the structure permenantly; returns 0 if it can't be built
+//there (out of reach), -1 if a rock or a tree is in the way
 
 int PlaceStructure(int task)
 {
@@ -253,6 +261,29 @@ int PlaceStructure(int task)
 	px=ppos.x;
 	py=ppos.y;
 	pz=ppos.z;
+	//a rock or a tree in the way: red, and nothing built (the trunks and rocks
+	//would be inside the walls)
+	int inprop=0;
+	for(x=0;x<MAXSTRUCTSIZE&&!inprop;x++)
+	for(y=0;y<MAXSTRUCTSIZE&&!inprop;y++)
+	for(z=0;z<MAXSTRUCTSIZE&&!inprop;z++)
+	{
+		char cb=rotstructure[x][y][z];
+		if(!cb||!strchr("pxd><v^",cb)) continue;   //the characters that place a block
+		int bx=x+offx-BLOCKGRIDSIZE,by=y+offy,bz=z+offz-BLOCKGRIDSIZE;
+		inprop=BlockInProp(bx,by,bz);
+		if(cb=='p')   //its post, down to a block or the ground
+			for(int i=by-1;i>=0&&!inprop&&(i+1)*BLOCKSIZE>GetLandSmooth(bx*BLOCKSIZE+1,bz*BLOCKSIZE+1);i--)
+			{
+				if(GetBlock(bx,i,bz)->type==1) break;
+				inprop=BlockInProp(bx,i,bz);
+			}
+	}
+	if(inprop)
+	{
+		if(task==1) return -1;
+		red=1;
+	}
 	char top=RND*10,postside=RND*10,side=RND*10,bottom=RND*10;
 	if(task==1)
 	{

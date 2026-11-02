@@ -14,8 +14,8 @@
 // Both sides must have the same protocol version. The one negotiation within a
 // protocol is the capability byte of REQUESTENTER and INFO below (HELLOCAP_*):
 // bytes appended where older builds of the same protocol stop reading, and new
-// messages (ENTERCOOKIE; HITMODE, SERVERHIT) or meanings (DELETEPLAYER that keeps
-// the slots) only sent to a peer that announced it understands them.
+// messages (ENTERCOOKIE; HITMODE, SERVERHIT; PROPSMODE) or meanings (DELETEPLAYER
+// that keeps the slots) only sent to a peer that announced it understands them.
 // EDIFICE_VERSION_STRING (the release, from CMakeLists.txt) is informative only.
 
 #ifndef EDIFICE_VERSION_H
@@ -48,8 +48,8 @@ struct PeerVersion
 	char version[16];
 };
 
-// Capabilities (M11 phases 2, 3a and 3b, docs/M11.md), still protocol 5. After the version
-// trailer, where builds before them stop reading:
+// Capabilities (M11 phases 2, 3a and 3b, docs/M11.md; props, docs/PROPS.md), still
+// protocol 5. After the version trailer, where builds before them stop reading:
 //   REQUESTENTER: ... trailer | uint8 caps | cookie[HELLOCOOKIE_SIZE] if caps & HELLOCAP_HASCOOKIE
 //   INFO:         ... trailer | 4 bytes of details | uint8 caps
 #define HELLOCAP_COOKIE 1        // REQUESTENTER: the client answers ENTERCOOKIE; INFO: the server sends it
@@ -61,6 +61,10 @@ struct PeerVersion
                                  // without renumbering, M11 phase 3b); INFO: the server keeps slots
 #define HELLOCAP_POSSEQ 32       // REQUESTENTER: its PLAYERPOSITIONs end with a uint16 sequence number
                                  // (POSITIONSEQSIZE, netmsg.h); the server drops those without one
+#define HELLOCAP_PROPS 64        // REQUESTENTER: the client has the rocks and trees that block (props.h,
+                                 // docs/PROPS.md) and obeys PROPSMODE; INFO: the server has them on
+                                 // (sv.ini props) and refuses clients without this bit
+// 128: reserved (smoke grenade)
 #define HELLOCOOKIE_SIZE 8
 #define HELLOCAPS_MAX (1+HELLOCOOKIE_SIZE)
 

@@ -21,6 +21,7 @@
 #include "effects.h"
 #include "ui.h"
 #include "hktime.h"
+#include "props.h"
 #include <string.h>
 #include <stdlib.h>
 //a vertex at a computed point: the temporary binds to the reference, where
@@ -1749,6 +1750,20 @@ void Draw(float offset)
 				us.numavoid++;
 			}
 		us.blocked=UltraBlocked;
+		//the rocks and trees there (props.h), for Ultra to draw its way
+		static std::vector<RProp> rprops;
+		rprops.clear();
+		const std::vector<Prop> &props=PropsList();
+		for(size_t i=0;i<props.size();i++)
+			if(PropThere((int)i))
+			{
+				const Prop &p=props[i];
+				RProp r={p.x,p.y,p.z,p.scale,PropDetail(p,PROPTURN)*6.2831853f,PropDetail(p,PROPTINT),
+					PropDetail(p,PROPPHASE),p.kind==PROP_ROCK?2+p.variant%3:(p.kind==PROP_TREE?1:0)};
+				rprops.push_back(r);
+			}
+		us.props=rprops.data();
+		us.numprops=(int)rprops.size();
 		us.landtex=&landtex[0][0];
 		us.landtexsize=LANDTEXGRIDSIZE;
 		for(int t=0;t<GetDefs()->numgroundtex&&t<16;t++)
@@ -1968,6 +1983,8 @@ void Draw(float offset)
 		if(curscenery->pos.z<drawpos.z+20)
 		scenery[curscenery->type].Draw(curscenery->pos,curscenery->side,curscenery->top);
 	}
+	//the rocks and trees that block (propsdraw.cpp); Ultra's vegetation draws its own
+	if(!ultrascene||!rultraprefs.vegetation) DrawProps(cur->pos,cur->dir);
 	
 	//reads the depth of where the sun is going to be, if there is nothing there, depth=1.
 	//Off the window nothing is read: the old code then tested an uninitialized local,

@@ -108,5 +108,6 @@ extern NetSettings netsettings;
 extern RemoteGameData rgd;
 extern char curobjective[1000];   //HUD lines the server sends (CMSG_OBJECTIVE, CMSG_SCORE)
 extern char curscore[1000];
+extern int sv_props;        //server: the rocks and trees block (sv.ini props, docs/PROPS.md)
 
 #endif
