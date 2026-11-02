@@ -21,6 +21,8 @@
 #include "effects.h"
 #include "ui.h"
 #include "hktime.h"
+#include <string.h>
+#include <stdlib.h>
 //a vertex at a computed point: the temporary binds to the reference, where
 //glVertex3fv((float *)&(a+b)) took the address of an rvalue (GCC: -fpermissive)
 static inline void Vertex(const Vector &v)
@@ -71,6 +73,10 @@ float sparkbright[30];
 int curspark;
 
 float recvbright,sendbright;
+
+//this frame's 3D scene goes through the Ultra graphics (renderer.h): Options'
+//Graphics, one view (no stereo)
+static int ultrascene;
 
 DWORD nextlightning;
 Vector lightningpos[500];
@@ -762,6 +768,7 @@ void DrawBlocks(int px,int py,int pz,int size)
 			while(y<py+size);
 		}
 	}
+	RSetMaterial(RMAT_BLOCK);
 	for(i=0;i<32;i++)
 	{
 		TexBind(TEX_BLOCK0+i);
@@ -772,6 +779,7 @@ void DrawBlocks(int px,int py,int pz,int size)
 		}
 		REnd();
 	}
+	RSetMaterial(RMAT_NONE);
 	RPushAttrib(RATTR_ENABLE|RATTR_FOG|RATTR_COLOR|RATTR_POLYGON);
 	RDisable(RCAP_TEXTURE);
 	RDisable(RCAP_BLEND);	
@@ -910,6 +918,17 @@ float WaterSurfaceHeight(float x)
 
 void DrawWater(int size,float cx,float cy)
 {
+	if(ultrascene)
+	{
+		//Ultra: its own surface, waves and all (visual only: the game's water stays
+		//at WATERHEIGHT); the lily pads would sink in the waves
+		woy+=.0009;
+		wox+=.0003;
+		if(wox>4) wox-=4;
+		if(woy>4) woy-=4;
+		RUltraWater();
+		return;
+	}
 	RDisable(RCAP_CULL);
 	
 	cx/=WATERBLOCKSIZE;
@@ -1579,9 +1598,77 @@ void Redraw()
 //draws everything 3d
 
 
+//Ultra's trees and rocks never stand in a block
+static int UltraBlocked(float x,float y,float z)
+{
+	if(y<0) return 0;
+	return GetBlock((int)(x/BLOCKSIZE),(int)(y/BLOCKSIZE),(int)(z/BLOCKSIZE))->type!=0;
+}
+
+//Debug aid for captures: HK_CAMERA="x,z,above,yaw,pitch" draws the world from x,z
+//(above the land or the water by "above"), looking at yaw (degrees, 0 along +z,
+//90 along +x) and pitch; HK_CAMERA=lake finds a lake's shore near the player and
+//looks across it. Only the view moves: the player stays where he is.
+static Player *DebugCamera(Player *cur)
+{
+	static const char *cam=getenv("HK_CAMERA");
+	if(!cam) return cur;
+	static Player p;
+	static int found=-1;
+	static float x,z,above,yaw,pitch;
+	if(found<0)
+	{
+		found=0;
+		if(!strcmp(cam,"lake"))
+		{
+			//the nearest point of the shore with water ahead for 10 to 40 units
+			float best=1e9f;
+			for(int r=0;r<160&&!found;r+=4)
+				for(int dx=-r;dx<=r;dx+=4)
+					for(int dz=-r;dz<=r;dz+=4)
+					{
+						if(abs(dx)!=r&&abs(dz)!=r) continue;
+						float px=cur->pos.x+dx,pz=cur->pos.z+dz;
+						float h=GetLandSmooth(px,pz);
+						if(h<WATERHEIGHT+.6f||h>WATERHEIGHT+2.5f) continue;
+						for(int a=0;a<16;a++)
+						{
+							float ang=a*3.14159265f/8,sx=sinf(ang),sz=cosf(ang);
+							int wet=1;
+							for(int k=10;k<=40&&wet;k+=3) wet=GetLandSmooth(px+sx*k,pz+sz*k)<WATERHEIGHT-1.5f;
+							if(!wet) continue;
+							float d=(float)(dx*dx+dz*dz);
+							if(d<best)
+							{
+								best=d;
+								x=px;
+								z=pz;
+								above=1.7f;
+								yaw=ang*180/3.14159265f;
+								pitch=-6;
+								found=1;
+							}
+						}
+					}
+		}
+		else found=sscanf(cam,"%f,%f,%f,%f,%f",&x,&z,&above,&yaw,&pitch)==5;
+		if(found) fprintf(stderr,"HK_CAMERA: %.1f,%.1f,%.1f,%.0f,%.0f (ground %.1f)\n",x,z,above,yaw,pitch,GetLandSmooth(x,z));
+	}
+	if(!found) return cur;
+	p=*cur;
+	float g=GetLandSmooth(x,z);
+	if(g<WATERHEIGHT) g=WATERHEIGHT;
+	p.pos=Vector(x,g+above,z);
+	float yr=yaw*3.14159265f/180,pr=pitch*3.14159265f/180;
+	p.dir=Vector(sinf(yr)*cosf(pr),sinf(pr),cosf(yr)*cosf(pr));
+	p.fwd=Normalize(Vector(sinf(yr),0,cosf(yr)));
+	p.roll=0;
+	return &p;
+}
+
 void Draw(float offset)
 {
-	Player *cur=GetLocalPlayer();
+	Player *cur=DebugCamera(GetLocalPlayer());
 	
 	
 	static int frame;
@@ -1600,7 +1687,7 @@ void Draw(float offset)
 	color[2]=GetSkySettings()->fogb;
 	color[3]=0;
 	
-	if(GetLocalPlayer()->pos.y<WATERHEIGHT) 
+	if(cur->pos.y<WATERHEIGHT)   //cur: HK_CAMERA's view too
 	{
 		fogend=10;
 		fogbegin=.1;
@@ -1624,6 +1711,45 @@ void Draw(float offset)
 	
 	REnable(RCAP_FOG);
 	RFogRange(fogbegin*400,400);
+
+	//Ultra: the scene from here (the clouds included) up to the gun
+	ultrascene=0;
+	if(RUltra()&&offset==0&&graphicsprefs.stereoseparation==0)
+	{
+		RUltraScene us;
+		memset(&us,0,sizeof(us));
+		us.view=RModelView();
+		us.eye[0]=cur->pos.x;
+		us.eye[1]=cur->pos.y;
+		us.eye[2]=cur->pos.z;
+		Vector sun=Normalize(Vector(0,GetSkySettings()->sunheight,1));   //where DrawSun puts it
+		us.sundir[0]=sun.x;
+		us.sundir[1]=sun.y;
+		us.sundir[2]=sun.z;
+		us.fogcolor[0]=GetSkySettings()->fogr;
+		us.fogcolor[1]=GetSkySettings()->fogg;
+		us.fogcolor[2]=GetSkySettings()->fogb;
+		us.fogend=400;
+		us.waterheight=WATERHEIGHT;
+		us.time=(float)(curtime%(1<<24))/1000;
+		us.underwater=cur->pos.y<WATERHEIGHT;
+		us.land=&land[0][0];
+		us.landsize=LANDGRIDSIZE;
+		//the flags and stations stay in the open
+		for(int i=0;i<MAXSERVEROBJS&&us.numavoid<32;i++)
+			if(sobject[i].type)
+			{
+				Vector p=sobject[i].pos;
+				MakeClose(&p);
+				us.avoid[us.numavoid][0]=p.x;
+				us.avoid[us.numavoid][1]=p.y;
+				us.avoid[us.numavoid][2]=p.z;
+				us.numavoid++;
+			}
+		us.blocked=UltraBlocked;
+		RUltraBegin(us);
+		ultrascene=1;
+	}
 
 	DrawCloudBox(cur->pos);
 	if(GetSkySettings()->lightning&&curtime>nextlightning)
@@ -1722,6 +1848,7 @@ void Draw(float offset)
 	dxpos=cur->pos.x+cur->dir.x*0;
 	dypos=cur->pos.z+cur->dir.z*0;
 	int unisize=20;
+	RSetMaterial(RMAT_TERRAIN);
 	DrawMip(dxpos,dypos,dxpos,dypos,0,unisize,1);
 	odxpos=dxpos;odypos=dypos;
 	dxpos=cur->pos.x+cur->dir.x*10;
@@ -1732,6 +1859,8 @@ void Draw(float offset)
 	dypos=cur->pos.z+cur->dir.z*27;
 	DrawMip(dxpos,dypos,odxpos,odypos,unisize,unisize,3);
 	DrawMip(dxpos,dypos,odxpos,odypos,unisize,unisize,4);
+	RSetMaterial(RMAT_NONE);
+	RUltraGrass();
 	//DrawMip(dxpos,dypos,odxpos,odypos,unisize,unisize,5);
 	REnable(RCAP_BLEND);
 	osize=0;
@@ -1838,7 +1967,7 @@ void Draw(float offset)
 	//Off the window nothing is read: the old code then tested an uninitialized local,
 	//in practice what an earlier frame left there; static keeps the last frame's.
 	static float depth=1;
-	if(fabs(sposx)<1e6&&fabs(sposy)<1e6) RReadDepth((int)sposx,(int)sposy,&depth);
+	if(!ultrascene&&fabs(sposx)<1e6&&fabs(sposy)<1e6) RReadDepth((int)sposx,(int)sposy,&depth);
 	
 	RPushAttrib(RATTR_ENABLE);
 	RDisable(RCAP_TEXTURE);
@@ -2046,6 +2175,7 @@ void Draw(float offset)
 	if(sunflarebright>1) sunflarebright=1;
 	if(sunflarebright<0) sunflarebright=0;
 	//if(sunflarebright==1)
+	if(!ultrascene)   //Ultra: the sky's own sun, its glare in the post-processing
 	{
 		RPushAttrib(RATTR_ENABLE|RATTR_FOG|RATTR_COLOR|RATTR_POLYGON);
 		DrawSun();
@@ -2054,6 +2184,8 @@ void Draw(float offset)
 	}
 	
 	if(fxprefs.viewmodel&&cur->playstate==10) DrawViewModel(cur);
+	if(ultrascene) RUltraEnd();
+	ultrascene=0;
 
 	//crosshair
 	RCullFace(RFACE_BACK);

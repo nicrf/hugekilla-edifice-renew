@@ -360,3 +360,64 @@ void RReadDepth(int x,int y,float *depth)
 	RFlush();
 	RBackendReadDepth(x,y,depth);
 }
+
+//---- Ultra graphics ----
+
+RUltraPrefs rultraprefs={2,2,1,2};
+static int ultrawanted;
+static int inscene;           //between RUltraBegin and RUltraEnd
+
+int RUltraSupported()
+{
+	return RBackendUltraSupported();
+}
+
+void RSetUltra(int on)
+{
+	ultrawanted=on!=0;
+}
+
+int RUltra()
+{
+	return ultrawanted&&RBackendUltraSupported();
+}
+
+//Classic never sees a material: no state change, no flush, the same batches
+void RSetMaterial(int material)
+{
+	if(!inscene) return;
+	SETSTATE(material,material);
+}
+
+void RUltraBegin(const RUltraScene &scene)
+{
+	if(!RUltra()||inscene) return;
+	RFlush();
+	inscene=1;
+	RBackendUltraMark(RMARK_BEGIN,state,&scene);
+}
+
+static void Mark(int mark)
+{
+	if(!inscene) return;
+	RFlush();
+	RBackendUltraMark(mark,state,0);
+}
+
+void RUltraWater()
+{
+	Mark(RMARK_WATER);
+}
+
+void RUltraGrass()
+{
+	Mark(RMARK_GRASS);
+}
+
+void RUltraEnd()
+{
+	if(!inscene) return;
+	RSetMaterial(RMAT_NONE);
+	Mark(RMARK_END);
+	inscene=0;
+}
