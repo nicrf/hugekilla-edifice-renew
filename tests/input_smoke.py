@@ -271,8 +271,9 @@ def scene_touch(exe, out):
 
 
 def scene_grenade(exe, out):
-    """frag or smoke grenades: the pad's D-pad right switches them (at any time), and
-    with the grenade in hand the touch controls have a Frag/Smoke button"""
+    """frag or smoke grenades: the pad's D-pad right switches them (at any time), with
+    the grenade in hand the touch controls have a Frag/Smoke button, and the weapon
+    wheel has the smoke grenade as a step of its own"""
     tap = "%.4f:%.4f" % ((1024 - 146) / 1024, 34 / 768)
     s = ("300:log;305:press:dpright;320:log;325:press:dpright;340:log;"
          "345:press:rightshoulder;360:log;"
@@ -286,7 +287,17 @@ def scene_grenade(exe, out):
     return [(st[300]["smoke"] == 0 and st[320]["smoke"] == 1 and st[340]["smoke"] == 0,
              "D-pad right switches to smoke and back"),
             (st[360]["weapon"] == 4 and st[385]["smoke"] == 1 and st[385]["touch"] == 1,
-             "the touch Smoke button, grenade in hand")], text
+             "the touch Smoke button, grenade in hand")] + wheel(exe, out), text
+
+
+def wheel(exe, out):
+    """RB / LB (the mouse wheel's SwitchGun) stop at the smoke grenade after the grenade"""
+    s = ("300:log;310:press:rightshoulder;325:log;330:press:rightshoulder;345:log;"
+         "350:press:rightshoulder;365:log;370:press:leftshoulder;385:log;390:press:leftshoulder;405:log")
+    st = parse_logs(run(exe, s, dict(HK_AUTOSTART="1", HK_PLAY="1"), out)[0])
+    got = [(st[f]["weapon"], st[f]["smoke"] if st[f]["weapon"] == 4 else 0) for f in (300, 325, 345, 365, 385, 405) if f in st]
+    want = [(3, 0), (4, 0), (4, 1), (5, 0), (4, 1), (4, 0)]
+    return [(got == want, "the weapon wheel: grenade, then smoke grenade (%s)" % got)]
 
 
 SCENES = [("game", scene_game), ("spawn", scene_spawn), ("menus", scene_menus), ("build", scene_build),

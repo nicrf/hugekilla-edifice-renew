@@ -1609,6 +1609,14 @@ void SwitchGun(int gun)
 {
 	Player *cur=GetLocalPlayer();
 	int ogun=GetLocalPlayer()->weapon;
+	//the wheel stops at the smoke grenade between the grenade and the next weapon
+	//(smoke.h), where the server takes them
+	if(ogun==4&&SmokeAllowed()&&(gun==51?!SmokeModeOn():gun==50&&SmokeModeOn()))
+	{
+		SmokeSetMode(gun==51);
+		cur->lastswitchtime=curtime;
+		return;
+	}
 	if(gun==51)
 	{
 		for(int i=GetLocalPlayer()->weapon+1;i<8;i++)
@@ -1640,6 +1648,8 @@ void SwitchGun(int gun)
 		GetLocalPlayer()->weapon=ogun;
 	}
 	if(ogun==GetLocalPlayer()->weapon) return;
+	//onto the grenade: from above its smoke step, from below (or its key) as it was
+	if(cur->weapon==4&&(gun==50||gun==51)) SmokeSetMode(gun==50);
 	if(curtime+500>GetLocalPlayer()->nextfiretime)
 	{
 		GetLocalPlayer()->nextfiretime=curtime+500;

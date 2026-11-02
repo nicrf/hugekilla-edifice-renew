@@ -312,9 +312,9 @@ void PadShutdown()
 void PadNextWeapon(int dir)
 {
 	Player *me = GetLocalPlayer();
-	int before = me->weapon;
+	int before = me->weapon, smoke = SmokeModeOn();
 	SwitchGun(dir > 0 ? 51 : 50);
-	if (me->weapon != before) return;
+	if (me->weapon != before || SmokeModeOn() != smoke) return;   // a step, the smoke grenade's too
 	for (int i = dir > 0 ? 0 : 6; i >= 0 && i <= 6; i += dir)
 		if (me->owngun[i])
 		{

@@ -41,6 +41,12 @@ void SmokeToggleMode()
 	}
 	smokemode=!smokemode;
 	ConsoleDisplayText((char *)(smokemode?"Grenades: smoke":"Grenades: frag"));
+	if(GetLocalPlayer()->weapon==4) GetLocalPlayer()->lastswitchtime=curtime;   //the names' wheel turns
+}
+
+void SmokeSetMode(int on)
+{
+	smokemode=on&&SmokeAllowed();
 }
 
 int ThrowSmokeGrenade(Player *cur)
