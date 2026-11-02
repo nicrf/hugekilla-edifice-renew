@@ -355,21 +355,6 @@ Mat hd_sample(vec2 p, float layer) {
 	return m;
 }
 
-// a layer at two scales, the second turned, mixed by a noise: no visible tiling
-Mat hd_layer(vec2 p, float layer, float scale) {
-	Mat a = hd_sample(p * scale, layer);
-	vec2 q = vec2(p.x * 0.8 - p.y * 0.6, p.x * 0.6 + p.y * 0.8) * scale * 0.37 + 0.31;
-	Mat b = hd_sample(q, layer);
-	float k = smoothstep(0.3, 0.7, vnoise(p * 0.035));
-	Mat m;
-	m.albedo = mix(a.albedo, b.albedo, k);
-	m.nrm = mix(a.nrm, b.nrm, k);
-	m.ao = mix(a.ao, b.ao, k);
-	m.rough = mix(a.rough, b.rough, k);
-	m.height = mix(a.height, b.height, k);
-	return m;
-}
-
 Mat mat_mix(Mat a, Mat b, float k) {
 	Mat m;
 	m.albedo = mix(a.albedo, b.albedo, k);
@@ -379,6 +364,103 @@ Mat mat_mix(Mat a, Mat b, float k) {
 	m.height = mix(a.height, b.height, k);
 	return m;
 }
+
+// Hex-tiling (Mikkelsen 2022, after Heitz and Neyret 2018): the texture is read
+// three times around each point, each hexagon with its own offset and turn, and
+// the three blended by their barycentric weights sharpened by the samples'
+// luminance (contrast kept, no grey blur); normals turned back with their hexagon.
+// variant: the grass picks one of its two photos per hexagon.
+vec2 hex_hash(vec2 p) {
+	vec2 r = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+	return fract(sin(r) * 43758.5453);
+}
+
+void hex_grid(vec2 st, out vec3 w, out vec2 v1, out vec2 v2, out vec2 v3) {
+	st *= 3.4641016;   // 2 sqrt(3): hexagons about one texture tile wide
+	vec2 sk = mat2(1.0, 0.0, -0.57735027, 1.15470054) * st;
+	vec2 base = floor(sk);
+	vec3 t = vec3(fract(sk), 0.0);
+	t.z = 1.0 - t.x - t.y;
+	float s = step(0.0, -t.z);
+	float s2 = 2.0 * s - 1.0;
+	w = vec3(-t.z * s2, s - t.y * s2, s - t.x * s2);
+	v1 = base + vec2(s, s);
+	v2 = base + vec2(s, 1.0 - s);
+	v3 = base + vec2(1.0 - s, s);
+}
+
+mat2 hex_rot(vec2 h) {
+	float a = (h.x - 0.5) * 6.2831853;
+	float c = cos(a);
+	float sn = sin(a);
+	return mat2(c, sn, -sn, c);
+}
+
+Mat hex_one(vec2 uv, vec2 v, vec2 dx, vec2 dy, float layer, float variant, out float lum) {
+	vec2 h = hex_hash(v);
+	mat2 r = hex_rot(h);
+	// the vertex in texture space, the turn around it, a random offset
+	vec2 c = vec2(v.x + 0.5 * v.y, 0.8660254 * v.y) / 3.4641016;
+	vec2 q = r * (uv - c) + c + h * 7.31;
+	vec2 qdx = r * dx;
+	vec2 qdy = r * dy;
+	float l = (variant > 0.0 && fract(h.y * 13.7) > 0.55) ? variant : layer;
+	Mat m;
+	m.albedo = textureGrad(sampler2DArray(hdalb, hdsmp), vec3(q, l), qdx, qdy).rgb;
+	vec3 n = textureGrad(sampler2DArray(hdnrm, hdsmp), vec3(q, l), qdx, qdy).rgb * 2.0 - 1.0;
+	n.xy = transpose(r) * n.xy;
+	m.nrm = n;
+	vec3 orm = textureGrad(sampler2DArray(hdorm, hdsmp), vec3(q, l), qdx, qdy).rgb;
+	m.ao = orm.r;
+	m.rough = orm.g;
+	m.height = orm.b;
+	lum = dot(m.albedo, vec3(0.3, 0.59, 0.11));
+	return m;
+}
+
+Mat hex_sample(vec2 uv, float layer, float variant) {
+	vec3 w;
+	vec2 v1, v2, v3;
+	hex_grid(uv, w, v1, v2, v3);
+	vec2 dx = dFdx(uv);
+	vec2 dy = dFdy(uv);
+	float l1, l2, l3;
+	Mat a = hex_one(uv, v1, dx, dy, layer, variant, l1);
+	Mat b = hex_one(uv, v2, dx, dy, layer, variant, l2);
+	Mat c = hex_one(uv, v3, dx, dy, layer, variant, l3);
+	vec3 lw = mix(vec3(1.0), vec3(l1, l2, l3), 0.6);
+	vec3 W = lw * pow(w, vec3(7.0));
+	W /= W.x + W.y + W.z;
+	Mat m;
+	m.albedo = a.albedo * W.x + b.albedo * W.y + c.albedo * W.z;
+	m.nrm = normalize(a.nrm * W.x + b.nrm * W.y + c.nrm * W.z);
+	m.ao = a.ao * W.x + b.ao * W.y + c.ao * W.z;
+	m.rough = a.rough * W.x + b.rough * W.y + c.rough * W.z;
+	m.height = a.height * W.x + b.height * W.y + c.height * W.z;
+	return m;
+}
+
+Mat mat_zero() {
+	Mat m;
+	m.albedo = vec3(0.0);
+	m.nrm = vec3(0.0, 0.0, 1.0);
+	m.ao = 1.0;
+	m.rough = 1.0;
+	m.height = 0.0;
+	return m;
+}
+
+// a layer hex-tiled at two scales, the coarser one taking over with distance
+// (no repeat near, no repeat far); variant: a second photo of the layer (-1 none)
+Mat hd_layer(vec2 p, float layer, float scale, float variant, float dist) {
+	float k = smoothstep(14.0, 70.0, dist);
+	Mat a = mat_zero();
+	Mat b = mat_zero();
+	if (k < 0.999) a = hex_sample(p * scale, layer, variant);
+	if (k > 0.001) b = hex_sample(p * scale * 0.29 + 0.17, layer, variant);
+	return mat_mix(a, b, k);
+}
+
 
 // height blending: where two layers meet, the higher one shows (stones over sand)
 float hblend(float wa, float ha, float wb, float hb) {
@@ -427,10 +509,10 @@ void main() {
 		float snowy = smoothstep(0.5, 0.75, cmin) * (1.0 - smoothstep(0.06, 0.16, (cmax - cmin) / max(cmax, 1e-3)));
 		vec2 p = wpos.xz;
 		// two grasses, mixed at a large scale: no field looks the same twice
-		Mat grass = mat_mix(hd_layer(p, 0.0, 0.17), hd_layer(p, 16.0, 0.15), smoothstep(0.35, 0.8, vnoise(p * 0.021 + 7.3)) * 0.7);
-		Mat dirt = hd_layer(p, 4.0, 0.19);
-		Mat sand = hd_layer(p, 2.0, 0.26);
-		Mat snow = hd_layer(p, 3.0, 0.09);
+		Mat grass = hd_layer(p, 0.0, 0.17, 16.0, eyedepth);
+		Mat dirt = hd_layer(p, 4.0, 0.19, -1.0, eyedepth);
+		Mat sand = hd_layer(p, 2.0, 0.26, -1.0, eyedepth);
+		Mat snow = hd_layer(p, 3.0, 0.09, -1.0, eyedepth);
 		// rock: triplanar, the slopes are steep
 		vec3 bw = pow(abs(gn), vec3(4.0));
 		bw /= bw.x + bw.y + bw.z;
@@ -451,6 +533,19 @@ void main() {
 		m = mat_mix(m, rock, hblend(1.0 - sp.g, m.height, sp.g, rock.height));
 		m = mat_mix(m, snow, hblend(1.0 - snoww, m.height, snoww, snow.height));
 		albedo = srgb_to_linear(m.albedo);
+		// macro variation: brightness, hue and roughness drift over tens of meters
+		float mv1 = vnoise(p * 0.0083);
+		float mv2 = vnoise(p * 0.0137 + 3.1);
+		albedo *= mix(0.78, 1.15, mv1) * mix(vec3(1.06, 1.0, 0.88), vec3(0.92, 1.0, 1.06), mv2);
+		m.rough = clamp(m.rough + (mv2 - 0.5) * 0.15, 0.2, 1.0);
+		// scattered details where the grass is: tiny flowers, and pebbles on bare ground
+		vec2 cell = floor(p * 1.7);
+		vec2 ch = hex_hash(cell + 17.0);
+		vec2 off = (p * 1.7 - cell) - (0.2 + 0.6 * ch);
+		float dot0 = 1.0 - smoothstep(0.035, 0.06, length(off));
+		float grassy = sp.r * (1.0 - snoww);
+		if (ch.x > 0.93) albedo = mix(albedo, ch.y > 0.5 ? vec3(0.8, 0.75, 0.2) : vec3(0.8, 0.8, 0.85), dot0 * grassy * (1.0 - smoothstep(10.0, 30.0, eyedepth)));
+		else if (ch.x < 0.05) albedo = mix(albedo, vec3(0.09, 0.085, 0.08) * (0.7 + ch.y), (1.0 - smoothstep(0.05, 0.11, length(off))) * (1.0 - grassy) * (1.0 - smoothstep(15.0, 40.0, eyedepth)));
 		// wet near the water's edge: darker and glossier
 		float wet = 1.0 - smoothstep(0.0, 0.6, wpos.y - skyhorizon.w);
 		albedo *= 1.0 - 0.4 * wet;
