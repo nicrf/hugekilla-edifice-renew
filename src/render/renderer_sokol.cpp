@@ -69,9 +69,8 @@ static void Log(const char *tag,uint32_t level,uint32_t id,const char *msg,uint3
 	if(level==0) abort();
 }
 
-static sg_pipeline Pipeline(int key)
+sg_pipeline_desc RSokolPipeDesc(int key)
 {
-	if(pipes[key].id) return pipes[key];
 	int colorwrite=key%2;
 	int cull=key/2%NUMCULLS;
 	int depthwrite=key/(2*NUMCULLS)%2;
@@ -108,6 +107,13 @@ static sg_pipeline Pipeline(int key)
 	d.face_winding=SG_FACEWINDING_CCW;   //GL's front faces
 	d.sample_count=1;
 	d.label="draw";
+	return d;
+}
+
+static sg_pipeline Pipeline(int key)
+{
+	if(pipes[key].id) return pipes[key];
+	sg_pipeline_desc d=RSokolPipeDesc(key);
 	pipes[key]=sg_make_pipeline(&d);
 	return pipes[key];
 }
@@ -120,7 +126,9 @@ void RBackendInit()
 	desc.logger.func=Log;
 	desc.image_pool_size=2048;      //textures (some 300), and those replaced in a frame
 	desc.view_pool_size=2048;
-	desc.pipeline_pool_size=NUMPIPES+16;
+	//the classic pipelines, and Ultra's: its own variants of them (HDR, lit, smoke) and its passes
+	desc.pipeline_pool_size=4*NUMPIPES+64;
+	desc.shader_pool_size=64;
 	//a frame applies two blocks per command, 256 bytes each at worst; split if more
 	desc.uniform_buffer_size=16*1024*1024;
 	sg_setup(&desc);
@@ -165,6 +173,7 @@ void RBackendInit()
 	memset(&vd,0,sizeof(vd));
 	vd.texture.image=whiteimage;
 	whiteview=sg_make_view(&vd);
+	if(RUltraBackendSupported()) RUltraInit();
 }
 
 static void DestroyTarget()
@@ -218,6 +227,7 @@ static void EnsureTarget()
 
 void RSokolShutdown()
 {
+	if(RUltraBackendSupported()) RUltraShutdown();
 	DestroyTarget();
 	if(errors) fprintf(stderr,"sokol_gfx: %d error(s)\n",errors);
 	sg_shutdown();
@@ -225,22 +235,10 @@ void RSokolShutdown()
 
 //---- recording ----
 
-struct Uniforms
-{
-	draw_vs_params_t vs;
-	draw_fs_params_t fs;
-};
-
-struct Cmd
-{
-	int pipe;
-	int first,count;          //in frameverts
-	int uniforms;             //in frameuniforms
-	sg_view view;
-	int sampler;
-	int viewport[4];          //width 0: the whole frame (a clear)
-	int scissor[4];
-};
+typedef RSokolUniforms Uniforms;
+typedef RSokolCmd Cmd;
+static_assert(sizeof(draw_vs_params_t)==2*sizeof(Mat4),"draw_vs_params layout");
+static_assert(sizeof(draw_fs_params_t)==8*sizeof(float),"draw_fs_params layout");
 
 static std::vector<RVertex> frameverts;
 static std::vector<Cmd> framecmds;
@@ -258,6 +256,12 @@ static int AddUniforms(const Uniforms &u)
 }
 
 //the vertices appended since first, drawn as one command (or the previous one, grown)
+//the Ultra scene being recorded (between its BEGIN and END marks), and its camera
+static int inscene;
+static Mat4 sceneinvview;
+//the material and texture slot of the draws being recorded
+static int curmaterial,curtexslot=-1;
+
 static void AddCmd(int pipe,int first,int uniforms,sg_view view,int sampler,const int viewport[4],const int scissor[4])
 {
 	int count=(int)frameverts.size()-first;
@@ -267,7 +271,8 @@ static void AddCmd(int pipe,int first,int uniforms,sg_view view,int sampler,cons
 		Cmd &last=framecmds.back();
 		if(last.pipe==pipe&&last.first+last.count==first&&last.uniforms==uniforms&&last.view.id==view.id&&
 			last.sampler==sampler&&!memcmp(last.viewport,viewport,sizeof(last.viewport))&&
-			!memcmp(last.scissor,scissor,sizeof(last.scissor)))
+			!memcmp(last.scissor,scissor,sizeof(last.scissor))&&last.material==curmaterial&&
+			last.texslot==curtexslot&&last.mark<0)
 		{
 			last.count+=count;
 			return;
@@ -282,6 +287,9 @@ static void AddCmd(int pipe,int first,int uniforms,sg_view view,int sampler,cons
 	c.sampler=sampler;
 	memcpy(c.viewport,viewport,sizeof(c.viewport));
 	memcpy(c.scissor,scissor,sizeof(c.scissor));
+	c.material=curmaterial;
+	c.texslot=curtexslot;
+	c.mark=-1;
 	framecmds.push_back(c);
 }
 
@@ -294,17 +302,22 @@ static Mat4 ApiProjection(const Mat4 &p)
 	return r;
 }
 
+Mat4 RSokolApiProjection(const Mat4 &gl)
+{
+	return ApiProjection(gl);
+}
+
 static void SetFog(Uniforms &u,const RState &s)
 {
-	memcpy(u.fs.fogcolor,s.fogcolor,sizeof(u.fs.fogcolor));
-	u.fs.fog[0]=1;
-	u.fs.fog[1]=0;
-	u.fs.fog[2]=u.fs.fog[3]=0;
+	memcpy(u.fogcolor,s.fogcolor,sizeof(u.fogcolor));
+	u.fog[0]=1;
+	u.fog[1]=0;
+	u.fog[2]=u.fog[3]=0;
 	if((s.caps&RCAP_FOG)&&s.fogend!=s.fogstart)
 	{
 		float inv=1/(s.fogend-s.fogstart);
-		u.fs.fog[0]=s.fogend*inv;
-		u.fs.fog[1]=inv;
+		u.fog[0]=s.fogend*inv;
+		u.fog[1]=inv;
 	}
 }
 
@@ -315,7 +328,7 @@ static void Transform(const Mat4 &m,const float in[4],float out[4])
 }
 
 //general 4x4 inverse (cofactors); 0 if singular
-static int Inverse(const Mat4 &a,Mat4 *out)
+int RSokolInverse(const Mat4 &a,Mat4 *out)
 {
 	const float *m=a.m;
 	float inv[16];
@@ -355,7 +368,7 @@ struct Expander
 	{
 		modelview=s.modelview;
 		proj=s.projection;
-		ok=Inverse(proj,&inv)&&s.viewport[2]>0&&s.viewport[3]>0;
+		ok=RSokolInverse(proj,&inv)&&s.viewport[2]>0&&s.viewport[3]>0;
 		pxw=ok?2.f/s.viewport[2]:0;
 		pxh=ok?2.f/s.viewport[3]:0;
 	}
@@ -523,10 +536,13 @@ void RBackendDraw(const RState &s,const RVertex *verts,const RCmd *cmds,int numc
 {
 	Uniforms u;
 	memset(&u,0,sizeof(u));
-	u.vs.proj=ApiProjection(s.projection);
-	u.vs.modelview=s.modelview;
+	u.proj=ApiProjection(s.projection);
+	u.modelview=s.modelview;
 	SetFog(u,s);
+	if(inscene) u.model=Mat4Mul(sceneinvview,s.modelview);
 	int uniforms=AddUniforms(u);
+	curmaterial=inscene?s.material:0;
+	curtexslot=inscene&&(s.caps&RCAP_TEXTURE)?s.texture:-1;
 	int expanded=-1;          //the uniforms of the wide lines and points, made when needed
 	Expander ex;
 	ex.ok=-1;
@@ -570,7 +586,8 @@ void RBackendDraw(const RState &s,const RVertex *verts,const RCmd *cmds,int numc
 			if(expanded<0)
 			{
 				Uniforms eu=u;
-				eu.vs.modelview=Mat4Identity();
+				eu.modelview=Mat4Identity();
+				if(inscene) eu.model=sceneinvview;
 				expanded=AddUniforms(eu);
 			}
 			if(prim==RP_POINTS)
@@ -597,10 +614,12 @@ void RBackendClear(const RState &s,int color,int depth)
 	if(!color&&!depth) return;
 	Uniforms u;
 	memset(&u,0,sizeof(u));
-	u.vs.proj=ApiProjection(Mat4Identity());
-	u.vs.modelview=Mat4Identity();
-	u.fs.fog[0]=1;            //no fog
+	u.proj=ApiProjection(Mat4Identity());
+	u.modelview=Mat4Identity();
+	u.fog[0]=1;               //no fog
 	int uniforms=AddUniforms(u);
+	curmaterial=0;
+	curtexslot=-1;
 	RVertex c;
 	memset(&c,0,sizeof(c));
 	c.r=s.clearcolor[0];
@@ -664,13 +683,47 @@ static void Submit()
 	pass.attachments.colors[0]=colorview;
 	pass.attachments.depth_stencil=depthview;
 	pass.label="frame";
-	sg_begin_pass(&pass);
+	int passopen=0;
 	int pipe=-1,uniforms=-1,sampler=-1;
 	uint32_t view=0;
 	int viewport[4]={-1,-1,-1,-1},scissor[4]={-1,-1,-1,-1};
 	for(size_t i=0;i<framecmds.size();i++)
 	{
 		const Cmd &c=framecmds[i];
+		if(c.mark==RMARK_BEGIN)
+		{
+			//the Ultra scene, up to its END mark: its own passes, which end in the frame
+			if(passopen) sg_end_pass();
+			passopen=0;
+			size_t end=i+1;
+			while(end<framecmds.size()&&framecmds[end].mark!=RMARK_END) end++;
+			RSokolFrame f;
+			memset(&f,0,sizeof(f));
+			f.vbuf=vbuf;
+			f.uniforms=frameuniforms.data();
+			f.samplers=samplers;
+			f.white=whiteview;
+			f.colorimage=colorimage;
+			f.depthimage=depthimage;
+			f.colorview=colorview;
+			f.depthview=depthview;
+			f.width=targetw;
+			f.height=targeth;
+			f.ztozero=ztozero;
+			f.origintopleft=RSokolOriginTopLeft();
+			RUltraDrawScene(f,&framecmds[i],(int)(end-i));
+			i=end;
+			continue;
+		}
+		if(c.mark>=0) continue;
+		if(!passopen)
+		{
+			sg_begin_pass(&pass);
+			passopen=1;
+			pipe=uniforms=sampler=-1;
+			view=0;
+			for(int k=0;k<4;k++) viewport[k]=scissor[k]=-1;
+		}
 		if(c.pipe!=pipe)
 		{
 			sg_apply_pipeline(Pipeline(c.pipe));
@@ -708,14 +761,14 @@ static void Submit()
 		if(c.uniforms!=uniforms)
 		{
 			const Uniforms &u=frameuniforms[c.uniforms];
-			sg_range vs={&u.vs,sizeof(u.vs)},fs={&u.fs,sizeof(u.fs)};
+			sg_range vs={&u.proj,sizeof(draw_vs_params_t)},fs={u.fogcolor,sizeof(draw_fs_params_t)};
 			sg_apply_uniforms(UB_draw_vs_params,&vs);
 			sg_apply_uniforms(UB_draw_fs_params,&fs);
 			uniforms=c.uniforms;
 		}
 		sg_draw(c.first,c.count,1);
 	}
-	sg_end_pass();
+	if(passopen) sg_end_pass();
 	frameverts.clear();
 	framecmds.clear();
 	frameuniforms.clear();
@@ -767,7 +820,43 @@ void RBackendReadPixels(int x,int y,int w,int h,int bgr,unsigned char *out)
 void RBackendReadDepth(int x,int y,float *depth)
 {
 	if(x<0||y<0||x>=targetw||y>=targeth) return;   //outside: GL left it
+	if(inscene) return;       //Ultra: the scene isn't drawn yet (the sun's glare is the post-processing's)
 	Submit();
 	sg_commit();
 	RSokolReadDepth(depthimage,x,y,depth);
+}
+
+//---- Ultra marks ----
+
+int RBackendUltraSupported()
+{
+	return RUltraBackendSupported();
+}
+
+void RBackendUltraMark(int mark,const RState &s,const RUltraScene *scene)
+{
+	if(mark==RMARK_BEGIN)
+	{
+		if(!scene||!RSokolInverse(scene->view,&sceneinvview)) return;
+		RUltraSetScene(*scene);
+		inscene=1;
+	}
+	else if(!inscene) return;
+	if(mark==RMARK_END) inscene=0;
+	//the matrices at that point (the water and the grass draw with the scene's camera)
+	Uniforms u;
+	memset(&u,0,sizeof(u));
+	u.proj=ApiProjection(s.projection);
+	u.modelview=s.modelview;
+	SetFog(u,s);
+	int uniforms=AddUniforms(u);
+	Cmd c;
+	memset(&c,0,sizeof(c));
+	c.first=(int)frameverts.size();
+	c.uniforms=uniforms;
+	memcpy(c.viewport,s.viewport,sizeof(c.viewport));
+	memcpy(c.scissor,noscissor,sizeof(c.scissor));
+	c.texslot=-1;
+	c.mark=mark;
+	framecmds.push_back(c);
 }

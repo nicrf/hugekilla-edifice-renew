@@ -35,6 +35,7 @@ struct RVertex
 	float x,y,z;
 	float u,v;
 	float r,g,b,a;
+	float nx,ny,nz;       //the model's normal (Ultra graphics only; 0,0,0: none)
 };
 
 //a primitive (or a run of them) between RBegin and REnd, as glBegin/glEnd did:
@@ -183,5 +184,65 @@ void RFlush();                //draws the batch: before presenting the frame
 //(the sun flare looks for what hides the sun)
 void RReadPixels(int x,int y,int w,int h,int bgr,unsigned char *out);
 void RReadDepth(int x,int y,float *depth);   //outside the window: may leave *depth as it was
+
+//---- Ultra graphics (sokol_gfx backend only) ----
+//
+//An optional render path over the same calls: the 3D scene goes into an HDR image,
+//lit by the sun (PBR, cascaded shadows), with its own sky, water and grass, then
+//post-processed (bloom, god rays, ACES tonemapping, FXAA) into the frame, under
+//the HUD drawn as before. The game only says what it draws (RSetMaterial) and
+//where the scene starts and ends; with Ultra off every call below does nothing,
+//so Classic draws exactly what it did.
+
+int RUltraSupported();        //the backend can (sokol_gfx Metal, D3D11, GL core; not WebGL2, not --gl)
+void RSetUltra(int on);       //Options' Graphics: Classic 0, Ultra 1
+int RUltra();                 //on and supported
+
+//sub-options (Options, Ultra rows): shadows 0 off, 1 two cascades, 2 four;
+//grass 0 off, 1 low, 2 high; water 0 sky reflection only, 1 planar reflection;
+//vegetation (trees, bushes, rocks) 0 off, 1 near, 2 far; clouds 0 the map's
+//layers, 1 volumetric
+struct RUltraPrefs
+{
+	int shadows,grass,water,vegetation,clouds;
+};
+extern RUltraPrefs rultraprefs;
+
+//what the next draws are: the Ultra shaders light them by kind (the vertex color,
+//the classic baked light, is then ignored)
+enum RMaterial
+{
+	RMAT_NONE,            //drawn as Classic does (in the HDR scene: particles, effects, clouds, text)
+	RMAT_TERRAIN,         //heightmap land: splatted grass, rock, sand, snow, dirt
+	RMAT_BLOCK,           //building blocks (TEX_BLOCK0+i: HD wall<i> if there is one)
+	RMAT_MODEL,           //.cob models, with their normals
+	RMAT_FOLIAGE          //models that sway in the wind (trees, flowers)
+};
+void RSetMaterial(int material);
+
+//the 3D scene's frame: the camera alone (world to eye, without the model), the
+//sun, the map's fog color and the land
+struct RUltraScene
+{
+	Mat4 view;
+	float eye[3];
+	float sundir[3];      //towards the sun, normalized
+	float fogcolor[3];    //the map's (skies.ini), sets the sky's mood
+	float fogend;         //where the land ends
+	float waterheight;
+	float time;           //seconds, for the waves and the wind
+	int underwater;
+	const float *land;    //heights, land[x*landsize+z], the world repeating every landsize
+	int landsize;
+	//no tree nor rock there: around these points (flags, stations), nor where
+	//blocked says a block is (x, y, z in the world)
+	float avoid[32][3];
+	int numavoid;
+	int (*blocked)(float x,float y,float z);
+};
+void RUltraBegin(const RUltraScene &scene);
+void RUltraWater();           //the water surface, here in the drawing order
+void RUltraGrass();           //the grass on the land near the camera
+void RUltraEnd();             //the scene is post-processed into the frame: the HUD comes next
 
 #endif

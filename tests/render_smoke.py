@@ -4,9 +4,11 @@
 
 Each scene runs in a fresh user folder (HK_USERDIR; net.ini with servervisibility=lan
 and no lobby, so nothing is announced), saves one frame (HK_SHOT, HK_FIXEDCLOCK=16)
-and is stopped. A scene fails when the game exits or saves nothing within 60 s, when
+and is stopped. A scene fails when the game exits or saves nothing within 60 s (360 s for Ultra), when
 its log has a sokol_gfx error or validation message (a Debug build validates every
-call; warnings are only shown), or when the frame is one flat color. --ref compares with the same captures of
+call; warnings are only shown), or when the frame is one flat color. The last two
+scenes draw with the Ultra graphics (HK_GRAPHICS=ultra), the second at a lake's shore.
+--ref compares with the same captures of
 another build (tests/pixel_diff.py), for information: what the CI's runners draw
 (software GL, WARP, a virtual GPU) differs from a real GPU. Linux needs a display
 (xvfb-run). Used by the CI's sokol job."""
@@ -32,6 +34,14 @@ SCENES = [
     # renderer); the console is drawn over the game and in the menus anyway
     ("spawn", dict(HK_AUTOSTART="1", HK_SHOT_FRAME="300", HK_FIXEDCLOCK="16")),
     ("game", dict(HK_AUTOSTART="1", HK_PLAY="1", HK_SHOT_FRAME="600", HK_FIXEDCLOCK="16")),
+    # the Ultra graphics (renderer.h): HDR, shadows, water, grass, post-processing; a
+    # backend without them (the fixed-function GL one) draws the game as Classic
+    # (low settings and a small window, small_window: the CI's software renderers
+    # draw them slowly)
+    ("ultra", dict(HK_AUTOSTART="1", HK_PLAY="1", HK_SHOT_FRAME="300", HK_FIXEDCLOCK="16", HK_GRAPHICS="ultra",
+                   HK_ULTRA_PREFS="1,1,1,1")),
+    ("ultralake", dict(HK_AUTOSTART="1", HK_PLAY="1", HK_SHOT_FRAME="300", HK_FIXEDCLOCK="16", HK_GRAPHICS="ultra",
+                       HK_ULTRA_PREFS="1,1,1,1", HK_CAMERA="lake")),
 ]
 
 
@@ -39,6 +49,22 @@ def executable(path):
     if path.endswith(".app"):
         return os.path.join(path, "Contents", "MacOS", "Edifice")
     return path
+
+
+def small_window(folder):
+    """data/control.ini with a 400x300 window: the CI's software renderers (llvmpipe,
+    WARP) draw the Ultra graphics slowly"""
+    with open(os.path.join(DATA, "control.ini"), "rb") as f:
+        lines = f.read().decode("latin-1").replace("\r\n", "\n").split("\n")
+    out = []
+    for line in lines:
+        if line.startswith("screenwidth="):
+            line = "screenwidth=400"
+        elif line.startswith("screenheight="):
+            line = "screenheight=300"
+        out.append(line)
+    with open(os.path.join(folder, "control.ini"), "wb") as f:
+        f.write("\r\n".join(out).encode("latin-1"))
 
 
 def net_ini(folder):
@@ -64,6 +90,8 @@ def run_scene(exe, name, env_extra, outdir):
         os.remove(shot)
     userdir = tempfile.mkdtemp(prefix="edifice-render-")
     net_ini(userdir)
+    if env_extra.get("HK_GRAPHICS") == "ultra":
+        small_window(userdir)
     env = dict(os.environ)
     env.update(env_extra)
     env.update(HK_USERDIR=userdir + os.sep, HK_SEED="42", SDL_AUDIODRIVER="dummy", HK_SHOT=shot,
@@ -72,7 +100,8 @@ def run_scene(exe, name, env_extra, outdir):
     with open(log, "wb") as f:
         p = subprocess.Popen([exe], stdout=f, stderr=subprocess.STDOUT, env=env,
                              stdin=subprocess.DEVNULL, cwd=userdir)
-    end = time.time() + 60
+    # Ultra loads its HD textures first: slow in a Debug build on the CI's runners
+    end = time.time() + (360 if env_extra.get("HK_GRAPHICS") == "ultra" else 60)
     try:
         while time.time() < end and p.poll() is None:
             with open(log, "rb") as f:
