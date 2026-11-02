@@ -379,8 +379,10 @@ void RUltraInit()
 
 	linclamp=Sampler(SG_FILTER_LINEAR,SG_FILTER_NEAREST,SG_WRAP_CLAMP_TO_EDGE,1);
 	pointclamp=Sampler(SG_FILTER_NEAREST,SG_FILTER_NEAREST,SG_WRAP_CLAMP_TO_EDGE,1);
-	linrepeat=Sampler(SG_FILTER_LINEAR,SG_FILTER_LINEAR,SG_WRAP_REPEAT,4);
-	hdsampler=Sampler(SG_FILTER_LINEAR,SG_FILTER_LINEAR,SG_WRAP_REPEAT,8);
+	//no anisotropy on a software renderer, which takes seconds a frame with it
+	int soft=RSokolSoftwareRenderer();
+	linrepeat=Sampler(SG_FILTER_LINEAR,SG_FILTER_LINEAR,SG_WRAP_REPEAT,soft?1:4);
+	hdsampler=Sampler(SG_FILTER_LINEAR,SG_FILTER_LINEAR,SG_WRAP_REPEAT,soft?1:8);
 	sg_sampler_desc sd;
 	memset(&sd,0,sizeof(sd));
 	sd.min_filter=sd.mag_filter=SG_FILTER_LINEAR;
@@ -730,6 +732,9 @@ static void UpdateLand()
 	const unsigned *bits=(const unsigned *)land;
 	for(size_t i=0;i<(size_t)size*size;i++) hash=(hash^bits[i])*16777619u;
 	hash^=(unsigned)(scene.waterheight*1000);
+	if(scene.landtex)
+		for(int i=0;i<scene.landtexsize*scene.landtexsize;i++) hash=(hash^(unsigned char)scene.landtex[i])*16777619u;
+	for(int i=0;i<16;i++) hash=(hash^scene.snowground[i])*16777619u;
 	if(landvalid&&hash==landhash) return;
 	landhash=hash;
 	landvalid=1;
@@ -762,6 +767,13 @@ static void UpdateLand()
 			float dirt=Smooth(0.66f,0.86f,nz2*0.6f+nz1*0.4f)*0.7f;
 			//layered: snow over rock over sand over grass and dirt
 			float rem=1;
+			//a block of snow ground (the map's texture): snow, no grass
+			if(scene.landtex&&scene.landtexsize>0)
+			{
+				int cell=size/scene.landtexsize;
+				int t=(unsigned char)scene.landtex[(x/cell)*scene.landtexsize+(z/cell)];
+				if(t<16&&scene.snowground[t]) snow=1;
+			}
 			float ws=snow*rem;
 			rem-=ws;
 			float wr=rock*rem;
@@ -1682,7 +1694,7 @@ void RUltraDrawScene(const RSokolFrame &f,const RSokolCmd *cmds,int n)
 		Fullpass(rays,rayspipe,"ultra god rays",0);
 		sg_bindings b;
 		memset(&b,0,sizeof(b));
-		b.views[VIEW_src]=hdr.tex;
+		b.views[VIEW_src]=scenecopy.tex;
 		b.views[VIEW_depth]=lindepth.tex;
 		b.samplers[SMP_linsmp]=linclamp;
 		b.samplers[SMP_pointsmp]=pointclamp;
