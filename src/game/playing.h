@@ -159,6 +159,7 @@ int GetLocalNum();
 Player *GetLocalPlayer();
 Player *GetPlayer(int player);
 void Playloop();
+void SyncLogFrame();   //HK_SYNCLOG: where each player is drawn (tests/net_sync.py)
 void HandleKey(DWORD key,DWORD flags);
 void HandleKeyUp(DWORD key,DWORD flags);
 int HandleConsoleKey(DWORD key,DWORD flags);

@@ -103,12 +103,32 @@ static void DebugFrameTime()
 			(double)((int64_t)SDL_GetPerformanceCounter() - start) * 1000 / (double)SDL_GetPerformanceFrequency() / n, n);
 }
 
+// Debug aid: HK_MAXFPS=N draws at most N frames a second, sleeping on the real clock:
+// without VSync (HK_SHOT), the pace of a real screen (tests/net_sync.py), or another
+// one (30, 144) to compare
+static void DebugMaxFps()
+{
+	static int fps = getenv("HK_MAXFPS") ? atoi(getenv("HK_MAXFPS")) : 0;
+	static int64_t next;
+	if (fps <= 0) return;
+	int64_t freq = (int64_t)SDL_GetPerformanceFrequency();
+	int64_t now = (int64_t)SDL_GetPerformanceCounter();
+	if (!next || now - next > freq / 4) next = now;   // first frame, or far behind: from now
+	next += freq / fps;
+	while ((now = (int64_t)SDL_GetPerformanceCounter()) < next)
+	{
+		int64_t ms = (next - now) * 1000 / freq;
+		if (ms > 1) SDL_Delay((Uint32)(ms - 1));
+	}
+}
+
 void HKSwapWindow()
 {
 	DebugScreenshot();
 	DebugFrameTime();
 	HKFrameDrawn();
 	if (window) RPresent();
+	DebugMaxFps();
 }
 
 // The window is created high-DPI aware: its size (and the mouse) is in points, the
@@ -728,6 +748,7 @@ static void Frame()
 		{
 			Playloop();
 			SockLoop();
+			SyncLogFrame();
 			if (redraw) Redraw();
 		}
 	}

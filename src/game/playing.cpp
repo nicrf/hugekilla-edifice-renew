@@ -21,6 +21,7 @@
 #include "gamepad.h"
 #include "touch.h"
 #include "props.h"
+#include <chrono>
 
 
 char menutext[5000];
@@ -624,6 +625,23 @@ void Playloop()
 			sobject[i].pos=GetPlayer(sobject[i].attached)->pos+Vector(0,.3,0);
 			sobject[i].dir=GetPlayer(sobject[i].attached)->fwd;
 		}
+	}
+}
+
+//Debug aid: HK_SYNCLOG=1 prints, each frame, where every player in the game is drawn,
+//on the wall clock in microseconds (the same for every process of the machine):
+//tests/net_sync.py compares where a player is with where the other game shows it
+void SyncLogFrame()
+{
+	static int on=getenv("HK_SYNCLOG")!=0;
+	if(!on) return;
+	long long us=(long long)std::chrono::duration_cast<std::chrono::microseconds>(
+		std::chrono::system_clock::now().time_since_epoch()).count();
+	for(int i=0;i<GetNumPlayers();i++)
+	{
+		Player *p=GetPlayer(i);
+		if(p->playstate<10) continue;
+		fprintf(stderr,"synclog %lld %d %d %d %.3f %.3f %.3f\n",us,GetLocalNum(),i,p->playstate,p->pos.x,p->pos.y,p->pos.z);
 	}
 }
 
