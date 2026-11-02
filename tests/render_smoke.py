@@ -4,7 +4,7 @@
 
 Each scene runs in a fresh user folder (HK_USERDIR; net.ini with servervisibility=lan
 and no lobby, so nothing is announced), saves one frame (HK_SHOT, HK_FIXEDCLOCK=16)
-and is stopped. A scene fails when the game exits or saves nothing within 60 s, when
+and is stopped. A scene fails when the game exits or saves nothing within 60 s (180 s for Ultra), when
 its log has a sokol_gfx error or validation message (a Debug build validates every
 call; warnings are only shown), or when the frame is one flat color. The last two
 scenes draw with the Ultra graphics (HK_GRAPHICS=ultra), the second at a lake's shore.
@@ -36,9 +36,11 @@ SCENES = [
     ("game", dict(HK_AUTOSTART="1", HK_PLAY="1", HK_SHOT_FRAME="600", HK_FIXEDCLOCK="16")),
     # the Ultra graphics (renderer.h): HDR, shadows, water, grass, post-processing; a
     # backend without them (the fixed-function GL one) draws the game as Classic
-    ("ultra", dict(HK_AUTOSTART="1", HK_PLAY="1", HK_SHOT_FRAME="300", HK_FIXEDCLOCK="16", HK_GRAPHICS="ultra")),
+    # (low settings: the CI's software renderers draw them slowly)
+    ("ultra", dict(HK_AUTOSTART="1", HK_PLAY="1", HK_SHOT_FRAME="300", HK_FIXEDCLOCK="16", HK_GRAPHICS="ultra",
+                   HK_ULTRA_PREFS="1,1,1")),
     ("ultralake", dict(HK_AUTOSTART="1", HK_PLAY="1", HK_SHOT_FRAME="300", HK_FIXEDCLOCK="16", HK_GRAPHICS="ultra",
-                       HK_CAMERA="lake")),
+                       HK_ULTRA_PREFS="1,1,1", HK_CAMERA="lake")),
 ]
 
 
@@ -79,7 +81,8 @@ def run_scene(exe, name, env_extra, outdir):
     with open(log, "wb") as f:
         p = subprocess.Popen([exe], stdout=f, stderr=subprocess.STDOUT, env=env,
                              stdin=subprocess.DEVNULL, cwd=userdir)
-    end = time.time() + 60
+    # Ultra loads its HD textures first: slow in a Debug build on the CI's runners
+    end = time.time() + (180 if env_extra.get("HK_GRAPHICS") == "ultra" else 60)
     try:
         while time.time() < end and p.poll() is None:
             with open(log, "rb") as f:
