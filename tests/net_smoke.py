@@ -12,10 +12,10 @@
  - A second new client joining then gets the cloud in its snapshot, landed, with
    an age that fits; at the end of its life the server removes it (type 0) and
    the older client never got a smoke object at all.
-NET_TEST_PORT: the server's info port if not 27020 (net.ini of its HK_USERDIR)."""
+HK_TEST_PORT: the server's info port if not 27020 (net.ini of its HK_USERDIR)."""
 import os, socket, struct, sys, time
 
-SERVER = ("127.0.0.1", int(os.environ.get("NET_TEST_PORT", "27020")))
+SERVER = ("127.0.0.1", int(os.environ.get("HK_TEST_PORT", "27020")))
 REQUESTENTER, INFO, PLAYERPOSITION, SIMPLE = 1, 2, 3, 5
 UPDATESERVEROBJECT, SERVEROBJECTSNAPSHOT, THROWSMOKE = 12, 13, 20
 REQUESTINFO, ENTER, PORTACK, JOINGAME, PING, PINGREPLY = 1, 2, 4, 8, 12, 13

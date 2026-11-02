@@ -8,6 +8,7 @@
 #include "multiplay.h"
 #include "hugekilla.h"
 #include "sound.h"
+#include "props.h"
 #include <string.h>
 
 static int smokemode;      //the local player's grenades: 0 frag, 1 smoke
@@ -94,11 +95,13 @@ static int Fly(ServerObject *o,float sf)
 	for(int k=0;k<steps;k++)
 	{
 		float p[3]={o->pos.x,o->pos.y,o->pos.z},v[3]={o->vel.x,o->vel.y,o->vel.z};
+		Vector before=o->pos;
 		Vector next=o->pos+o->vel*(sf/steps);
-		int landed=SmokeFly(p,v,sf/steps,sv.gravity,GetHeight(next));
+		int landed=SmokeFly(p,v,sf/steps,sv.gravity,GetHeight(next));   //rock tops included
 		o->pos=Vector(p[0],p[1],p[2]);
 		o->vel=Vector(v[0],v[1],v[2]);
 		if(landed) return 1;
+		PropsBounce(o->pos,before,o->vel);   //off a trunk, as a frag grenade
 	}
 	return 0;
 }

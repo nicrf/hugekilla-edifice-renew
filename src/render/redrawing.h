@@ -29,6 +29,7 @@ void LoadScenery();
 void MoveUnnecessaryTextures();
 float DrawText(float,float,const char *);
 void Draw(float offset);
+void DrawProps(const Vector &eye,const Vector &dir);   //propsdraw.cpp: the rocks and trees, Classic
 
 #include "ase.h"
 

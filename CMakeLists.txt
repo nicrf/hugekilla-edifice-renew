@@ -253,6 +253,7 @@ set(SOURCES
   src/render/ase.cpp
   src/render/redrawing.cpp
   src/render/effects.cpp
+  src/render/propsdraw.cpp
   src/render/textures.cpp
   src/render/renderer.cpp
   ${HK_RENDER_SOURCES}
@@ -263,6 +264,8 @@ set(SOURCES
   src/game/land.cpp
   src/game/mapfile.cpp
   src/game/playing.cpp
+  src/game/props.cpp
+  src/game/propsgame.cpp
   src/game/smoke.cpp
   src/game/structures.cpp
   src/game/Vector.cpp
@@ -487,6 +490,10 @@ set(HK_TEST_INCLUDES ${SRC}/game ${SRC}/net ${SRC}/platform)   # "hktypes.h": DW
 add_executable(map_test tests/map_test.cpp src/game/mapfile.cpp)
 target_include_directories(map_test PRIVATE ${HK_TEST_INCLUDES})
 add_test(NAME map COMMAND map_test)
+# the rocks and trees that block: placement from the land, hash, collision (src/game/props.h)
+add_executable(props_test tests/props_test.cpp src/game/props.cpp)
+target_include_directories(props_test PRIVATE ${HK_TEST_INCLUDES})
+add_test(NAME props COMMAND props_test)
 # with HK_LOBBY_URL set (a running server/), also talks to the lobby (tests/net_lobby.py)
 add_executable(lobby_test tests/lobby_test.cpp src/net/lobby.cpp)
 target_include_directories(lobby_test PRIVATE ${SRC}/net)
@@ -511,7 +518,7 @@ if(EMSCRIPTEN)
   # the web build's unit tests run in Node.js (the toolchain's emulator), on the
   # real files (fileio_test makes folders)
   foreach(t worldrandom_test wire_test voice_test anticheat_test hmac_test fileio_test map_test
-      lobby_test signaling_test input_test smoke_test)
+      props_test lobby_test signaling_test input_test smoke_test)
     target_link_options(${t} PRIVATE -sNODERAWFS=1 -sALLOW_MEMORY_GROWTH=1 -sSTACK_SIZE=1MB)
   endforeach()
   target_link_options(lobby_test PRIVATE -sFETCH=1)   # lobby.cpp's emscripten_fetch
@@ -620,7 +627,7 @@ endif()
 option(EDIFICE_WERROR "Treat warnings in the game code as errors" OFF)
 if(EDIFICE_WERROR)
   set(HK_WERROR_TARGETS Edifice worldrandom_test wire_test voice_test anticheat_test hmac_test
-    fileio_test map_test lobby_test signaling_test smoke_test)
+    fileio_test map_test props_test lobby_test signaling_test smoke_test)
   if(EDIFICE_GNS)
     list(APPEND HK_WERROR_TARGETS gns_loopback_test gns_netplay_test gns_p2p_test)
   endif()

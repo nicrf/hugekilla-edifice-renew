@@ -63,6 +63,11 @@
 //SERVERHIT: you were hit, msg = by whom, msg2 = your life now (0: KILLED follows).
 #define SERVERHIT 28
 #define HITMODE 29
+//PROPSMODE (docs/PROPS.md): msg 1 = the rocks and trees block (props.h), 0 = there
+//are none; msg2 = the server's PropsHash of its land, which the client compares
+//with its own. Only to clients whose REQUESTENTER has HELLOCAP_PROPS (version.h), at
+//the join and when the server's props setting changes.
+#define PROPSMODE 30
 //smoke grenades (smoke.h): msg 1 = this server takes them now, 0 = not (a player
 //without HELLOCAP_SMOKE is in: he wouldn't see the smoke). Only to clients with
 //HELLOCAP_SMOKE, at the join and when it changes.

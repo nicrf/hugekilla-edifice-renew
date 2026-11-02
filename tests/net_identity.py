@@ -6,7 +6,8 @@ a repeated join request from the same address gets the same slot and port
 """
 import os, socket, struct, sys, time
 
-SERVER = ("127.0.0.1", int(os.environ.get("NET_TEST_PORT", "27020")))   # see run_netplay_tests.sh
+# HK_TEST_PORT: a server on another info port than the default 27020
+SERVER = ("127.0.0.1", int(os.environ.get("HK_TEST_PORT", "27020")))
 SIMPLE, INFO, REQUESTENTER = 5, 2, 1
 REQUESTINFO, ENTER = 1, 2
 MAGIC = 0x31564445

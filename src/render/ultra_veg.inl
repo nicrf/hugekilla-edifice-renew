@@ -1,10 +1,12 @@
 //Trees, bushes and rocks of the Ultra graphics, included by renderer_ultra.cpp.
 //
-//Purely visual: no collision, nothing on the network. Each client places them from
-//the land alone (a hash of the cell they stand in, the land's height, slope and
-//water), so every client sees the same ones; never on blocks (RUltraScene's
-//blocked), nor near the flags and stations (RUltraScene's avoid). They can hide a
-//player that a Classic player sees (BUILD.md).
+//The trees and the boulders are the game's props (src/game/props.h, RUltraScene's
+//props): they block players, bullets and grenades, the same for every player, and
+//Classic draws them too (propsdraw.cpp). Ultra adds bushes and small stones of its
+//own, purely visual: placed from the land alone (a hash of the cell they stand in,
+//the land's height, slope and water), so every client sees the same ones; never on
+//blocks (RUltraScene's blocked), nor near the flags and stations (RUltraScene's
+//avoid). A bush can hide a player that a Classic player sees (BUILD.md).
 //
 //The meshes are made here (no files): conifers of stacked cones, broadleaf trees
 //and bushes of lumpy blobs, rocks of displaced spheres; each with a lighter mesh
@@ -324,7 +326,7 @@ static int VegAvoid(float x,float y,float z,float radius)
 	return 0;
 }
 
-static void VegAdd(int mesh,float x,float y,float z,float scale,unsigned &s)
+static void VegAddTurned(int mesh,float x,float y,float z,float scale,float turn,float tint,float phase)
 {
 	if(vegtotal>=VEGMAXINST) return;
 	VegInstance in;
@@ -332,12 +334,27 @@ static void VegAdd(int mesh,float x,float y,float z,float scale,unsigned &s)
 	in.pos[1]=y;
 	in.pos[2]=z;
 	in.scale=scale;
-	in.turn=VegRand(s)*6.2831853f;
-	in.tint=VegRand(s);
+	in.turn=turn;
+	in.tint=tint;
 	in.pad=0;
-	in.phase=VegRand(s)*6.2831853f;
+	in.phase=phase;
 	veglists[mesh].push_back(in);
 	vegtotal++;
+}
+
+static void VegAdd(int mesh,float x,float y,float z,float scale,unsigned &s)
+{
+	float turn=VegRand(s)*6.2831853f,tint=VegRand(s),phase=VegRand(s)*6.2831853f;
+	VegAddTurned(mesh,x,y,z,scale,turn,tint,phase);
+}
+
+//an offset in the world, which repeats every landsize, into [-landsize/2, landsize/2)
+static float VegWrap(float d)
+{
+	float h=scene.landsize*.5f;
+	while(d>=h) d-=scene.landsize;
+	while(d<-h) d+=scene.landsize;
+	return d;
 }
 
 //what stands around the camera this frame
@@ -351,10 +368,37 @@ static void VegPlace()
 	float w=scene.waterheight;
 	float ex=scene.eye[0],ez=scene.eye[2];
 	unsigned seed=landhash;
-	//trees and bushes: an 8-unit cell each at most, thicker in forests
+	float trange=q>=2?260.0f:170.0f;
+	float rrange=q>=2?150.0f:90.0f;
+	//the game's trees and boulders (props.h): where they block
+	for(int i=0;i<scene.numprops;i++)
+	{
+		const RProp &pr=scene.props[i];
+		float dx=VegWrap(pr.x-ex),dz=VegWrap(pr.z-ez),d2=dx*dx+dz*dz;
+		float x=ex+dx,z=ez+dz;
+		if(pr.mesh>=2)
+		{
+			if(d2>rrange*rrange) continue;
+			int far=d2>55*55;
+			VegAddTurned((far?VEG_ROCK0FAR:VEG_ROCK0)+(pr.mesh-2)%3,x,pr.y,z,pr.scale,pr.turn,pr.tint,pr.phase*6.2831853f);
+			continue;
+		}
+		if(d2>trange*trange) continue;
+		int far=d2>75*75;
+		int mesh=pr.mesh==0?(far?VEG_CONIFERFAR:VEG_CONIFER):(far?VEG_TREEFAR:VEG_TREE);
+		VegAddTurned(mesh,x,pr.y-.15f,z,pr.scale,pr.turn,pr.tint,pr.phase*6.2831853f);
+		//a bush or two at its foot
+		unsigned s=(unsigned)(pr.phase*16777216.0f)^seed;
+		if(!far&&VegRand(s)<.4f)
+		{
+			float a=VegRand(s)*6.28f,bx=x+cosf(a)*2.2f,bz=z+sinf(a)*2.2f;
+			float bh=VegLand(bx,bz,0);
+			if(bh>w+1&&!VegAvoid(bx,bh,bz,12)) VegAdd(VEG_BUSH,bx,bh-.1f,bz,.6f+VegRand(s)*.5f,s);
+		}
+	}
+	//bushes: an 8-unit cell each at most, thicker in forests
 	const int tc=8;
 	int tcells=size/tc;
-	float trange=q>=2?260.0f:170.0f;
 	int r=(int)(trange/tc);
 	int cx0=(int)floorf(ex/tc),cz0=(int)floorf(ez/tc);
 	for(int dz=-r;dz<=r;dz++)
@@ -373,38 +417,15 @@ static void VegPlace()
 			float h=VegLand(x,z,&n);
 			if(h<w+1.5f||1-n.y>0.28f||h>w+60) continue;
 			if(VegAvoid(x,h,z,14)) continue;
-			float k=VegRand(s);
+			//the trees are the props now: what was a tree's cell stays empty
+			if(VegRand(s)<0.75f&&h<=w+30) continue;
 			int far=d2>75*75;
-			int mesh;
-			float scale;
-			if(k<0.4f||h>w+30)
-			{
-				mesh=far?VEG_CONIFERFAR:VEG_CONIFER;
-				scale=0.8f+VegRand(s)*0.6f;
-			}
-			else if(k<0.75f)
-			{
-				mesh=far?VEG_TREEFAR:VEG_TREE;
-				scale=0.75f+VegRand(s)*0.5f;
-			}
-			else
-			{
-				mesh=far?VEG_BUSHFAR:VEG_BUSH;
-				scale=0.7f+VegRand(s)*0.8f;
-			}
-			VegAdd(mesh,x,h-0.15f,z,scale,s);
-			//a bush or two at a tree's foot
-			if(mesh!=VEG_BUSH&&mesh!=VEG_BUSHFAR&&VegRand(s)<0.4f&&!far)
-			{
-				float a=VegRand(s)*6.28f,bx=x+cosf(a)*2.2f,bz=z+sinf(a)*2.2f;
-				float bh=VegLand(bx,bz,0);
-				if(bh>w+1&&!VegAvoid(bx,bh,bz,12)) VegAdd(VEG_BUSH,bx,bh-0.1f,bz,0.6f+VegRand(s)*0.5f,s);
-			}
+			VegAdd(far?VEG_BUSHFAR:VEG_BUSH,x,h-0.15f,z,0.7f+VegRand(s)*0.8f,s);
 		}
-	//rocks: a 4-unit cell each at most, more on slopes and shores, some in clusters
+	//stones: a 4-unit cell each at most, more on slopes and shores, some in clusters;
+	//small (the boulders are props), never blocking
 	const int rc=4;
 	int rcells=size/rc;
-	float rrange=q>=2?150.0f:90.0f;
 	r=(int)(rrange/rc);
 	cx0=(int)floorf(ex/rc);
 	cz0=(int)floorf(ez/rc);
@@ -430,9 +451,9 @@ static void VegPlace()
 			{
 				float rx=x+(i?(VegRand(s)-0.5f)*3:0),rz=z+(i?(VegRand(s)-0.5f)*3:0);
 				float rh=i?VegLand(rx,rz,0):h;
-				//mostly stones, now and then a boulder
+				//stones, now and then a bigger one, all below the props' smallest rock
 				float big=VegRand(s);
-				float scale=(i?0.25f:0.35f)+big*big*big*(i?0.6f:2.4f);
+				float scale=(i?0.25f:0.35f)+big*big*big*(i?0.25f:0.4f);
 				int k=(int)(VegRand(s)*3)%3;
 				VegAdd((far?VEG_ROCK0FAR:VEG_ROCK0)+k,rx,rh-0.2f*scale,rz,scale,s);
 			}

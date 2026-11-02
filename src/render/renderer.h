@@ -221,6 +221,15 @@ enum RMaterial
 };
 void RSetMaterial(int material);
 
+//a rock or a tree that blocks (src/game/props.h), at x, y, z of the first copy of
+//the world (0..landsize): Ultra draws its own version of it
+struct RProp
+{
+	float x,y,z,scale;
+	float turn,tint,phase;   //radians; 0..1; 0..1
+	int mesh;                //0 conifer, 1 broadleaf tree, 2..4 rock shapes
+};
+
 //the 3D scene's frame: the camera alone (world to eye, without the model), the
 //sun, the map's fog color and the land
 struct RUltraScene
@@ -245,6 +254,10 @@ struct RUltraScene
 	const char *landtex;
 	int landtexsize;
 	unsigned char snowground[16];
+	//the rocks and trees that block (valid until the frame is drawn); Ultra adds
+	//only bushes and small stones of its own
+	const RProp *props;
+	int numprops;
 };
 //the volumetric smoke of a frame (effects.cpp): lumps of density raymarched after
 //the scene, and the tunnels bullets leave through them (capsules where it thins)
