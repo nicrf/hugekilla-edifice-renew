@@ -727,6 +727,9 @@ static void UpdateLand()
 	const unsigned *bits=(const unsigned *)land;
 	for(size_t i=0;i<(size_t)size*size;i++) hash=(hash^bits[i])*16777619u;
 	hash^=(unsigned)(scene.waterheight*1000);
+	if(scene.landtex)
+		for(int i=0;i<scene.landtexsize*scene.landtexsize;i++) hash=(hash^(unsigned char)scene.landtex[i])*16777619u;
+	for(int i=0;i<16;i++) hash=(hash^scene.snowground[i])*16777619u;
 	if(landvalid&&hash==landhash) return;
 	landhash=hash;
 	landvalid=1;
@@ -759,6 +762,13 @@ static void UpdateLand()
 			float dirt=Smooth(0.66f,0.86f,nz2*0.6f+nz1*0.4f)*0.7f;
 			//layered: snow over rock over sand over grass and dirt
 			float rem=1;
+			//a block of snow ground (the map's texture): snow, no grass
+			if(scene.landtex&&scene.landtexsize>0)
+			{
+				int cell=size/scene.landtexsize;
+				int t=(unsigned char)scene.landtex[(x/cell)*scene.landtexsize+(z/cell)];
+				if(t<16&&scene.snowground[t]) snow=1;
+			}
 			float ws=snow*rem;
 			rem-=ws;
 			float wr=rock*rem;

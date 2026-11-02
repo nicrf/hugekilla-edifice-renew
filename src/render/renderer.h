@@ -232,6 +232,11 @@ struct RUltraScene
 	int underwater;
 	const float *land;    //heights, land[x*landsize+z], the world repeating every landsize
 	int landsize;
+	//the map's ground textures: landtex[x*landtexsize+z] is the one of the block of
+	//landsize/landtexsize units at x, z; snowground[i] says texture i is snow (no grass)
+	const char *landtex;
+	int landtexsize;
+	unsigned char snowground[16];
 };
 void RUltraBegin(const RUltraScene &scene);
 void RUltraWater();           //the water surface, here in the drawing order
