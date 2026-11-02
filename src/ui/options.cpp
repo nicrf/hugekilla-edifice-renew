@@ -306,11 +306,26 @@ static void SaveOptions()
 
 //reads the settings LoadControls doesn't know about (called at startup)
 
+static int Clampi(int v,int lo,int hi);
+//the fourth value of HK_ULTRA_PREFS, the trees and rocks (a later sub-option)
+#define ULTRA_EXTRA_PREFS(v) (void)(v)
+
 //Graphics: Classic or Ultra (renderer.h), as control.ini or HK_GRAPHICS says
 static void ApplyGraphics()
 {
 	const char *env=getenv("HK_GRAPHICS");   //debug aid: ultra or classic, over control.ini
 	if(env) ultrawanted=!strcmp(env,"ultra");
+	//debug aid: HK_ULTRA_PREFS="shadows,grass,water[,trees]" over control.ini (render_smoke)
+	const char *prefs=getenv("HK_ULTRA_PREFS");
+	if(prefs)
+	{
+		int v[4]={rultraprefs.shadows,rultraprefs.grass,rultraprefs.water,-1};
+		sscanf(prefs,"%d,%d,%d,%d",&v[0],&v[1],&v[2],&v[3]);
+		rultraprefs.shadows=Clampi(v[0],0,2);
+		rultraprefs.grass=Clampi(v[1],0,2);
+		rultraprefs.water=Clampi(v[2],0,1);
+		ULTRA_EXTRA_PREFS(v[3]);
+	}
 	RSetUltra(ultrawanted);
 }
 
