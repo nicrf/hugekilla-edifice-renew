@@ -1,6 +1,7 @@
 //server setup screen, shown by the main menu "Server" button before the server starts:
 //server name, game mode, capture and time limits, sky, terrain and scenery, each of the
-//world settings having a "Random" choice, and the map: a new random land or one saved
+//world settings having a "Random" choice, whether rocks and trees block (props, docs/PROPS.md),
+//and the map: a new random land or one saved
 //with the console's savemap (maps/<name>.map in the user folder, which then gives the
 //sky, terrain, scenery and buildings), and whether the game is announced on the
 //Internet list (edifice-lobby, lobbygame.cpp). Choices are kept in sv.ini and net.ini.
@@ -47,12 +48,13 @@ static const char *visibilities[]={"lan","public","friends","private"};
 static const char *visibilitynames[]={"LAN only","Public (listed)","Friends (game code)","Private (game code)"};
 #define NUMVISIBILITIES 4
 
-#define SETUPROWS 9
-#define MAPROW 7
-#define INTERNETROW 8
+#define SETUPROWS 10
+#define PROPSROW 7
+#define MAPROW 8
+#define INTERNETROW 9
 static const char *rowlabels[SETUPROWS]=
 {
-	"Server name","Game mode","Captures to win","Time limit","Sky","Terrain","Scenery","Map","Internet"
+	"Server name","Game mode","Captures to win","Time limit","Sky","Terrain","Scenery","Rocks and trees","Map","Internet"
 };
 
 #define PANELX1 -.95f
@@ -188,9 +190,9 @@ static void SaveSetup()
 	const char *netkeys[6]={"servername","serversky","serverterrain","serverscenery","servermap","servervisibility"};
 	const char *netvalues[6]={servername,sky,terrain,scenery,mapchoice>=0?mapnames[mapchoice]:"*",visibilities[visibility]};
 	SetIniValues(UserFile("net.ini"),netkeys,netvalues,6);
-	const char *svkeys[3]={"gamemode","capturelimit","timelimit"};
-	const char *svvalues[3]={mode,captures,timelimit};
-	SetIniValues(UserFile("sv.ini"),svkeys,svvalues,3);
+	const char *svkeys[4]={"gamemode","capturelimit","timelimit","props"};
+	const char *svvalues[4]={mode,captures,timelimit,sv_props?"1":"0"};
+	SetIniValues(UserFile("sv.ini"),svkeys,svvalues,4);
 }
 
 //picks a value for every "Random" choice, then starts the server
@@ -256,6 +258,7 @@ static void ChangeRow(int row,int dir)
 	case 4: Cycle(skychoice,numskies,dir); break;
 	case 5: Cycle(terrainchoice,NUMTERRAINS,dir); break;
 	case 6: Cycle(scenerychoice,NUMSCENERIES,dir); break;
+	case PROPSROW: sv_props=!sv_props; break;
 	case MAPROW: Cycle(mapchoice,nummaps,dir); setuperror[0]=0; break;
 	case INTERNETROW:
 		if(lobbyok) visibility=(visibility+dir+NUMVISIBILITIES)%NUMVISIBILITIES;
@@ -275,6 +278,7 @@ static int RowText(int row,char *text)
 	case 4: strcpy(text,skychoice>=0?skynames[skychoice]:"Random"); break;
 	case 5: strcpy(text,terrainchoice>=0?terrainnames[terrainchoice]:"Random"); break;
 	case 6: strcpy(text,scenerychoice>=0?scenerynames[scenerychoice]:"Random"); break;
+	case PROPSROW: strcpy(text,sv_props?"On":"Off"); break;
 	case MAPROW: strcpy(text,mapchoice>=0?mapnames[mapchoice]:"New random land"); break;
 	case INTERNETROW:
 		if(lobbyok) strcpy(text,visibilitynames[visibility]);
@@ -305,6 +309,9 @@ static const char *RowHelp(int row)
 	case 3: return "Length of a round";
 	case 4: case 5: case 6:
 		return mapchoice>=0?"The saved map gives the sky, terrain and scenery":"Random picks one when the server starts";
+	case PROPSROW:
+		return sv_props?"They stop players, bullets and grenades; older versions can't join":
+			"No rocks nor trees: older versions (0.5) can join";
 	case MAPROW:
 		return mapchoice>=0?"A map saved with savemap, buildings included":"A new land from the settings above";
 	case INTERNETROW:
@@ -411,12 +418,12 @@ void DrawServerSetup()
 	//what the row under the mouse (or picked with the keys) does
 	int helprow=hoverrow>=0?hoverrow:keyrow;
 	RColor3f(.6f,.6f,.6f);
-	UITextFit(LABELX,UITextY(-.3f,-.22f),RowHelp(helprow),PANELX2-.05f-LABELX);
+	UITextFit(LABELX,UITextY(-.39f,-.31f),RowHelp(helprow),PANELX2-.05f-LABELX);
 	if(setuperror[0])
 	{
-		UIRect(PANELX1+.02f,-.5f,PANELX2-.02f,-.4f,.6f,.15f,.1f,.35f);
+		UIRect(PANELX1+.02f,-.57f,PANELX2-.02f,-.47f,.6f,.15f,.1f,.35f);
 		RColor3f(1,.7f,.55f);
-		UITextFit(LABELX,UITextY(-.5f,-.4f),setuperror,PANELX2-.05f-LABELX);
+		UITextFit(LABELX,UITextY(-.57f,-.47f),setuperror,PANELX2-.05f-LABELX);
 	}
 	RColor3f(.45f,.45f,.45f);
 	const char *keys="Click or Left/Right: change    Up/Down: pick a row    Enter: start    Esc: back";

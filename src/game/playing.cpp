@@ -19,6 +19,7 @@
 #include "effects.h"
 #include "gamepad.h"
 #include "touch.h"
+#include "props.h"
 
 
 char menutext[5000];
@@ -352,6 +353,9 @@ float GetHeight(Vector pos)
 		}
 		blockpos.y-=1;
 	}
+	//the rocks are ground too (props.h): walked onto, bullets and grenades stop there
+	float rock=PropsHeight(pos);
+	if(height<rock) height=rock;
 	return height;
 }
 
@@ -378,13 +382,17 @@ void TickObjects(float sf)
 					object[i].vel/=1.2;
 				}
 				object[i].vel.y-=sv.gravity*mysf;
+				Vector before=object[i].pos;
 				object[i].pos+=object[i].vel*mysf;
+				PropsBounce(object[i].pos,before,object[i].vel);   //off a trunk
 				
 			}
 			if(object[i].type==4)
 			{
 				float prevy=object[i].pos.y;
+				Vector before=object[i].pos;
 				object[i].pos+=object[i].vel*mysf;
+				PropsBounce(object[i].pos,before,object[i].vel);   //a grenade off a trunk
 				//into the water (M13.5): a splash where it went in
 				if(fxprefs.impacts&&prevy>=WATERHEIGHT&&object[i].pos.y<WATERHEIGHT&&GetLandSmooth(object[i].pos.x,object[i].pos.z)<WATERHEIGHT)
 					FxWaterSplash(object[i].pos,2);
@@ -484,6 +492,11 @@ void TickObjects(float sf)
 				
 				Vector prev=object[i].pos;
 				object[i].pos+=Normalize(object[i].vel)*20*mysf;
+				//a rock or a trunk in the way: the bullet ends there, on the server too
+				//(AcBulletTick tests only the part of the step before it)
+				Vector propat;
+				int inprop=PropsSegmentHit(prev,object[i].pos,&propat);
+				if(inprop) object[i].pos=propat;
 				AcBulletTick(&object[i],prev);   //server: the players it hits (M11)
 				FxBulletThroughSmoke(prev,object[i].pos);   //Ultra: the smoke it crosses, pushed aside
 				//the water (M13.5): a splash where it goes in, then a wake of bubbles
@@ -529,6 +542,11 @@ void TickObjects(float sf)
 							}
 						}
 					}
+				}
+				if(inprop&&object[i].type)
+				{
+					if(fxprefs.impacts) FxBulletImpact(object[i].pos,Normalize(object[i].vel),1);
+					object[i].type=0;
 				}
 				
 			}
@@ -590,6 +608,7 @@ void Playloop()
 	}
 		
 	targlasttime=targtime;
+	PropsRefresh();   //which rocks and trees are there (blocks, stations)
 	for(i=0;i<MAXSERVEROBJS;i++)
 	{
 		if(sobject[i].type==1) sobject[i].dir=Normalize(CrossProduct(sobject[i].dir,Vector(0,1,0))*.01+sobject[i].dir);
@@ -680,6 +699,9 @@ void Play()
 			cur->firing=0;
 			cur->respawntime=0;
 			cur->pos=Vector(LANDGRIDSIZE+RND*LANDGRIDSIZE,100,LANDGRIDSIZE+RND*LANDGRIDSIZE);
+			//not into a tree or a rock (props.h)
+			for(int tries=0;tries<20&&!PropsSpawnFree(cur->pos.x,cur->pos.z);tries++)
+				cur->pos=Vector(LANDGRIDSIZE+RND*LANDGRIDSIZE,100,LANDGRIDSIZE+RND*LANDGRIDSIZE);
 			cur->vel=Vector(0,0,0);
 			cur->life=100;
 			int i;
@@ -1040,6 +1062,8 @@ void Play()
 		cv=Normalize(Vector(1,0,-1));if(GetHeight(cur->pos+cv*.7)>wmh){float dp=DotProduct(cv,cur->vel);if(dp>0) cur->vel-=dp*cv;}
 		cv=Normalize(Vector(-1,0,-1));if(GetHeight(cur->pos+cv*.7)>wmh){float dp=DotProduct(cv,cur->vel);if(dp>0) cur->vel-=dp*cv;}
 		cv=Normalize(Vector(-1,0,1));if(GetHeight(cur->pos+cv*.7)>wmh){float dp=DotProduct(cv,cur->vel);if(dp>0) cur->vel-=dp*cv;}
+		//the trunks: round walls, from the feet to the top of the head (props.h)
+		PropsPushPlayer(cur->pos,cur->vel,.5f,1.45f,.4f);
 		if(scraped&&curtime>cur->nextwallscrape)
 		{
 			SetSoundPosition(110,cur->pos+Vector(0,-1,0));
@@ -1243,10 +1267,12 @@ int HandleMenuKey(DWORD key)
 			}
 			if(number==1)
 			{
-				//aimed at the sky or past MAXBUILDDIST: the preview is red, keep placing
-				if(!PlaceStructure(1))
+				//aimed at the sky or past MAXBUILDDIST, or into a rock or a tree: the
+				//preview is red, keep placing
+				int placed=PlaceStructure(1);
+				if(placed<=0)
 				{
-					ConsoleDisplayText("Too far to build");
+					ConsoleDisplayText((char *)(placed<0?"A rock or a tree is in the way":"Too far to build"));
 					return 1;
 				}
 				menutext[0]=0;

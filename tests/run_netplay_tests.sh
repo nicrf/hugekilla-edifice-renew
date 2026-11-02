@@ -4,6 +4,9 @@
 # AddressSanitizer reports anything. Used by CI on Linux; also works locally:
 #   tests/run_netplay_tests.sh build/linux-debug/Edifice
 # Linux needs Xvfb (a virtual display) unless DISPLAY is already set.
+# Beside a game running on this machine (or the user's settings): HK_USERDIR=<a
+# folder with copies of data/*.ini, net.ini on other ports> HK_TEST_PORT=<its
+# infosendport> tests/run_netplay_tests.sh <binary>
 set -u
 BIN="$1"
 LOGDIR="${2:-netplay-logs}"
@@ -28,16 +31,23 @@ status=0
 # name@N: the same test in the world of HK_SEED=N, on top of the random one
 # (10, 26, 40: worlds where players 2 units apart stood ~100 units apart in height)
 # net_cookie@require: the same server vars plus ac_requirecookie 1 (docs/M11.md)
+# net_props@on|off: the rocks and trees that block on and off (docs/PROPS.md); the
+# other tests join as older builds (without HELLOCAP_PROPS): props 0 for them
 for run in net_handshake net_identity net_join net_fuzz net_voice net_voice@1 net_voice@2 \
 		net_voice@3 net_voice@10 net_voice@26 net_voice@40 net_map net_anticheat \
-		net_cookie net_cookie@require net_slots; do
+		net_cookie net_cookie@require net_slots net_props@on net_props@off; do
 	t="${run%@*}"
 	log="$LOGDIR/$run.log"
 	args=()
-	unset HK_SEED HK_AC_VARS
-	if [ "$t" = net_cookie ]; then
+	unset HK_SEED HK_PROPS_LOG
+	export HK_AC_VARS="props=0"
+	if [ "$t" = net_props ]; then
+		HK_AC_VARS="props=$([ "$run" = net_props@on ] && echo 1 || echo 0)"
+		export HK_PROPS_LOG=1
+		args=("$log" "$BIN" "${run#*@}")
+	elif [ "$t" = net_cookie ]; then
 		# short cookie time buckets (expiry check), room for its join requests
-		export HK_AC_VARS="ac_cookietime=1000 ac_ipenter=600"
+		export HK_AC_VARS="$HK_AC_VARS ac_cookietime=1000 ac_ipenter=600"
 		if [ "$run" = net_cookie@require ]; then
 			HK_AC_VARS="$HK_AC_VARS ac_requirecookie=1"
 			args=(require)

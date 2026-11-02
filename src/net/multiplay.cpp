@@ -27,6 +27,7 @@
 #include "anticheat.h"
 #include "hmac.h"
 #include "hktime.h"
+#include "props.h"
 #include <stdarg.h>
 #define MAXLOCALLIST 128
 #define PEERTIMEOUT 70000     //ms without a message before a peer is dropped
@@ -137,8 +138,8 @@ static void SendRequestEnter()
 	int len=2+nl+1;
 	len+=WriteVersionTrailer(&buf[len]);
 	int cookie=haveentercookie&&entercookieip==infosock.dest.sin_addr.s_addr;
-	len+=WriteHelloCaps(&buf[len],HELLOCAP_COOKIE|HELLOCAP_SERVERHITS|HELLOCAP_STABLESLOTS|HELLOCAP_POSSEQ,
-		cookie?entercookie:0);
+	len+=WriteHelloCaps(&buf[len],HELLOCAP_COOKIE|HELLOCAP_SERVERHITS|HELLOCAP_STABLESLOTS|HELLOCAP_POSSEQ|
+		HELLOCAP_PROPS,cookie?entercookie:0);
 	infosock.Send(buf,len);
 	infosock.Flush();
 }
@@ -169,6 +170,9 @@ int ac_lagcomp=300;         //ms of a shooter's ping the server rewinds, at most
 int ac_stableslots=1;       //1: a leaver frees its slot, the others keep their numbers (all clients able)
 float ac_posrate=2;         //positions per positionresendtime a client may send (more are dropped), 0: off
 int ac_moveclamp=0;         //1: a player moving faster than ac_maxspeed is held back to it (0: logged only)
+//not a check either: the rocks and trees that block (props.h, docs/PROPS.md). On, clients
+//without them (HELLOCAP_PROPS) are refused: they would walk and shoot through them
+int sv_props=1;             //sv.ini props, Server Setup "Rocks and trees"
 
 //server answers an info request, with its version
 static void SendInfo(SOCKADDR_IN dest)
@@ -189,7 +193,8 @@ static void SendInfo(SOCKADDR_IN dest)
 	buf[len++]=(char)sv.capturelimit;
 	//capabilities (M11 phases 2, 3a and 3b, version.h; ignored by older clients)
 	buf[len++]=(char)((ac_enable?HELLOCAP_COOKIE|(ac_requirecookie?HELLOCAP_REQUIRECOOKIE:0)|
-		(ac_serverhits?HELLOCAP_SERVERHITS:0):0)|(ac_stableslots?HELLOCAP_STABLESLOTS:0));
+		(ac_serverhits?HELLOCAP_SERVERHITS:0):0)|(ac_stableslots?HELLOCAP_STABLESLOTS:0)|
+		(sv_props?HELLOCAP_PROPS:0));
 	infosock.dest=dest;
 	infosock.Send(buf,len);
 	infosock.Flush();
@@ -345,6 +350,7 @@ static void AcInitVars()
 		{&ac_requirecookie,0,"ac_requirecookie"},{&ac_cookietime,0,"ac_cookietime"},
 		{&ac_serverhits,0,"ac_serverhits"},{0,&ac_hittolerance,"ac_hittolerance"},{&ac_lagcomp,0,"ac_lagcomp"},
 		{&ac_stableslots,0,"ac_stableslots"},{0,&ac_posrate,"ac_posrate"},{&ac_moveclamp,0,"ac_moveclamp"},
+		{&sv_props,0,"props"},
 	};
 	//debug (tests): HK_AC_VARS="ac_requirecookie=1 ac_cookietime=1000" wins over sv.ini
 	const char *env=getenv("HK_AC_VARS");
@@ -568,7 +574,8 @@ static int AcCountsDamage()
 //phase 3a, a step of a bullet from prev to o->pos: the server's bullet is the one
 //that hits. Each player is where the shooter saw it, rewound by its ping (at most
 //ac_lagcomp), with ac_hittolerance around its hitbox; the bullet stopped at the
-//land and the blocks already (TickObjects: line of sight). One player per bullet.
+//land and the blocks already, and o->pos was brought back to the rock or trunk it
+//meets (TickObjects: line of sight, props.h). One player per bullet.
 static void AcServerBullet(Object *o,Vector prev,int shooter)
 {
 	int rewind=shooter==GetLocalNum()?0:AcRewind(GetPlayer(shooter)->ping,ac_lagcomp);
@@ -780,6 +787,27 @@ static void AcSendHitMode(int i)
 	clientsock[i].SendReliable(mode.b,sizeof(mode.b),0);
 }
 
+//whether the rocks and trees block, and the server's props, to client i if it has them
+static void SendPropsMode(int i)
+{
+	if(!(acplayer[i].caps&HELLOCAP_PROPS)) return;
+	SimpleBuf mode=MakeSimple(PROPSMODE,sv_props!=0,PropsLandHash());
+	clientsock[i].SendReliable(mode.b,sizeof(mode.b),0);
+}
+
+//every server frame: the props setting, here and again to the clients when it
+//changes on the console (a client of an older build stays as it was: it only
+//matters for joining, docs/PROPS.md)
+static void PropsServerFrame()
+{
+	static int last=-1;
+	PropsSetEnabled(sv_props);
+	if(last>=0&&(sv_props!=0)!=last)
+		for(int i=1;i<numplayers;i++)
+			if(slotused[i]&&GetPlayer(i)->playstate>=10) SendPropsMode(i);
+	last=sv_props!=0;
+}
+
 //every server frame: where each player is (the shooters' lag), and the hit mode
 //again to the clients when ac_serverhits or ac_enable change on the console
 static void AcServerFrame()
@@ -942,6 +970,7 @@ void StartServer()
 	if(server) return;
 	Disconnect();
 	server=1;
+	PropsSetEnabled(sv_props);
 	joinsecretset=0;   //a new join cookie secret for each game hosted (M11 phase 2)
 	memset(acplayer,0,sizeof(acplayer));   //the host's position history of a previous game
 	LoadNetSettings();
@@ -1009,6 +1038,7 @@ void Disconnect()
 	server=0;
 	connected=0;
 	clientserverhits=0;
+	PropsSetEnabled(1);   //no server to say otherwise: drawn (a land in the menus)
 	numplayers=0;
 	memset(slotused,0,sizeof(slotused));
 	VoiceReset();
@@ -1131,6 +1161,7 @@ void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pn
 				GetPlayer(pnum)->playstate=10;
 				AcJoin(pnum);
 				AcSendHitMode(pnum);
+				SendPropsMode(pnum);
 				
 				ConsoleDisplayText("received blockinfo acknowledgement, sending objects and join game");
 				break;
@@ -1215,6 +1246,7 @@ void ServerLoop()
 {
 	GTick();
 	LobbyHostLoop(UsedSlots());
+	PropsServerFrame();
 	AcServerFrame();
 	static Message msg;
 	SOCKADDR_IN source;
@@ -1254,6 +1286,17 @@ void ServerLoop()
 					RefuseClient(source,VERSIONMISMATCH,message);
 					break;
 				}
+				HelloCaps caps;
+				ReadHelloCaps((char *)&msg+trailer,msglen-trailer,&caps);
+				//the rocks and trees block here: a build without them would walk and
+				//shoot through them (docs/PROPS.md). The 0.5.x client shows "update
+				//the game" (VERSIONMISMATCH), an original one the text.
+				if(sv_props&&!(caps.caps&HELLOCAP_PROPS))
+				{
+					ConsoleDisplayText("refused, client without rocks and trees (props 1)");
+					RefuseClient(source,VERSIONMISMATCH,"This server has rocks and trees: update the game");
+					break;
+				}
 				//a retried request (its ENTER got lost) gets the same slot again
 				int known;
 				for(known=1;known<numplayers;known++)
@@ -1270,8 +1313,6 @@ void ServerLoop()
 					break;
 				}
 				//no slot, nothing sent but a small answer, before the address is proven
-				HelloCaps caps;
-				ReadHelloCaps((char *)&msg+trailer,msglen-trailer,&caps);
 				if(!JoinAddressProven(source,&caps,msglen)) break;
 				if(addplayer<0)
 				{
@@ -1525,6 +1566,8 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 				char text[200];
 				if(type==SERVERFULL)
 					strcpy(text,"Can't join:\rthe server is full");
+				else if((int)msg==EDIFICE_PROTOCOL_VERSION)   //same protocol: it needs something newer
+					strcpy(text,"Can't join: the server\rneeds a newer build.\rUpdate the game.");
 				else
 					snprintf(text,sizeof(text),"Can't join: server is\rprotocol %d, you %d.\rUpdate the game.",(int)msg,EDIFICE_PROTOCOL_VERSION);
 				ConsoleDisplayText(text);
@@ -1560,6 +1603,7 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 					connected=1;
 					SetLocalNum(msg2);
 					clientserverhits=0;   //until this server says otherwise (HITMODE)
+					PropsSetEnabled(0);   //and none until it says it has them (PROPSMODE)
 					GetLocalPlayer()->playstate=1;
 					GetLocalPlayer()->timeout=curtime+PEERTIMEOUT;
 					numplayers=msg2+1;
@@ -1622,6 +1666,22 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 				SetSoundPosition(msg2+1,GetPlayer(msg)->pos);
 				if(msg2<500) PlaySound(msg2+1,0);
 				else PlaySound(msg2,0);
+				break;
+			}
+		case PROPSMODE:
+			{
+				//the server's rocks and trees (docs/PROPS.md): ours come from the same
+				//land; the hashes say whether both sides built the same ones
+				if(!connected) break;
+				PropsSetEnabled(msg!=0);
+				char text[120];
+				if(!msg) snprintf(text,sizeof(text),"the server has no rocks and trees");
+				else if(msg2==PropsLandHash())
+					snprintf(text,sizeof(text),"rocks and trees: %d, same as the server's (%08x)",PropsCount(),(unsigned)msg2);
+				else
+					snprintf(text,sizeof(text),"rocks and trees differ from the server's (%08x, ours %08x)",(unsigned)msg2,PropsLandHash());
+				ConsoleDisplayText(text);
+				if(getenv("HK_PROPS_LOG")) fprintf(stderr,"%s\n",text);
 				break;
 			}
 		case HITMODE:

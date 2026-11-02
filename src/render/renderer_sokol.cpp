@@ -51,6 +51,7 @@ static sg_view whiteview;         //texturing off, or a slot never filled: GL dr
 static sg_buffer vbuf;
 static size_t vbufsize;
 static int ztozero;               //the API's depth range is 0..1 (not GL's -1..1)
+static int metal;                 //Submit waits for the frame in flight before writing
 
 //the offscreen frame, at the drawable's size
 static int targetw,targeth;
@@ -134,6 +135,7 @@ void RBackendInit()
 	sg_setup(&desc);
 	sg_backend backend=sg_query_backend();
 	ztozero=backend!=SG_BACKEND_GLCORE&&backend!=SG_BACKEND_GLES3;
+	metal=backend==SG_BACKEND_METAL_MACOS||backend==SG_BACKEND_METAL_IOS||backend==SG_BACKEND_METAL_SIMULATOR;
 	drawshader=sg_make_shader(draw_shader_desc(backend));
 	presentshader=sg_make_shader(present_shader_desc(backend));
 
@@ -652,6 +654,21 @@ static void Submit()
 		frameuniforms.clear();
 		return;
 	}
+	//Metal: sokol_gfx copies a transient write into the frame's slot at once, but only
+	//waits for the frame that last used that slot (SG_NUM_INFLIGHT_FRAMES ago) when the
+	//frame's command buffer is made, at its first pass. Written before it, the vertices
+	//overwrote those of a frame the GPU was still drawing: with the Ultra scene keeping
+	//the GPU busy, its last draws (the gun, the HUD, the menus) flashed with the next
+	//frame's vertices. An empty compute pass makes the command buffer (and waits) first.
+	if(metal)
+	{
+		sg_pass sync;
+		memset(&sync,0,sizeof(sync));
+		sync.compute=true;
+		sync.label="frame sync";
+		sg_begin_pass(&sync);
+		sg_end_pass();
+	}
 	size_t bytes=frameverts.size()*sizeof(RVertex);
 	if(bytes>vbufsize)
 	{
@@ -798,6 +815,7 @@ void RSokolEndFrame()
 	sg_draw(0,3,1);
 	sg_end_pass();
 	sg_commit();
+	RSokolDumpFrame(colorimage,targetw,targeth);
 	RSokolPresentNative();
 	TexSokolEndFrame();
 }

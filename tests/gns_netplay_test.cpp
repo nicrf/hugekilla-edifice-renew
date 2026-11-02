@@ -19,6 +19,7 @@
 #include "multiplaystruct.h"
 #include "netmsg.h"
 #include "gnslink.h"
+#include "version.h"
 
 uint32_t HKTicks()   //system_sdl.cpp isn't linked: no SDL here
 {
@@ -119,7 +120,10 @@ static int Enter(Client &c)
 				req[1]=nl;
 				memcpy(&req[2],c.name,nl+1);
 				memcpy(&req[2+nl+1],trailer,trailerlen);
-				c.infosock->Send(req,2+nl+1+trailerlen);
+				//a build with the rocks and trees (version.h): a server with props 1
+				//refuses the others
+				req[2+nl+1+trailerlen]=HELLOCAP_PROPS;
+				c.infosock->Send(req,2+nl+1+trailerlen+1);
 			}
 			c.infosock->Flush();
 		}

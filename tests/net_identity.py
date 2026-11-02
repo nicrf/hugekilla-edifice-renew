@@ -4,9 +4,10 @@ a repeated join request from the same address gets the same slot and port
 
     HK_AUTOSTART=1 <Edifice binary> &   then   python3 tests/net_identity.py
 """
-import socket, struct, sys, time
+import os, socket, struct, sys, time
 
-SERVER = ("127.0.0.1", 27020)
+# HK_TEST_PORT: a server on another info port than the default 27020
+SERVER = ("127.0.0.1", int(os.environ.get("HK_TEST_PORT", "27020")))
 SIMPLE, INFO, REQUESTENTER = 5, 2, 1
 REQUESTINFO, ENTER = 1, 2
 MAGIC = 0x31564445

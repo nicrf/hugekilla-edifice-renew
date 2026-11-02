@@ -11,7 +11,8 @@ either; malformed VOICE messages are never relayed. Last, A stands next to the
 host and sends garbage frames, which the host decodes (opus must reject them)."""
 import os, socket, struct, sys, time
 
-SERVER = ("127.0.0.1", 27020)
+# HK_TEST_PORT: a server on another info port than the default 27020
+SERVER = ("127.0.0.1", int(os.environ.get("HK_TEST_PORT", "27020")))
 REQUESTENTER, INFO, PLAYERPOSITION, SIMPLE, VOICE = 1, 2, 3, 5, 16
 REQUESTINFO, ENTER, PORTACK, JOINGAME, PING, PINGREPLY = 1, 2, 4, 8, 12, 13
 RELIABLE, LASTRELIABLE, ACK = 0xFF, 0xFE, 0xFD
