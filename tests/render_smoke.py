@@ -39,7 +39,7 @@ SCENES = [
     # (low settings and a small window, small_window: the CI's software renderers
     # draw them slowly)
     ("ultra", dict(HK_AUTOSTART="1", HK_PLAY="1", HK_SHOT_FRAME="300", HK_FIXEDCLOCK="16", HK_GRAPHICS="ultra",
-                   HK_ULTRA_PREFS="1,1,0")),
+                   HK_ULTRA_PREFS="1,1,1")),
     ("ultralake", dict(HK_AUTOSTART="1", HK_PLAY="1", HK_SHOT_FRAME="300", HK_FIXEDCLOCK="16", HK_GRAPHICS="ultra",
                        HK_ULTRA_PREFS="1,1,1", HK_CAMERA="lake")),
 ]
