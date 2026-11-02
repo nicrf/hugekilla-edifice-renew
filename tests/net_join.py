@@ -9,7 +9,8 @@ NET_JOIN_DUMP=<dir> also saves every message and datagram received there
 (seeds for tests/fuzz, and what tests/net_map.py checks)."""
 import math, os, socket, struct, sys, time
 
-SERVER = ("127.0.0.1", 27020)
+# HK_TEST_PORT: a server on another info port than the default 27020
+SERVER = ("127.0.0.1", int(os.environ.get("HK_TEST_PORT", "27020")))
 REQUESTENTER, INFO, PLAYERPOSITION, LANDINFO, BLOCKS, CHATMESSAGE = 1, 2, 3, 4, 7, 8
 FIREGUN, SERVERVARS, UPDATESERVEROBJECT, SNAPSHOT, KILLEDPOSITION, RGD = 10, 11, 12, 13, 14, 15
 PLAYERNAMES, SIMPLE = 6, 5

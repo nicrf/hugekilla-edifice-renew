@@ -1,11 +1,13 @@
 """Checks the netplay version handshake against a running local server:
     HK_AUTOSTART=1 <Edifice binary> &  then  python3 tests/net_handshake.py
 (server info port 27020, see data/net.ini)."""
-import socket, struct, sys, time
+import os, socket, struct, sys, time
 
-SERVER = ("127.0.0.1", 27020)
+# HK_TEST_PORT: a server on another info port than the default 27020
+SERVER = ("127.0.0.1", int(os.environ.get("HK_TEST_PORT", "27020")))
 SIMPLE, INFO, REQUESTENTER, CHATMESSAGE = 5, 2, 1, 8
 REQUESTINFO, ENTER, SERVERFULL, VERSIONMISMATCH = 1, 2, 15, 26
+HELLOCAP_PROPS = 64
 MAGIC = 0x31564445
 
 
@@ -92,12 +94,31 @@ refused = any(len(g) >= 2 and g[0] == SIMPLE and g[1] == VERSIONMISMATCH for g i
 print("other protocol REQUESTENTER ->", "VERSIONMISMATCH" if refused else "accepted?!")
 ok &= refused
 
-# 4. same version is accepted (ENTER)
-s.sendto(packet(bytes([REQUESTENTER, 4]) + b"Same\x00" + trailer(layout, proto=proto, ver=ver.encode())), SERVER)
+# 4. same version is accepted (ENTER), with the capabilities of this build that a
+# server may require: the rocks and trees (HELLOCAP_PROPS, docs/PROPS.md)
+caps = t[11 + vlen + 4] if len(t) > 11 + vlen + 4 else 0
+s.sendto(packet(bytes([REQUESTENTER, 4]) + b"Same\x00" + trailer(layout, proto=proto, ver=ver.encode()) +
+                bytes([HELLOCAP_PROPS])), SERVER)
 got = recv_all(s, 2.5)
 entered = any(len(g) >= 2 and g[0] == SIMPLE and g[1] == ENTER for g in got)
 print("same-version REQUESTENTER ->", "ENTER" if entered else "no ENTER (types: %s)" % [g[:2] for g in got])
 ok &= entered
+
+# 5. the same version from a build without the rocks and trees (0.5.x): refused with
+# its text if the server has them (INFO says so), else accepted
+s2 = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s2.bind(("127.0.0.1", 0))
+s2.sendto(packet(bytes([REQUESTENTER, 5]) + b"Older\x00" + trailer(layout, proto=proto, ver=ver.encode())), SERVER)
+got = recv_all(s2, 2.5)
+entered = any(len(g) >= 2 and g[0] == SIMPLE and g[1] == ENTER for g in got)
+chats = [g for g in got if g and g[0] == CHATMESSAGE]
+if caps & HELLOCAP_PROPS:
+    print("REQUESTENTER without rocks and trees ->", "ENTER?!" if entered else "refused",
+          "| text:", chats[0][5:].decode(errors="replace") if chats else None)
+    ok &= not entered and any(b"rocks and trees" in c for c in chats)
+else:
+    print("REQUESTENTER without rocks and trees (server without them) ->", "ENTER" if entered else "refused?!")
+    ok &= entered
 
 print("ALL OK" if ok else "SOME CHECKS FAILED")
 sys.exit(0 if ok else 1)

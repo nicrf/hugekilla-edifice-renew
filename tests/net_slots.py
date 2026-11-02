@@ -19,7 +19,8 @@ local server: slots 1 to 4.
 The server log (its stderr) must show the drops."""
 import math, os, socket, struct, sys, time
 
-SERVER = ("127.0.0.1", 27020)
+# HK_TEST_PORT: a server on another info port than the default 27020
+SERVER = ("127.0.0.1", int(os.environ.get("HK_TEST_PORT", "27020")))
 REQUESTENTER, INFO, PLAYERPOSITION, SIMPLE, FIREGUN = 1, 2, 3, 5, 10
 REQUESTINFO, ENTER, EXIT, PORTACK, PLAYERNAMES, JOINGAME, DELETEPLAYER, PING, PINGREPLY = 1, 2, 3, 4, 6, 8, 11, 12, 13
 KILLED, CHANGETEAM, SERVERHIT = 19, 20, 28
