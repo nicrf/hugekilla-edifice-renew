@@ -485,6 +485,7 @@ void TickObjects(float sf)
 				Vector prev=object[i].pos;
 				object[i].pos+=Normalize(object[i].vel)*20*mysf;
 				AcBulletTick(&object[i],prev);   //server: the players it hits (M11)
+				FxBulletThroughSmoke(prev,object[i].pos);   //Ultra: the smoke it crosses, pushed aside
 				//the water (M13.5): a splash where it goes in, then a wake of bubbles
 				//(the bullet itself keeps its speed: what it hits is the game's)
 				if(fxprefs.impacts&&object[i].type&&object[i].pos.y<WATERHEIGHT)

@@ -533,6 +533,10 @@ void AseObj::Draw(Vector pos,Vector x,Vector y)
 				v.z=curvect->z;
 				v.r=v.g=v.b=curface->pnt[point]->curcolor;
 				v.a=1;
+				//the model's own normal, for the Ultra graphics' lighting
+				v.nx=curface->pnt[point]->nvctr.x;
+				v.ny=curface->pnt[point]->nvctr.y;
+				v.nz=curface->pnt[point]->nvctr.z;
 				if(curtex>5)
 				{
 					v.u=curface->tex[point].u;
@@ -554,5 +558,7 @@ void AseObj::Draw(Vector pos,Vector x,Vector y)
 	}
 	
 	if(part.count) parts.push_back(part);
+	RSetMaterial(foliage?RMAT_FOLIAGE:RMAT_MODEL);   //Ultra only
 	RDrawMesh(Mat4From(m),verts.data(),parts.data(),(int)parts.size());
+	RSetMaterial(RMAT_NONE);
 }
