@@ -269,7 +269,7 @@ Les joueurs distants sautent et reviennent en arrière : chaque client simule so
 - **Tâches :**
   0. Mesurer et préparer : simulateur de réseau (`HK_NETSIM`), mesure automatique de la synchronisation (`tests/net_sync.py`), physique d'un joueur sortie dans une fonction pure (`MovePlayer`).
 
-     *Fait :* `HK_NETSIM` dans `Sock`, `HK_SYNCLOG`, `HK_MAXFPS`, `tests/net_sync.py` ; chiffres de départ dans `docs/M16.md`.
+     *Fait :* `HK_NETSIM` dans `Sock`, `HK_SYNCLOG`, `HK_MAXFPS`, `tests/net_sync.py` ; chiffres de départ dans `docs/M16.md` ; `MovePlayer` (`src/game/movement.cpp`, `tests/movement_test.cpp`), comportement inchangé.
   1. Tick fixe à 60 Hz, rendu interpolé entre deux ticks.
   2. Mouvement décidé par le serveur d'après des commandes d'entrée numérotées (INPUTCMD, capacité `HELLOCAP_INPUTS` 256, deuxième octet de capacités).
   3. Prédiction côté client et réconciliation.

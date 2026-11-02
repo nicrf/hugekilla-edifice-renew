@@ -21,6 +21,7 @@
 #include "gamepad.h"
 #include "touch.h"
 #include "props.h"
+#include "movement.h"
 #include <chrono>
 
 
@@ -645,6 +646,59 @@ void SyncLogFrame()
 	}
 }
 
+static const MoveWorld moveworld={GetHeight,PropsPushPlayer};
+
+//the sounds and smoke of a player's move (MovePlayer)
+static void PlayerMoveEffects(Player *cur,const MoveEvents &ev)
+{
+	int soundnum=cur==GetLocalPlayer()?170:171;   //the jetpack
+	if(ev.thrust==1)
+	{
+		Vector targ=ev.thrustdir;
+		SetSoundPosition(soundnum,ev.thrustpos);
+		for(int i=0;i<MAXPARTICLES;i++)
+		{
+			if(particle[i].type==0)
+			{
+				particle[i].type=3;
+				particle[i].pos=ev.thrustpos-targ+Vector(RND*2-1,0,RND*2-1)*.1;
+				particle[i].vel=targ*-.4+Vector(RND-.5,RND-.5,RND-.5)*.1;
+				particle[i].timeout=curtime+3000;
+				break;
+			}
+		}
+		if(!cur->wasthrusting)
+		{
+			PlaySound(soundnum,1);
+			cur->wasthrusting=1;
+		}
+	}
+	else if(ev.thrust==0&&cur->wasthrusting)
+	{
+		StopSound(soundnum);
+		cur->wasthrusting=0;
+	}
+	if(ev.landed&&curtime>cur->nextfootsteps)
+	{
+		SetSoundPosition(120,ev.landpos+Vector(0,-2,0));
+		PlaySound(120,0);
+		cur->nextfootsteps=curtime+300;
+		SetSoundPosition(130,ev.landpos+Vector(0,-1,0));
+		PlaySound(130,0);
+	}
+	if(ev.walked&&curtime>cur->nextfootsteps)
+	{
+		SetSoundPosition(100,ev.walkpos+Vector(0,-2,0));
+		PlaySound(100,0);
+		cur->nextfootsteps=curtime+600;
+	}
+	if(ev.splash)
+	{
+		SetSoundPosition(140,ev.splashpos+Vector(0,-1,0));
+		PlaySound(140,0);
+	}
+}
+
 //handles all physics, movement, etc.
 
 void Play()
@@ -775,16 +829,7 @@ void Play()
 		Player *cur=GetPlayer(i);
 		if(cur!=GetLocalPlayer())
 			MakeClose(&cur->pos);
-		Vector prevvel=cur->vel;
-		
-		cur->fwd=Normalize(cur->fwd);
-		cur->tilt=Normalize(cur->tilt);
-		cur->dir=Normalize(VectMult(cur->tilt,cur->fwd,Vector(0,1,0),CrossProduct(cur->dir,Vector(0,1,0)))+cur->inaccuracy);
-		cur->inaccuracy+=cur->inaccuracyvel;
-		cur->inaccuracyvel/=1.33;
-		cur->inaccuracy/=1.12;
-
-		if(cur->gunkick<0){cur->kickvel=0;cur->gunkick=0;}
+		AimPlayer(cur);
 		
 		if(cur!=GetLocalPlayer()&&cur->timeout>curtime+100000&&IsServer())
 		{
@@ -802,317 +847,15 @@ void Play()
 			}
 		
 		}
-		float oyv=cur->vel.y;
-		int underwater=0;
-		if(cur->pos.y-2<WATERHEIGHT) underwater=1;
-		if(underwater)
-		{
-			cur->vel.y-=.01*sf;
-			cur->vel/=powf(2.3,sf);
-			Vector right=Normalize(CrossProduct(cur->dir,Vector(0,1,0)));
-			if(cur==GetLocalPlayer()&&padmove.active)
-				cur->vel+=(padmove.fwd*cur->dir*sv.walkaccelerate+padmove.strafe*right*sv.strafeaccelerate)*sf;
-			else
-			{
-				cur->vel+=((cur->up*cur->dir-cur->down*cur->dir)*sv.walkaccelerate)*sf;
-				cur->vel+=((cur->rstrafe-cur->lstrafe)*right*sv.strafeaccelerate)*sf;
-			}
-		}
-		else
-		{
-			cur->vel.y-=sv.gravity*sf;
-		}
-		float yoffset=.4;
-		float centerheight=GetHeight(cur->pos-Vector(0,yoffset,0));
-		float groundheight=centerheight;
-		float xpheight=GetHeight(cur->pos+Vector(.4,-yoffset,0));
-		float xnheight=GetHeight(cur->pos+Vector(-.4,-yoffset,0));
-		float zpheight=GetHeight(cur->pos+Vector(0,-yoffset,.4));
-		float znheight=GetHeight(cur->pos+Vector(0,-yoffset,-.4));
-
-#define EQUALHEIGHT -1.1
-		if(xpheight<cur->pos.y-EQUALHEIGHT)
-		{
-			if(xpheight>groundheight) groundheight=xpheight;
-		}
-		if(xnheight<cur->pos.y-EQUALHEIGHT)
-		{
-			if(xnheight>groundheight) groundheight=xnheight;
-		}
-		if(zpheight<cur->pos.y-EQUALHEIGHT)
-		{
-			if(zpheight>groundheight) groundheight=zpheight;
-		}
-		if(znheight<cur->pos.y-EQUALHEIGHT)
-		{
-			if(znheight>groundheight) groundheight=znheight;
-		}
-		xpheight=GetHeight(cur->pos+Vector(.6,-yoffset,0));
-		xnheight=GetHeight(cur->pos+Vector(-.6,-yoffset,0));
-		zpheight=GetHeight(cur->pos+Vector(0,-yoffset,.6));
-		znheight=GetHeight(cur->pos+Vector(0,-yoffset,-.6));
-
-		cur->thrustfuel+=sv.thrustrechargerate*sf;
-		if(cur->thrustfuel>1) cur->thrustfuel=1;
-		if(cur->hanggliding==0)
-		//alive only (playstate 10): a dead player waiting to respawn fell up with it
-		if(cur->jetpack&&cur->playstate==10&&cur->thrustfuel>0&&sv.thrustrechargerate)
-		{
-			cur->thrustfuel-=sv.thrustuse*sf;
-			Vector targ;
-			if(sv.chopperthrust)
-			{
-				targ=GetRight(cur->dir,Vector(0,1,0));
-				targ.x/=4;
-				targ.z/=4;
-			}
-			else
-			{
-				targ.x=targ.z=0;
-				targ.y=1;
-			}
-			cur->vel+=targ*.05*sf;
-			if(speedpenalty) cur->vel.y-=.02*sf;
-			int soundnum=cur==GetLocalPlayer()?170:171;
-			SetSoundPosition(soundnum,cur->pos);
-			for(int n=0;n<1;n++)
-			{
-				for(int i=0;i<MAXPARTICLES;i++)
-				{
-					if(particle[i].type==0)
-					{
-						particle[i].type=3;
-						particle[i].pos=cur->pos-targ+Vector(RND*2-1,0,RND*2-1)*.1;
-						particle[i].vel=targ*-.4+Vector(RND-.5,RND-.5,RND-.5)*.1;
-						particle[i].timeout=curtime+3000;
-						break;
-					}
-				}
-			}
-			if(!cur->wasthrusting)
-			{
-				PlaySound(soundnum,1);
-				cur->wasthrusting=1;
-			}
-		}
-		else
-		{
-			if(cur->wasthrusting)
-			{
-				int soundnum=cur==GetLocalPlayer()?170:171;
-				StopSound(soundnum);
-				cur->wasthrusting=0;
-			}
-		}
-		Vector topheadheight=cur->pos+Vector(0,.4,0);
-		if(GetHeight(topheadheight)>topheadheight.y)
-		{
-			cur->vel.y=cur->vel.y/powf(1.6,sf)-.1*sf;
-			cur->vel/=powf(1.3,sf);
-			float f=.5*sf;
-			if(cur->pos.y<groundheight+1.5)
-			{
-				cur->vel.x+=(xnheight-xpheight)*f;
-				cur->vel.z+=(znheight-zpheight)*f;
-				cur->vel.x/=powf(2.4,fabs(xnheight-xpheight));
-				cur->vel.z/=powf(2.4,fabs(znheight-zpheight));
-			}
-		}
-		if(cur->hangglide&&cur->playstate==10&&cur->vel.y<-.2&&Magnitude(cur->vel)>.4)
-		{
-			cur->hanggliding=1;
-		}
-		//the glider folds when its key is released (it stayed out, and the jetpack
-		//sharing that key did nothing, until landing). Other players' gliding state
-		//comes from the network, so only the local player.
-		if(cur==GetLocalPlayer()&&!cur->hangglide)
-			cur->hanggliding=0;
-		float roll;
-		roll=0;
-		if(cur->hanggliding)
-		{
-			Vector right=Normalize(CrossProduct(cur->fwd,Vector(0,1,0)));
-			Vector mul=right*cur->vel;
-			roll=DotProduct(right,cur->vel)*-80;
-		}
-		if(cur->hanggliding)
-		{
-			cur->vel=(cur->vel*10+Magnitude(cur->vel)*Normalize(cur->dir+Vector(0,.2,0)))/11;
-			cur->vel/=powf(1.004,sf);
-			if(Magnitude(cur->vel)<.2) cur->hanggliding=0;
-			cur->roll=(cur->roll*15+roll)/16;
-			if(Magnitude(cur->vel)>1.2) cur->vel/=powf(1.02,sf);
-		}
-		else
-		{
-			cur->roll/=powf(1.1,sf);
-		}
-		if(fabs(cur->roll)>50) cur->roll/=1.01;
-		if(cur->pos.y<groundheight+1.45) cur->pos.y=groundheight+1.45;
-		if(cur->pos.y<groundheight+1.5)
-		{
-			cur->hanggliding=0;
-			if(cur->jump&&cur->playstate==10)
-			{
-				cur->vel.y+=.45;
-				cur->jump=0;
-			}
-	
-			if(cur->vel.y<=-.8&&curtime>cur->nextfootsteps)
-			{
-				SetSoundPosition(120,cur->pos+Vector(0,-2,0));
-				PlaySound(120,0);
-				cur->nextfootsteps=curtime+300;
-				SetSoundPosition(130,cur->pos+Vector(0,-1,0));
-				PlaySound(130,0);
-			}
-			Vector right=Normalize(CrossProduct(cur->dir,Vector(0,1,0)));
-			Vector targ=((float)cur->up*cur->fwd-(float)cur->down*cur->fwd)*sv.walkaccelerate+
-				((cur->rstrafe-cur->lstrafe)*right*sv.strafeaccelerate);
-			if(cur==GetLocalPlayer()&&padmove.active)
-				targ=padmove.fwd*cur->fwd*sv.walkaccelerate+padmove.strafe*right*sv.strafeaccelerate;
-			if(cur->up||cur->down||cur->lstrafe||cur->rstrafe)
-			{
-				cur->runtime+=sf;
-				if(cur->runtime>15) cur->runtime-=15;
-			}
-			else 
-			{
-				if(cur->runtime) cur->runtime+=sf;
-				if(cur->runtime>15) cur->runtime=0;
-			}
-			cur->legframe=sin(cur->runtime/15*2*pi)*2.49+2.495;
-			float omag=Magnitude(targ);
-			if(omag!=0&&cur->playstate==10)
-			{
-				float heightdiff=(GetHeight(Normalize(targ)/2+cur->pos)-GetHeight(cur->pos))*2;
-				float heightdiff2=(GetHeight(Normalize(targ)/1+cur->pos)-GetHeight(Normalize(targ)/2+cur->pos))*2;
-				targ=Normalize(targ);
-				//if(heightdiff<1.3||heightdiff>2)//||cur->pos.y>GetHeight(cur->pos)+.5) 
-				{
-					/*if(heightdiff>1.3) omag/=8;
-					else
-						if(heightdiff>.9) 
-						{
-							cur->vel.y=(cur->vel.y*5+Magnitude(cur->vel-Vector(0,cur->vel.y,0)))/6;
-							omag/=1.3;
-						}
-					
-					//if(heightdiff>1.3) heightdiff=0;
-					if(heightdiff<-1)heightdiff=0;
-					//if(heightdiff>0) heightdiff/=1.3;
-					
-					targ.y=heightdiff*omag;
-					*/
-					targ.y=heightdiff;
-					if(fabs(heightdiff)>1.1) targ.y=0;
-					if(targ.y>1) omag/=1+targ.y-1;
-					targ=Normalize(targ)*omag;
-					
-					targ/=1+speedpenalty;
-					cur->vel+=targ*sf;
-				}
-
-
-			}
-
-			if(((cur->up||cur->down||cur->lstrafe||cur->rstrafe)&&curtime>cur->nextfootsteps)&&cur->playstate==10)
-			{
-				SetSoundPosition(100,cur->pos+Vector(0,-2,0));
-				PlaySound(100,0);
-				cur->nextfootsteps=curtime+600;
-			}
-			if((cur->up||cur->down||cur->lstrafe||cur->rstrafe))
-			{
-				cur->vel.x/=powf(sv.resistance,sf);
-				cur->vel.z/=powf(sv.resistance,sf);
-			}
-			else
-			{
-				cur->vel.x/=powf(sv.stopresistance,sf);
-				cur->vel.z/=powf(sv.stopresistance,sf);
-			}
-			
-			//r->vel.y+=(groundheight+1.5-cur->pos.y)/4.4*sf;
-			//if(cur->vel.y<.01&&cur->vel.y>-.01&&fabs(1.2-cur->pos.y)<.1) cur->vel.y=0;
-			//if(cur->pos.y<groundheight+.8){cur->pos.y=groundheight+.8;if(cur->vel.y<0)cur->vel.y=0;}
-			if(cur->vel.y<0)cur->vel.y/=powf(2.1,sf);//else cur->vel.y/=powf(1.1,sf);
-			
-			#define PUSHHEIGHT 1
-			#define MAXPUSHHEIGHT 3
-
-			if(xpheight>centerheight+PUSHHEIGHT+.3)
-			{
-				if(cur->vel.x>0) cur->vel.x/=powf(1.3,sf);
-			}
-			if(xnheight>centerheight+PUSHHEIGHT+.3)
-			{
-				if(cur->vel.x<0) cur->vel.x/=powf(1.3,sf);
-			}
-			if(zpheight>centerheight+PUSHHEIGHT+.3)
-			{
-				if(cur->vel.z>0) cur->vel.z/=powf(1.3,sf);
-			}
-			if(znheight>centerheight+PUSHHEIGHT+.3)
-			{
-				if(cur->vel.z<0) cur->vel.z/=powf(1.3,sf);
-			}
-		}
-		
-		int scraped=0;
-		int thumped=0;
-		float thumpspeed=.3;
-		float scrapespeed=.5;
-		float wmh=cur->pos.y-.5;
-		if(xpheight>wmh)
-		{
-			if(cur->vel.x>0) cur->vel.x=0;
-			
-		}
-		if(xnheight>wmh)
-		{
-			if(cur->vel.x<0) cur->vel.x=0;
-			
-		}
-		if(zpheight>wmh)
-		{
-			if(cur->vel.z>0) cur->vel.z=0;
-			
-		}
-		if(znheight>wmh)
-		{
-			if(cur->vel.z<0) cur->vel.z=0;
-			
-		}
-		Vector cv;
-		cv=Normalize(Vector(1,0,1));if(GetHeight(cur->pos+cv*.7)>wmh){float dp=DotProduct(cv,cur->vel);if(dp>0) cur->vel-=dp*cv;}
-		cv=Normalize(Vector(1,0,-1));if(GetHeight(cur->pos+cv*.7)>wmh){float dp=DotProduct(cv,cur->vel);if(dp>0) cur->vel-=dp*cv;}
-		cv=Normalize(Vector(-1,0,-1));if(GetHeight(cur->pos+cv*.7)>wmh){float dp=DotProduct(cv,cur->vel);if(dp>0) cur->vel-=dp*cv;}
-		cv=Normalize(Vector(-1,0,1));if(GetHeight(cur->pos+cv*.7)>wmh){float dp=DotProduct(cv,cur->vel);if(dp>0) cur->vel-=dp*cv;}
-		//the trunks: round walls, from the feet to the top of the head (props.h)
-		PropsPushPlayer(cur->pos,cur->vel,.5f,1.45f,.4f);
-		if(scraped&&curtime>cur->nextwallscrape)
-		{
-			SetSoundPosition(110,cur->pos+Vector(0,-1,0));
-			PlaySound(110,0);
-			cur->nextwallscrape=curtime+1000;
-		}
-		if(thumped)
-		{
-			SetSoundPosition(130,cur->pos+Vector(0,-1,0));
-			//PlaySound(130,0);
-		}
-		cur->inaccuracyvel.y+=(prevvel.y-cur->vel.y)/10;
-		cur->gunoffsetvel+=(prevvel-cur->vel)*sf/powf(10,sf);
-		cur->gunoffset+=cur->gunoffsetvel*sf;
-		cur->gunoffset/=powf(1.3,sf);
-		cur->gunoffsetvel=cur->gunoffsetvel/powf(1.8,sf)-cur->gunoffset/20*sf;
-		if(cur->pos.y+cur->vel.y*sf<WATERHEIGHT&&cur->pos.y>WATERHEIGHT)
-		{
-			SetSoundPosition(140,cur->pos+Vector(0,-1,0));
-			PlaySound(140,0);
-		}
-		cur->pos+=cur->vel*sf;
+		MoveInput in;
+		in.local=cur==GetLocalPlayer();
+		in.pad=in.local&&padmove.active;
+		in.padfwd=padmove.fwd;
+		in.padstrafe=padmove.strafe;
+		in.speedpenalty=speedpenalty;
+		MoveEvents ev;
+		MovePlayer(cur,in,sf,sv,moveworld,&ev);
+		PlayerMoveEffects(cur,ev);
 	}	
 }
 

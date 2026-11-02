@@ -264,6 +264,7 @@ set(SOURCES
   src/game/land.cpp
   src/game/mapfile.cpp
   src/game/playing.cpp
+  src/game/movement.cpp
   src/game/props.cpp
   src/game/propsgame.cpp
   src/game/smoke.cpp
@@ -514,11 +515,15 @@ add_test(NAME input COMMAND input_test)
 add_executable(smoke_test tests/smoke_test.cpp)
 target_include_directories(smoke_test PRIVATE ${HK_TEST_INCLUDES})
 add_test(NAME smoke COMMAND smoke_test)
+
+add_executable(movement_test tests/movement_test.cpp src/game/movement.cpp src/game/Vector.cpp)
+target_include_directories(movement_test PRIVATE ${HK_TEST_INCLUDES} ${SRC}/render)   # ase.h (playing.h)
+add_test(NAME movement COMMAND movement_test)
 if(EMSCRIPTEN)
   # the web build's unit tests run in Node.js (the toolchain's emulator), on the
   # real files (fileio_test makes folders)
   foreach(t worldrandom_test wire_test voice_test anticheat_test hmac_test fileio_test map_test
-      props_test lobby_test signaling_test input_test smoke_test)
+      props_test lobby_test signaling_test input_test smoke_test movement_test)
     target_link_options(${t} PRIVATE -sNODERAWFS=1 -sALLOW_MEMORY_GROWTH=1 -sSTACK_SIZE=1MB)
   endforeach()
   target_link_options(lobby_test PRIVATE -sFETCH=1)   # lobby.cpp's emscripten_fetch
