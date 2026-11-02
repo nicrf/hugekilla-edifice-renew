@@ -1155,3 +1155,158 @@ void main() {
 @end
 
 @program fxaa post_vs fxaa_fs
+
+//---------------------------------------------------------------- trees, bushes, rocks
+
+// instanced meshes made by renderer_ultra.cpp, placed from the land (the same on
+// every client); the wind is the grass's
+@block veg_vs_body
+layout(binding=0) uniform veg_vs_params {
+	mat4 viewproj;
+	vec4 cam;           // xyz: camera, w: time
+	vec4 wind;          // xy: direction, z: strength
+};
+
+in vec3 position;
+in vec3 normal0;
+in vec3 attr;           // x: part (0 trunk, 1 leaves, 2 rock), y: occlusion, z: how much it sways
+in vec4 inst0;          // xyz: where it stands, w: scale
+in vec4 inst1;          // x: turn, y: tint, z: -, w: phase
+
+vec3 veg_world(out vec3 n) {
+	float c = cos(inst1.x);
+	float s = sin(inst1.x);
+	vec3 p = position * inst0.w;
+	p = vec3(c * p.x - s * p.z, p.y, s * p.x + c * p.z);
+	n = vec3(c * normal0.x - s * normal0.z, normal0.y, s * normal0.x + c * normal0.z);
+	vec3 w = inst0.xyz + p;
+	float t = cam.w;
+	vec2 wd = wind.xy;
+	float gust = 0.6 + 0.4 * sin(t * 0.9 + dot(inst0.xz, wd) * 0.05) * sin(t * 0.37 + inst0.x * 0.02);
+	float sway = (sin(t * 1.4 + inst1.w) * 0.35 + gust) * wind.z * attr.z * attr.z * inst0.w * 0.12;
+	// leaves flutter a little on their own
+	float flutter = sin(t * 7.0 + dot(w, vec3(1.7, 2.3, 1.1))) * 0.025 * attr.z * step(0.5, attr.x) * step(attr.x, 1.5);
+	w.xz += wd * sway + flutter;
+	w.y += flutter;
+	return w;
+}
+@end
+
+@vs veg_vs
+@include_block veg_vs_body
+out vec3 wpos;
+out vec3 wnormal;
+out vec3 vattr;
+out float tint;
+
+void main() {
+	vec3 n;
+	vec3 w = veg_world(n);
+	wpos = w;
+	wnormal = n;
+	vattr = attr;
+	tint = inst1.y;
+	gl_Position = viewproj * vec4(w, 1.0);
+}
+@end
+
+@fs veg_fs
+@include_block common
+@include_block scene_ub
+layout(binding=1) uniform texture2D skylut;
+layout(binding=1) uniform sampler lutsmp;
+layout(binding=4) uniform texture2DArray hdalb;
+layout(binding=5) uniform texture2DArray hdnrm;
+layout(binding=6) uniform texture2DArray hdorm;
+layout(binding=3) uniform sampler hdsmp;
+layout(binding=7) uniform texture2D shadowmap;
+layout(binding=4) uniform sampler shadowsmp;
+layout(binding=1) uniform veg_fs_params {
+	vec4 view;          // the camera's forward direction; w: clip below the water (reflection)
+};
+@include_block sky_fn
+@include_block pbr_fn
+@include_block shadow_fn
+
+in vec3 wpos;
+in vec3 wnormal;
+in vec3 vattr;
+in float tint;
+
+out vec4 frag_color;
+
+vec3 tri_rock(vec3 p, vec3 n, out vec3 tn, out float rough, out float ao) {
+	vec3 bw = pow(abs(n), vec3(4.0));
+	bw /= bw.x + bw.y + bw.z;
+	vec3 a = texture(sampler2DArray(hdalb, hdsmp), vec3(p.zy * 0.3, 1.0)).rgb * bw.x +
+		texture(sampler2DArray(hdalb, hdsmp), vec3(p.xz * 0.3, 1.0)).rgb * bw.y +
+		texture(sampler2DArray(hdalb, hdsmp), vec3(p.xy * 0.3, 1.0)).rgb * bw.z;
+	vec3 nx = texture(sampler2DArray(hdnrm, hdsmp), vec3(p.zy * 0.3, 1.0)).rgb * 2.0 - 1.0;
+	vec3 ny = texture(sampler2DArray(hdnrm, hdsmp), vec3(p.xz * 0.3, 1.0)).rgb * 2.0 - 1.0;
+	vec3 nz = texture(sampler2DArray(hdnrm, hdsmp), vec3(p.xy * 0.3, 1.0)).rgb * 2.0 - 1.0;
+	// whiteout blend of the three planes' normals
+	vec3 n1 = vec3(nx.xy + n.zy, abs(nx.z) * n.x).zyx;
+	vec3 n2 = vec3(ny.xy + n.xz, abs(ny.z) * n.y).xzy;
+	vec3 n3 = vec3(nz.xy + n.xy, abs(nz.z) * n.z);
+	tn = normalize(n1 * bw.x + n2 * bw.y + n3 * bw.z);
+	vec3 orm = texture(sampler2DArray(hdorm, hdsmp), vec3(p.xz * 0.3, 1.0)).rgb;
+	rough = orm.g;
+	ao = orm.r;
+	return a;
+}
+
+void main() {
+	if (view.w > 0.5 && wpos.y < skyhorizon.w - 0.05) discard;
+	vec3 v = normalize(eyepos.xyz - wpos);
+	vec3 n = normalize(wnormal);
+	if (dot(n, v) < 0.0 && vattr.x > 0.5 && vattr.x < 1.5) n = -n;
+	float part = vattr.x;
+	float ao = vattr.y;
+	vec3 albedo;
+	float rough;
+	float trans = 0.0;
+	if (part > 1.5) {
+		// rocks: the land's HD rock, triplanar, with its normal map; moss on top
+		vec3 tn;
+		float tao;
+		albedo = srgb_to_linear(tri_rock(wpos, n, tn, rough, tao));
+		albedo = mix(albedo, vec3(dot(albedo, vec3(0.3, 0.59, 0.11))), 0.3) * mix(0.55, 0.8, tint);
+		float moss = smoothstep(0.6, 0.9, n.y) * smoothstep(0.4, 0.7, vnoise(wpos.xz * 1.3));
+		albedo = mix(albedo, vec3(0.05, 0.08, 0.025), moss * 0.7);
+		n = tn;
+		ao *= tao;
+	}
+	else if (part > 0.5) {
+		// leaves: green, varied per plant and in patches, light through them
+		float k = vnoise(wpos.xz * 4.3 + wpos.y * 3.7) * 0.6 + vnoise(wpos.xz * 1.1 - wpos.y * 0.9) * 0.4;
+		vec3 g = mix(vec3(0.035, 0.07, 0.02), vec3(0.09, 0.13, 0.035), tint);
+		albedo = g * mix(0.45, 1.5, k * k);
+		rough = 0.65;
+		trans = 0.35;
+	}
+	else {
+		// bark: brown, in stripes along the trunk
+		float k = vnoise(vec2(atan(wnormal.z, wnormal.x) * 4.0, wpos.y * 9.0));
+		albedo = mix(vec3(0.05, 0.035, 0.025), vec3(0.11, 0.08, 0.055), k);
+		rough = 0.9;
+	}
+	float eyed = dot(wpos - eyepos.xyz, view.xyz);
+	float shadow = shadow_at(wpos, n, eyed);
+	vec3 c = shade(albedo, rough, 0.0, ao, n, v, shadow);
+	c += albedo * suncolor.rgb * trans * pow(max(dot(-v, sundir.xyz), 0.0), 3.0) * shadow;
+	frag_color = vec4(apply_fog(c, wpos), 1.0);
+}
+@end
+
+@program veg veg_vs veg_fs
+
+@vs vegshadow_vs
+@include_block veg_vs_body
+void main() {
+	vec3 n;
+	vec3 w = veg_world(n);
+	gl_Position = viewproj * vec4(w, 1.0);
+}
+@end
+
+@program vegshadow vegshadow_vs shadow_fs

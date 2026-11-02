@@ -183,6 +183,8 @@ static int landvalid;
 static float skykey[8];           //what the sky LUT was computed for
 static float suncolor[3],skyzenith[3],skyhorizon[3],skyground[3],haze,classicscale,overcast,darkness;
 
+static void VegInit();
+
 static void Log(const char *what)
 {
 	fprintf(stderr,"Ultra: %s\n",what);
@@ -383,6 +385,7 @@ void RUltraInit()
 	sd.wrap_v=SG_WRAP_CLAMP_TO_EDGE;
 	lutsampler=sg_make_sampler(&sd);
 	for(int i=0;i<32;i++) hdblocklayer[i]=-1;
+	VegInit();
 }
 
 static void FreeTargets()
@@ -1418,6 +1421,8 @@ static void Fullpass(const Target &dst,sg_pipeline pipe,const char *label,int lo
 	sg_apply_pipeline(pipe);
 }
 
+#include "ultra_veg.inl"
+
 void RUltraSetScene(const RUltraScene &s)
 {
 	scene=s;
@@ -1439,6 +1444,7 @@ void RUltraDrawScene(const RSokolFrame &f,const RSokolCmd *cmds,int n)
 	EnsureTargets(f.width,f.height);
 	UpdateLand();
 	UpdateSky();
+	VegPlace();
 	int shadows=rultraprefs.shadows;
 	int size=shadows>=2?4096:2048;
 	if(shadows&&shadowsize!=size)
@@ -1504,14 +1510,14 @@ void RUltraDrawScene(const RSokolFrame &f,const RSokolCmd *cmds,int n)
 	{
 		p=Pass(0,0,&shadowatlas,1,"ultra shadows");
 		sg_begin_pass(&p);
-		sg_apply_pipeline(shadowpipe);
-		sg_bindings b;
-		memset(&b,0,sizeof(b));
-		b.vertex_buffers[0]=f.vbuf;
-		sg_apply_bindings(&b);
 		int tile=size/2;
 		for(int i=0;i<ncasc;i++)
 		{
+			sg_apply_pipeline(shadowpipe);
+			sg_bindings b;
+			memset(&b,0,sizeof(b));
+			b.vertex_buffers[0]=f.vbuf;
+			sg_apply_bindings(&b);
 			sg_apply_viewport((i%2)*tile,(i/2)*tile,tile,tile,false);
 			int last=-1;
 			for(int k=1;k<n;k++)
@@ -1530,6 +1536,7 @@ void RUltraDrawScene(const RSokolFrame &f,const RSokolCmd *cmds,int n)
 				}
 				sg_draw(c.first,c.count,1);
 			}
+			VegDraw(cs.vp[i],1,0);
 		}
 		sg_end_pass();
 	}
@@ -1560,6 +1567,7 @@ void RUltraDrawScene(const RSokolFrame &f,const RSokolCmd *cmds,int n)
 			if(!IsLit(c)||!SameMat(f.uniforms[c.uniforms].proj,proj)) continue;
 			d.Lit(c);
 		}
+		VegDraw(Mat4Mul(proj,Mat4Mul(scene.view,r)),0,1);
 		sg_end_pass();
 		d.reflect=0;
 	}
@@ -1600,6 +1608,7 @@ void RUltraDrawScene(const RSokolFrame &f,const RSokolCmd *cmds,int n)
 		if(c.mark==RMARK_GRASS)
 		{
 			DrawGrass(f,f.uniforms[c.uniforms]);
+			VegDraw(Mat4Mul(f.uniforms[c.uniforms].proj,f.uniforms[c.uniforms].modelview),0,0);
 			d.Reset();
 			continue;
 		}

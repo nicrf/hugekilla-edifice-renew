@@ -199,10 +199,11 @@ void RSetUltra(int on);       //Options' Graphics: Classic 0, Ultra 1
 int RUltra();                 //on and supported
 
 //sub-options (Options, Ultra rows): shadows 0 off, 1 two cascades, 2 four;
-//grass 0 off, 1 low, 2 high; water 0 sky reflection only, 1 planar reflection
+//grass 0 off, 1 low, 2 high; water 0 sky reflection only, 1 planar reflection;
+//vegetation (trees, bushes, rocks) 0 off, 1 near, 2 far
 struct RUltraPrefs
 {
-	int shadows,grass,water;
+	int shadows,grass,water,vegetation;
 };
 extern RUltraPrefs rultraprefs;
 
@@ -232,6 +233,11 @@ struct RUltraScene
 	int underwater;
 	const float *land;    //heights, land[x*landsize+z], the world repeating every landsize
 	int landsize;
+	//no tree nor rock there: around these points (flags, stations), nor where
+	//blocked says a block is (x, y, z in the world)
+	float avoid[32][3];
+	int numavoid;
+	int (*blocked)(float x,float y,float z);
 };
 void RUltraBegin(const RUltraScene &scene);
 void RUltraWater();           //the water surface, here in the drawing order

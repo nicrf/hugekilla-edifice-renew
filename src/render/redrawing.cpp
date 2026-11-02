@@ -1598,6 +1598,13 @@ void Redraw()
 //draws everything 3d
 
 
+//Ultra's trees and rocks never stand in a block
+static int UltraBlocked(float x,float y,float z)
+{
+	if(y<0) return 0;
+	return GetBlock((int)(x/BLOCKSIZE),(int)(y/BLOCKSIZE),(int)(z/BLOCKSIZE))->type!=0;
+}
+
 //Debug aid for captures: HK_CAMERA="x,z,above,yaw,pitch" draws the world from x,z
 //(above the land or the water by "above"), looking at yaw (degrees, 0 along +z,
 //90 along +x) and pitch; HK_CAMERA=lake finds a lake's shore near the player and
@@ -1728,6 +1735,18 @@ void Draw(float offset)
 		us.underwater=cur->pos.y<WATERHEIGHT;
 		us.land=&land[0][0];
 		us.landsize=LANDGRIDSIZE;
+		//the flags and stations stay in the open
+		for(int i=0;i<MAXSERVEROBJS&&us.numavoid<32;i++)
+			if(sobject[i].type)
+			{
+				Vector p=sobject[i].pos;
+				MakeClose(&p);
+				us.avoid[us.numavoid][0]=p.x;
+				us.avoid[us.numavoid][1]=p.y;
+				us.avoid[us.numavoid][2]=p.z;
+				us.numavoid++;
+			}
+		us.blocked=UltraBlocked;
 		RUltraBegin(us);
 		ultrascene=1;
 	}
