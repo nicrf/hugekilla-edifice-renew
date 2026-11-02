@@ -6,9 +6,10 @@
     HK_AUTOSTART=1 build/macos-debug/Edifice.app/Contents/MacOS/Edifice &
     python3 tests/net_fuzz.py
 """
-import socket, struct, sys, time
+import os, socket, struct, sys, time
 
-SERVER = ("127.0.0.1", 27020)
+# HK_TEST_PORT: a server on another info port than the default 27020
+SERVER = ("127.0.0.1", int(os.environ.get("HK_TEST_PORT", "27020")))
 SIMPLE, INFO, REQUESTENTER, CHATMESSAGE, BLOCKS = 5, 2, 1, 8, 7
 PLAYERPOSITION, KILLEDPOSITION, UPDATESERVEROBJECT, VOICE = 3, 14, 12, 16
 REQUESTINFO, ENTER, CREDITS, RECEIVEDLANDINFO = 1, 2, 24, 5

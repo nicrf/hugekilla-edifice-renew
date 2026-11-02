@@ -14,6 +14,7 @@
 #include "hugekilla.h"
 #include "playing.h"
 #include "sound.h"
+#include "props.h"
 
 #define RND ((float)rand()/RAND_MAX)
 char clouds[1024*1024];
@@ -700,6 +701,7 @@ repos:
 		}
 		if(height>WATERHEIGHT-2||height<WATERHEIGHT-8&&tries<30) goto repos;
 	}
+	PropsBuild(ldfs.randomseed);   //the rocks and trees, from this land (props.h)
 	ConsoleDisplayText("Done");
 }
 
