@@ -271,6 +271,8 @@ Les joueurs distants sautent et reviennent en arrière : chaque client simule so
 
      *Fait :* `HK_NETSIM` dans `Sock`, `HK_SYNCLOG`, `HK_MAXFPS`, `tests/net_sync.py` ; chiffres de départ dans `docs/M16.md` ; `MovePlayer` (`src/game/movement.cpp`, `tests/movement_test.cpp`), comportement inchangé.
   1. Tick fixe à 60 Hz, rendu interpolé entre deux ticks.
+
+     *Fait :* `Playloop()` (`TICKRATE`, `simtick`), regard à chaque image, `PlayDrawBegin`/`PlayDrawEnd` autour de `Redraw` ; la synchronisation mesurée ne change pas (chiffres dans `docs/M16.md`), la physique ne dépend plus des images par seconde.
   2. Mouvement décidé par le serveur d'après des commandes d'entrée numérotées (INPUTCMD, capacité `HELLOCAP_INPUTS` 256, deuxième octet de capacités).
   3. Prédiction côté client et réconciliation.
   4. Instantanés datés en delta à 30 Hz (SNAPSHOT, `HELLOCAP_SNAPSHOTS` 512), joueurs distants dessinés 100 ms dans le passé, meilleure quantification.

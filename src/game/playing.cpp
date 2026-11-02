@@ -582,11 +582,21 @@ void Play();
 static int zoommoved;       //mouse movement since the zoom key went down
 static float zoomtarget=-1; //-1: no eased zoom running
 
-//called once per frame, calls Play a number of times according to how much time has passed
+//the simulation's fixed tick (docs/M16.md, phase 1): 60 a second whatever the frame
+//rate, so every machine simulates the same steps. sf was the frame's time /40 (the
+//original game's 25 frames a second), and stays that scale: a tick is sf .41667.
+static double tickleft;          //ms of real time not simulated yet
+static Vector tickprev[MAXPLAYERS];   //where each player was before the last tick
+static float tickalpha;          //how far the frame is between the last two ticks
+DWORD simtick;
+
+static void PlayLook(float framesf);
+
+//called once per frame: as many ticks as the time that passed holds, then the frame
+//is drawn between the last two (PlayDrawBegin)
 
 void Playloop()
 {
-	int numsteps;
 	DWORD targtime;
 	static DWORD targlasttime=0;
 
@@ -595,20 +605,28 @@ void Playloop()
 	//Interpolating from 0 set curtime to 0 for a frame, and a join request answered
 	//within that frame got a timeout based on it, then "server timed out" at once.
 	if(!targlasttime||(int)(targtime-targlasttime)>2000)
-		targlasttime=targtime;
-	
-	
-	sf=(float)(targtime-targlasttime)/40;
-	if(sf>80) sf=0;
-	numsteps=((float)sf)*(float)2+1;
-	sf/=(float)numsteps;
-	int i;
-	for(i=0;i<numsteps;i++)
 	{
-		curtime=((float)i/numsteps)*targtime+((float)1-(float)i/numsteps)*targlasttime;
+		targlasttime=targtime;
+		tickleft=0;
+	}
+	int dt=(int)(targtime-targlasttime);
+	PlayLook((float)dt/40);   //the view follows the mouse every frame, not every tick
+	tickleft+=dt;
+	//a frame of more than 15 ticks (250 ms): the game slows down rather than run
+	//them all at once (a stall, a breakpoint)
+	if(tickleft>TICKMS*MAXTICKSPERFRAME) tickleft=TICKMS*MAXTICKSPERFRAME;
+	int i;
+	while(tickleft>=TICKMS)
+	{
+		tickleft-=TICKMS;
+		simtick++;
+		curtime=targtime-(DWORD)tickleft;
 		lasttime=curtime;
+		sf=(float)(TICKMS/40);
+		for(i=0;i<MAXPLAYERS;i++) tickprev[i]=GetPlayer(i)->pos;
 		Play();
 	}
+	tickalpha=(float)(tickleft/TICKMS);
 	Player *cur=GetLocalPlayer();
 	if(curtime>cur->menudissapeartime&&menu!=BUILDING) 
 	{
@@ -699,11 +717,47 @@ static void PlayerMoveEffects(Player *cur,const MoveEvents &ev)
 	}
 }
 
-//handles all physics, movement, etc.
+//Where the frame draws each player: between where it was before the last tick and
+//where it is now, tickalpha of the way (positions only: the view, the legs, the roll
+//are the tick's). Around Redraw; PlayDrawEnd puts the simulation's positions back.
+//Not across a jump of 5 units in one tick: an arrival, a respawn, the edge of the
+//world, a position received from the network that far.
+static Vector drawsaved[MAXPLAYERS];
+static int drawing;
 
-void Play()
+void PlayDrawBegin()
 {
-	int numplayers=GetNumPlayers();
+	if(drawing) return;
+	drawing=1;
+	for(int i=0;i<GetNumPlayers()&&i<MAXPLAYERS;i++)
+	{
+		Player *p=GetPlayer(i);
+		drawsaved[i]=p->pos;
+		Vector d=p->pos-tickprev[i];
+		if(Magnitude(d)<5)
+			p->pos=tickprev[i]+d*tickalpha;
+	}
+	for(int i=0;i<MAXSERVEROBJS;i++)   //what players carry, with them
+		if(sobject[i].attached!=(-1))
+			sobject[i].pos=GetPlayer(sobject[i].attached)->pos+Vector(0,.3,0);
+}
+
+void PlayDrawEnd()
+{
+	if(!drawing) return;
+	drawing=0;
+	for(int i=0;i<GetNumPlayers()&&i<MAXPLAYERS;i++)
+		GetPlayer(i)->pos=drawsaved[i];
+	for(int i=0;i<MAXSERVEROBJS;i++)
+		if(sobject[i].attached!=(-1))
+			sobject[i].pos=GetPlayer(sobject[i].attached)->pos+Vector(0,.3,0);
+}
+
+//the local player's view, every frame: the mouse (and the pad's right stick, which
+//moves it) and the zoom. framesf: the frame's time in the game's scale (ms/40).
+
+static void PlayLook(float framesf)
+{
 	if(GetLocalPlayer()->playstate>=10)
 	{
 		Player *cur=GetLocalPlayer();
@@ -725,7 +779,7 @@ void Play()
 		}
 		if(zoomtarget>=0)
 		{
-			float step=.25f*sf;
+			float step=.25f*framesf;
 			if(step>1) step=1;
 			cur->fzoom+=(zoomtarget-cur->fzoom)*step;
 			if(fabs(zoomtarget-cur->fzoom)<.05f)
@@ -740,6 +794,17 @@ void Play()
 		cur->fwd-=CrossProduct(Vector(0,1,0),cur->fwd)*mxchange*mspeed;
 		cur->tilt-=CrossProduct(Vector(0,0,1),cur->tilt)*mychange*mspeed;
 		if(cur->tilt.x<.01)cur->tilt.x=.01;
+	}
+}
+
+//handles all physics, movement, etc.: one tick (sf)
+
+void Play()
+{
+	int numplayers=GetNumPlayers();
+	if(GetLocalPlayer()->playstate>=10)
+	{
+		Player *cur=GetLocalPlayer();
 		if(cur->gundowntime&&curtime>cur->nextfiretime)
 		{
 			cur->gundowntime=0;

@@ -159,6 +159,14 @@ int GetLocalNum();
 Player *GetLocalPlayer();
 Player *GetPlayer(int player);
 void Playloop();
+//the simulation's fixed tick (docs/M16.md, phase 1)
+#define TICKRATE 60
+#define TICKMS (1000.0/TICKRATE)
+#define MAXTICKSPERFRAME 15   //250 ms: beyond, the game slows down instead
+extern DWORD simtick;         //ticks simulated since the start
+//around drawing: each player between its last two ticks, then back
+void PlayDrawBegin();
+void PlayDrawEnd();
 void SyncLogFrame();   //HK_SYNCLOG: where each player is drawn (tests/net_sync.py)
 void HandleKey(DWORD key,DWORD flags);
 void HandleKeyUp(DWORD key,DWORD flags);

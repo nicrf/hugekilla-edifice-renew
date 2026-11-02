@@ -748,8 +748,10 @@ static void Frame()
 		{
 			Playloop();
 			SockLoop();
+			PlayDrawBegin();   // each player between its last two ticks
 			SyncLogFrame();
 			if (redraw) Redraw();
+			PlayDrawEnd();
 		}
 	}
 }
