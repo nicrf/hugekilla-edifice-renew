@@ -837,7 +837,8 @@ void Play()
 		cur->thrustfuel+=sv.thrustrechargerate*sf;
 		if(cur->thrustfuel>1) cur->thrustfuel=1;
 		if(cur->hanggliding==0)
-		if(cur->jetpack&&cur->thrustfuel>0&&sv.thrustrechargerate)
+		//alive only (playstate 10): a dead player waiting to respawn fell up with it
+		if(cur->jetpack&&cur->playstate==10&&cur->thrustfuel>0&&sv.thrustrechargerate)
 		{
 			cur->thrustfuel-=sv.thrustuse*sf;
 			Vector targ;
@@ -899,7 +900,7 @@ void Play()
 				cur->vel.z/=powf(2.4,fabs(znheight-zpheight));
 			}
 		}
-		if(cur->hangglide&&cur->vel.y<-.2&&Magnitude(cur->vel)>.4)
+		if(cur->hangglide&&cur->playstate==10&&cur->vel.y<-.2&&Magnitude(cur->vel)>.4)
 		{
 			cur->hanggliding=1;
 		}
