@@ -38,9 +38,9 @@ SCENES = [
     # backend without them (the fixed-function GL one) draws the game as Classic
     # (low settings: the CI's software renderers draw them slowly)
     ("ultra", dict(HK_AUTOSTART="1", HK_PLAY="1", HK_SHOT_FRAME="300", HK_FIXEDCLOCK="16", HK_GRAPHICS="ultra",
-                   HK_ULTRA_PREFS="1,1,1")),
+                   HK_ULTRA_PREFS="1,1,1,1")),
     ("ultralake", dict(HK_AUTOSTART="1", HK_PLAY="1", HK_SHOT_FRAME="300", HK_FIXEDCLOCK="16", HK_GRAPHICS="ultra",
-                       HK_ULTRA_PREFS="1,1,1", HK_CAMERA="lake")),
+                       HK_ULTRA_PREFS="1,1,1,1", HK_CAMERA="lake")),
 ]
 
 

@@ -308,8 +308,8 @@ static void SaveOptions()
 //reads the settings LoadControls doesn't know about (called at startup)
 
 static int Clampi(int v,int lo,int hi);
-//the fourth value of HK_ULTRA_PREFS, the trees and rocks (a later sub-option)
-#define ULTRA_EXTRA_PREFS(v) (void)(v)
+//the fourth value of HK_ULTRA_PREFS: the trees and rocks
+#define ULTRA_EXTRA_PREFS(v) if((v)>=0) rultraprefs.vegetation=Clampi((v),0,2)
 
 //Graphics: Classic or Ultra (renderer.h), as control.ini or HK_GRAPHICS says
 static void ApplyGraphics()
