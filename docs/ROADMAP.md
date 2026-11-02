@@ -25,6 +25,7 @@
 | Restructuration lourde (M12) | Fin du port, M5, M6 | Déplacer des fichiers pendant le port produirait des conflits en série |
 | Rendu sokol_gfx (M13) | M12.5 (`IRenderer`) | Le backend ne se remplace qu'une fois tous les appels `gl*` regroupés dans `src/render/` |
 | Portage web (M14) | M13, M7d (signalisation, TURN) | WebGL2/WebGPU seulement côté rendu, WebRTC seulement côté réseau |
+| Synchronisation en ligne (M16) | M11 (coups du serveur, slots stables), M4 (même relief partout) | La prédiction rejoue la même physique sur le client et le serveur |
 
 **Couche réseau ou protocole d'abord ?** On restructure la couche réseau (abstraction du transport, M7) **sans changer le protocole UDP** : les callbacks de `SendReliable` (sock.cpp:118-150) font partie du contrat de l'interface, et chaque backend les émule. On ne refond le protocole (M6, puis éventuellement M11) qu'avec un incrément de `EDIFICE_PROTOCOL_VERSION` à chaque lot.
 
@@ -262,6 +263,21 @@ Jouer sans clavier ni souris : manette sur les trois systèmes et le web, écran
   2. Commandes tactiles : manette à l'écran (stick gauche, zone de regard à droite, boutons), affichée au premier toucher, menus au doigt ; page web sans défilement ni zoom, bouton plein écran, indication de passer en paysage.
 
      *Fait :* `src/platform/touch.cpp` (disposition dans `inputlogic.h`, testée), réglages dans Options → Pad / Touch, page web (`shell.html`) ; `tests/input_smoke.py` (doigts par `HK_PADTEST`) et `tests/web_smoke.py` (téléphone simulé par Playwright, événements tactiles CDP) ; détails dans BUILD.md, « Écrans tactiles ». Non vérifié : de vrais téléphones et tablettes (iOS Safari, Android Chrome), un écran tactile natif. Reste : le clavier du téléphone pour les champs de texte (code de partie, nom).
+
+### M16 - Synchronisation en ligne refaite, « protocole 6 » (XL, par petites PR)
+Les joueurs distants sautent et reviennent en arrière : chaque client simule son joueur à son propre pas (`sf = dt/40`) et envoie sa position toutes les 70 ms, les autres la reçoivent sans date, s'y téléportent et extrapolent. Conception de toutes les phases dans `docs/M16.md` (tick, formats INPUTCMD et SNAPSHOT, accusés et deltas, interpolation, réconciliation, capacités).
+- **Tâches :**
+  0. Mesurer et préparer : simulateur de réseau (`HK_NETSIM`), mesure automatique de la synchronisation (`tests/net_sync.py`), physique d'un joueur sortie dans une fonction pure (`MovePlayer`).
+
+     *Fait :* `HK_NETSIM` dans `Sock`, `HK_SYNCLOG`, `HK_MAXFPS`, `tests/net_sync.py` ; chiffres de départ dans `docs/M16.md`.
+  1. Tick fixe à 60 Hz, rendu interpolé entre deux ticks.
+  2. Mouvement décidé par le serveur d'après des commandes d'entrée numérotées (INPUTCMD, capacité `HELLOCAP_INPUTS` 256, deuxième octet de capacités).
+  3. Prédiction côté client et réconciliation.
+  4. Instantanés datés en delta à 30 Hz (SNAPSHOT, `HELLOCAP_SNAPSHOTS` 512), joueurs distants dessinés 100 ms dans le passé, meilleure quantification.
+  5. Compensation de latence au tick que le tireur voyait, grenades et fumigènes prédits, événements fiables datés (`HELLOCAP_TICKEVENTS` 1024).
+  6. Retrait du chemin du protocole 5 : protocole 6, version 0.8.0, les anciens refusés.
+- **Compatibilité :** protocole 5 jusqu'à la phase 6, chaque nouveauté seulement entre deux pairs qui l'annoncent ; un client 0.7 joue dans la même partie avec les positions d'avant.
+- **Fait quand :** à 100 ms de latence, 20 de gigue et 2 % de pertes (`HK_NETSIM=100,20,2`), `net_sync.py` ne voit plus d'à-coups (< 0,05 par seconde) sur les joueurs distants, et le joueur local n'est jamais corrigé de façon visible.
 
 ## 4. Sécurité : vulnérabilités classées
 

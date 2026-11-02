@@ -11,6 +11,8 @@
 #include "wire.h"
 #include "datagramlink.h"
 #include "hktime.h"
+#include <stdlib.h>
+#include <vector>
 
 #define RELIABLE -1
 #define LASTRELIABLE -2
@@ -46,6 +48,104 @@ int ReadSimple(const void *in,int len,SimpleMessage *out)
 }
 
 
+//---- HK_NETSIM=<latency ms>,<jitter ms>,<loss %> (debug, docs/M16.md) ----
+//Every datagram a Sock sends waits latency + 0..jitter ms (so some overtake others),
+//or is lost, as over a bad Internet link; the reliable channel resends what it
+//loses. Outgoing only: set it on both games for a round trip of twice the latency.
+//Its own random numbers: rand() is the game's (RND), whose sequence must not change.
+
+static struct
+{
+	int on;
+	int latency,jitter;
+	float loss;
+	unsigned int rng;
+} netsim;
+
+struct NetSimDatagram
+{
+	DatagramLink *link;
+	SOCKADDR_IN to;
+	DWORD at;                //HKTicks() time it leaves
+	std::vector<char> data;
+};
+static std::vector<NetSimDatagram> netsimqueue;
+
+static void NetSimInit()
+{
+	static int done;
+	if(done) return;
+	done=1;
+	const char *env=getenv("HK_NETSIM");
+	if(!env||!*env) return;
+	float loss=0;
+	int latency=0,jitter=0;
+	if(sscanf(env,"%d,%d,%f",&latency,&jitter,&loss)<1) return;
+	netsim.latency=latency>0?latency:0;
+	netsim.jitter=jitter>0?jitter:0;
+	netsim.loss=loss>0?loss:0;
+	netsim.rng=HKTicks()*2654435761u|1;
+	netsim.on=netsim.latency||netsim.jitter||netsim.loss>0;
+	if(netsim.on)
+		fprintf(stderr,"netsim: %d ms + 0..%d ms, %.1f%% lost, every datagram sent\n",netsim.latency,netsim.jitter,netsim.loss);
+}
+
+static float NetSimRandom()   //0..1
+{
+	netsim.rng^=netsim.rng<<13;
+	netsim.rng^=netsim.rng>>17;
+	netsim.rng^=netsim.rng<<5;
+	return (netsim.rng>>8)/16777216.0f;
+}
+
+//sends the datagrams whose time has come (at every Receive and send)
+static void NetSimPump()
+{
+	if(netsimqueue.empty()) return;
+	DWORD now=HKTicks();
+	for(size_t i=0;i<netsimqueue.size();)
+	{
+		NetSimDatagram &d=netsimqueue[i];
+		if((int)(now-d.at)>=0)
+		{
+			d.link->SendTo(d.data.data(),(int)d.data.size(),&d.to);
+			netsimqueue.erase(netsimqueue.begin()+i);
+		}
+		else i++;
+	}
+}
+
+//what a Sock sends goes through here
+static void LinkSend(DatagramLink *link,const void *data,int size,const SOCKADDR_IN *to)
+{
+	if(!link) return;
+	NetSimInit();
+	if(!netsim.on)
+	{
+		link->SendTo(data,size,to);
+		return;
+	}
+	NetSimPump();
+	if(NetSimRandom()*100<netsim.loss) return;
+	NetSimDatagram d;
+	d.link=link;
+	d.to=*to;
+	d.at=HKTicks()+netsim.latency+(DWORD)(NetSimRandom()*netsim.jitter);
+	d.data.assign((const char *)data,(const char *)data+size);
+	netsimqueue.push_back(d);
+}
+
+//a link closed: what it still had to send goes with it
+static void NetSimForget(DatagramLink *link)
+{
+	for(size_t i=0;i<netsimqueue.size();)
+	{
+		if(netsimqueue[i].link==link) netsimqueue.erase(netsimqueue.begin()+i);
+		else i++;
+	}
+}
+
+
 Sock::Sock()
 {
 	memset(this,0,sizeof(*this));
@@ -61,6 +161,7 @@ void Sock::Open(DatagramLink *l)
 
 void Sock::Close()
 {
+	if(link) NetSimForget(link);
 	delete link;
 	link=0;
 }
@@ -71,7 +172,7 @@ void Sock::Flush()
 {
 	sendbuf.type=0;
 	if(!sendbufpos) return;
-	if(link) link->SendTo(&sendbuf,sendbufpos+1,&dest);
+	LinkSend(link,&sendbuf,sendbufpos+1,&dest);
 	packetssent++;
 	datasendthissec+=sendbufpos+1+16;
 	datasendthisframe+=sendbufpos+1+16;
@@ -97,6 +198,7 @@ int Sock::Send(const void *data,int size)
 int Sock::Receive(void *data,SOCKADDR_IN *source,int maxsize)
 {
 	fromack=0;
+	NetSimPump();
 	if(!link&&!feeddata) return 0;
 	for(;;)
 	{
@@ -218,7 +320,7 @@ int Sock::Receive(void *data,SOCKADDR_IN *source,int maxsize)
 			buf ack;
 			ack.type=ACK;
 			memcpy(&ack.data[0],&recvbuf.data[4],4);   //id, part number
-			if(link) link->SendTo(&ack,1+4,&dest);
+			LinkSend(link,&ack,1+4,&dest);
 			packetssent++;
 			WORD id=WireGetU16(&recvbuf.data[4]);
 			if(id!=(WORD)(lastreliableid+1))   //WORD: keeps working after 65535 transfers
@@ -253,7 +355,7 @@ int Sock::Receive(void *data,SOCKADDR_IN *source,int maxsize)
 
 void Sock::ResendReliable(rbuf *curbuf)
 {
-	if(link) link->SendTo(&curbuf->data,curbuf->size,&dest);
+	LinkSend(link,&curbuf->data,curbuf->size,&dest);
 	packetssent++;
 	datasendthissec+=RELIABLEPACKETSIZE+1+16;
 	datasendthisframe+=RELIABLEPACKETSIZE+1+16;
