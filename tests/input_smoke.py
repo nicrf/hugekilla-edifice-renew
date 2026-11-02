@@ -270,8 +270,27 @@ def scene_touch(exe, out):
     return checks, text + text2 + text3
 
 
+def scene_grenade(exe, out):
+    """frag or smoke grenades: the pad's D-pad right switches them (at any time), and
+    with the grenade in hand the touch controls have a Frag/Smoke button"""
+    tap = "%.4f:%.4f" % ((1024 - 146) / 1024, 34 / 768)
+    s = ("300:log;305:press:dpright;320:log;325:press:dpright;340:log;"
+         "345:press:rightshoulder;360:log;"
+         "365:finger:1:down:" + tap + ";367:finger:1:up:" + tap + ";380:shot:touchgrenade;385:log")
+    text, exited = run(exe, s, dict(HK_AUTOSTART="1", HK_PLAY="1"), out)
+    st = parse_logs(text)
+    need = [300, 320, 340, 360, 385]
+    missing = [f for f in need if f not in st]
+    if missing:
+        return [(False, "all logs (missing %s)" % missing)], text
+    return [(st[300]["smoke"] == 0 and st[320]["smoke"] == 1 and st[340]["smoke"] == 0,
+             "D-pad right switches to smoke and back"),
+            (st[360]["weapon"] == 4 and st[385]["smoke"] == 1 and st[385]["touch"] == 1,
+             "the touch Smoke button, grenade in hand")], text
+
+
 SCENES = [("game", scene_game), ("spawn", scene_spawn), ("menus", scene_menus), ("build", scene_build),
-          ("touch", scene_touch)]
+          ("touch", scene_touch), ("grenade", scene_grenade)]
 
 
 def main():

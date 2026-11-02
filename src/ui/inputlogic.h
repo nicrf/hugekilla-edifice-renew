@@ -186,6 +186,7 @@ enum
 {
 	TB_FIRE,TB_JUMP,TB_JETPACK,TB_RELOAD,TB_WEAPON,TB_ZOOM,TB_CLAIM,   //right thumb
 	TB_BUILD,TB_SCORES,TB_MENU,                                        //top corners
+	TB_GRENADE,   //frag or smoke grenades, shown with the grenade in hand (touch.cpp)
 	TB_COUNT
 };
 
@@ -241,6 +242,8 @@ inline void InTouchLayoutFor(float w,float h,float size,InTouchLayout *l)
 	l->b[TB_SCORES].y=34*s;
 	l->b[TB_MENU].x=34*s;
 	l->b[TB_MENU].y=84*s;   //under the frame counter
+	l->b[TB_GRENADE].x=w-146*s;
+	l->b[TB_GRENADE].y=34*s;
 	for(int i=TB_BUILD;i<TB_COUNT;i++) l->b[i].r=22*s;
 }
 

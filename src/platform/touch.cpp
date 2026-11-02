@@ -6,7 +6,8 @@
 // In the game: a finger down on the left side holds a move stick there (analog, as a
 // gamepad's: SetPadMove), one on the right side looks around as it drags, and the
 // buttons press their action's key (fire, jump, jetpack, reload, weapon, zoom, claim,
-// build, scores, menu), so they do what the keyboard does. All at once: each finger
+// build, scores, menu), so they do what the keyboard does; with the grenade in hand
+// one more switches frag and smoke grenades. All at once: each finger
 // has its own part. Fire also looks as it drags, to aim while shooting. In the menus
 // a tap clicks where it lifts (a drag scrolls the build menu instead).
 //
@@ -22,6 +23,7 @@
 #include "cfgfile.h"
 #include "playing.h"
 #include "ui.h"
+#include "smoke.h"
 #include "inputlogic.h"
 #include <SDL.h>
 #include <math.h>
@@ -118,6 +120,12 @@ static Finger *FingerOf(SDL_FingerID id)
 	return 0;
 }
 
+// the grenade's button: there with the grenade in hand, on a server that takes smoke
+static int GrenadeButton()
+{
+	return menu != BUILDING && GetLocalPlayer()->weapon == 4 && SmokeAllowed();
+}
+
 // a button's press: the key of its action, or what it does placing a structure;
 // returns the key to release with the finger (0: none)
 static int ButtonDown(int b)
@@ -144,6 +152,7 @@ static int ButtonDown(int b)
 	case TB_BUILD: vk = controls.build; break;
 	case TB_SCORES: vk = controls.showscores; break;
 	case TB_MENU: vk = KEY_ESCAPE; break;
+	case TB_GRENADE: SmokeToggleMode(); return 0;
 	}
 	if (vk) HKInjectKey(vk, 1);
 	return vk;
@@ -190,6 +199,7 @@ int TouchHandleEvent(const SDL_Event &ev)
 		f->x = f->downx = x;
 		f->y = f->downy = y;
 		int hit = InTouchHit(&l, x, y);
+		if (hit == TB_GRENADE && !GrenadeButton()) hit = -1;   // not drawn: looks around
 		if (Controls())
 		{
 			if (hit >= 0)
@@ -404,7 +414,7 @@ void DrawTouchControls()
 	Disc(kx, ky, l.stick.r * .42f, 1, 1, 1, stick ? .45f : .22f);
 
 	int building = menu == BUILDING;
-	static const char *labels[TB_COUNT] = {"Fire", "Jump", "Jet", "Reload", "Weapon", "Zoom", "Claim", "Build", "Scores", "Menu"};
+	static const char *labels[TB_COUNT] = {"Fire", "Jump", "Jet", "Reload", "Weapon", "Zoom", "Claim", "Build", "Scores", "Menu", ""};
 	for (int b = 0; b < TB_COUNT; b++)
 	{
 		const char *text = labels[b];
@@ -412,6 +422,11 @@ void DrawTouchControls()
 		if (building && b == TB_RELOAD) text = "Turn";
 		if (building && b == TB_CLAIM) text = "Cancel";
 		if (building && b == TB_WEAPON) continue;
+		if (b == TB_GRENADE)
+		{
+			if (!GrenadeButton()) continue;
+			text = SmokeModeOn() ? "Smoke" : "Frag";
+		}
 		Button(l, b, text, pressed[b]);
 	}
 	RPopAttrib();
