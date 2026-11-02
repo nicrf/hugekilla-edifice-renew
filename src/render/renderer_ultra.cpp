@@ -97,6 +97,14 @@ static void Set4(float *d,float a,float b,float c,float e)
 	d[3]=e;
 }
 
+//the Ultra assets' own random numbers: rand() is the game's (its world, its sky)
+static unsigned urandseed=1;
+static int URand()
+{
+	urandseed=urandseed*1103515245u+12345u;
+	return (int)((urandseed>>16)&0x7fff);
+}
+
 //IEEE half from float (the sky LUT and nothing hot)
 static unsigned short Half(float f)
 {
@@ -529,14 +537,14 @@ static void MakeWaterNormals()
 {
 	const int n=256;
 	std::vector<float> hgt((size_t)n*n,0);
-	srand(1234);
+	urandseed=1234;
 	for(int k=0;k<48;k++)
 	{
-		int fx=rand()%15-7,fy=rand()%15-7;
+		int fx=URand()%15-7,fy=URand()%15-7;
 		if(!fx&&!fy) fx=1;
 		float f=sqrtf((float)(fx*fx+fy*fy));
 		float amp=1/powf(f,1.4f);
-		float ph=(float)rand()/RAND_MAX*6.2831853f;
+		float ph=(float)URand()/32767.0f*6.2831853f;
 		for(int y=0;y<n;y++)
 			for(int x=0;x<n;x++)
 				hgt[(size_t)y*n+x]+=amp*sinf(6.2831853f*(fx*x+fy*y)/n+ph);
@@ -716,14 +724,14 @@ static void MakeGrass()
 		float tile=ring?GRASSFARTILE:GRASSTILE;
 		float step=tile/GRASSPERSIDE;
 		std::vector<float> inst;
-		srand(ring?777:333);
+		urandseed=ring?777:333;
 		for(int y=0;y<GRASSPERSIDE;y++)
 			for(int x=0;x<GRASSPERSIDE;x++)
 			{
-				inst.push_back((x+(float)rand()/RAND_MAX)*step);
-				inst.push_back((y+(float)rand()/RAND_MAX)*step);
-				inst.push_back((float)rand()/RAND_MAX*6.2831853f);
-				inst.push_back((float)rand()/RAND_MAX);
+				inst.push_back((x+(float)URand()/32767.0f)*step);
+				inst.push_back((y+(float)URand()/32767.0f)*step);
+				inst.push_back((float)URand()/32767.0f*6.2831853f);
+				inst.push_back((float)URand()/32767.0f);
 			}
 		memset(&bd,0,sizeof(bd));
 		bd.data.ptr=inst.data();
