@@ -28,6 +28,7 @@
 #include "renderer.h"
 #include <SDL.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <vector>
 
@@ -220,6 +221,57 @@ int RSokolReadDepth(sg_image image,int x,int y,float *depth)
 {
 	ReadTexture(image,x,y,1,1,4,(unsigned char *)depth);   //Depth32Float
 	return 1;
+}
+
+static void WriteDump(int frame,int w,int h,const unsigned char *rgba,int topdown);
+
+//HK_DUMPFRAMES: a copy of the frame, blitted in a command buffer of its own after the
+//frame's and read once the GPU is done with it, so that the frames keep their pacing
+struct PendingDump
+{
+	id<MTLCommandBuffer> cb;
+	id<MTLBuffer> buf;
+	int w,h,frame;
+};
+static std::vector<PendingDump> pendingdumps;
+
+static void DumpQueue(sg_image image,int w,int h,int frame)
+{
+	sg_mtl_image_info info=sg_mtl_query_image_info(image);
+	id<MTLTexture> tex=(__bridge id<MTLTexture>)info.tex[info.active_slot];
+	id<MTLCommandQueue> queue=(__bridge id<MTLCommandQueue>)sg_mtl_command_queue();
+	if(!tex||!queue) return;
+	NSUInteger rowbytes=(NSUInteger)w*4;
+	PendingDump d;
+	d.buf=[device newBufferWithLength:rowbytes*h options:MTLResourceStorageModeShared];
+	d.cb=[queue commandBuffer];
+	id<MTLBlitCommandEncoder> blit=[d.cb blitCommandEncoder];
+	[blit copyFromTexture:tex sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0,0,0)
+		sourceSize:MTLSizeMake(w,h,1) toBuffer:d.buf destinationOffset:0
+		destinationBytesPerRow:rowbytes destinationBytesPerImage:rowbytes*h];
+	[blit endEncoding];
+	[d.cb commit];
+	d.w=w;
+	d.h=h;
+	d.frame=frame;
+	pendingdumps.push_back(d);
+}
+
+static void DumpPoll(int wait)
+{
+	size_t k=0;
+	for(size_t i=0;i<pendingdumps.size();i++)
+	{
+		PendingDump &d=pendingdumps[i];
+		if(wait) [d.cb waitUntilCompleted];
+		if(d.cb.status<MTLCommandBufferStatusCompleted)
+		{
+			pendingdumps[k++]=d;
+			continue;
+		}
+		WriteDump(d.frame,d.w,d.h,(const unsigned char *)d.buf.contents,1);
+	}
+	pendingdumps.resize(k);
 }
 
 static void NewFramePool()
@@ -462,6 +514,21 @@ int RSokolReadDepth(sg_image image,int x,int y,float *depth)
 	return 1;
 }
 
+static void WriteDump(int frame,int w,int h,const unsigned char *rgba,int topdown);
+
+//HK_DUMPFRAMES: read at once (the frame was committed)
+static void DumpQueue(sg_image image,int w,int h,int frame)
+{
+	std::vector<unsigned char> rgba((size_t)w*h*4);
+	RSokolReadColor(image,0,0,w,h,rgba.data());
+	WriteDump(frame,w,h,rgba.data(),0);
+}
+
+static void DumpPoll(int wait)
+{
+	(void)wait;
+}
+
 static void NewFramePool()
 {
 }
@@ -618,6 +685,21 @@ int RSokolReadDepth(sg_image image,int x,int y,float *depth)
 #endif
 }
 
+static void WriteDump(int frame,int w,int h,const unsigned char *rgba,int topdown);
+
+//HK_DUMPFRAMES: read at once (the frame was committed)
+static void DumpQueue(sg_image image,int w,int h,int frame)
+{
+	std::vector<unsigned char> rgba((size_t)w*h*4);
+	RSokolReadColor(image,0,0,w,h,rgba.data());
+	WriteDump(frame,w,h,rgba.data(),0);
+}
+
+static void DumpPoll(int wait)
+{
+	(void)wait;
+}
+
 static void NewFramePool()
 {
 }
@@ -625,6 +707,57 @@ static void NewFramePool()
 #else
 #error "HK_RENDER_SOKOL: define SOKOL_METAL, SOKOL_D3D11, SOKOL_GLCORE or SOKOL_GLES3"
 #endif
+
+//HK_DUMPFRAMES=N saves N presented frames from the HK_DUMPFRAMES_START-th (default 300)
+//as HK_DUMPFRAMES_DIR/frameNNNNN.ppm, shrunk HK_DUMPFRAMES_SCALE times (default 2):
+//what the window got, with VSync and the frame pacing kept (HK_SHOT reads back
+//without VSync), to catch what changes from one frame to the next
+static int dumpcount=-1,dumpstart,dumpscale;
+static const char *dumpdir;
+
+//rgba: rows top-down (Metal's blit) or bottom-up (RSokolReadColor)
+static void WriteDump(int frame,int w,int h,const unsigned char *rgba,int topdown)
+{
+	char path[1024];
+	snprintf(path,sizeof(path),"%s/frame%05d.ppm",dumpdir,frame);
+	FILE *f=fopen(path,"wb");
+	if(!f) return;
+	int s=dumpscale,ow=w/s,oh=h/s;
+	fprintf(f,"P6\n%d %d\n255\n",ow,oh);
+	std::vector<unsigned char> row((size_t)ow*3);
+	for(int y=0;y<oh;y++)
+	{
+		int sy=topdown?y*s:h-1-y*s;
+		for(int x=0;x<ow;x++)
+		{
+			const unsigned char *p=rgba+((size_t)sy*w+(size_t)x*s)*4;
+			row[x*3]=p[0];
+			row[x*3+1]=p[1];
+			row[x*3+2]=p[2];
+		}
+		fwrite(row.data(),1,row.size(),f);
+	}
+	fclose(f);
+}
+
+void RSokolDumpFrame(sg_image image,int w,int h)
+{
+	static int frame;
+	if(dumpcount<0)
+	{
+		const char *n=getenv("HK_DUMPFRAMES");
+		dumpcount=n?atoi(n):0;
+		dumpstart=getenv("HK_DUMPFRAMES_START")?atoi(getenv("HK_DUMPFRAMES_START")):300;
+		dumpscale=getenv("HK_DUMPFRAMES_SCALE")?atoi(getenv("HK_DUMPFRAMES_SCALE")):2;
+		if(dumpscale<1) dumpscale=1;
+		dumpdir=getenv("HK_DUMPFRAMES_DIR")?getenv("HK_DUMPFRAMES_DIR"):".";
+	}
+	if(dumpcount<=0) return;
+	frame++;
+	if(frame>=dumpstart&&frame<dumpstart+dumpcount) DumpQueue(image,w,h,frame);
+	DumpPoll(frame>=dumpstart+dumpcount-1);
+	if(frame==dumpstart+dumpcount-1) fprintf(stderr,"HK_DUMPFRAMES: %d frames in %s\n",dumpcount,dumpdir);
+}
 
 void RPresent()
 {

@@ -371,7 +371,7 @@ static void HandleEvent(const SDL_Event &ev)
 			UpdateViewport();
 		if (ev.window.event == SDL_WINDOWEVENT_FOCUS_LOST)
 			VoicePushToTalk(0);   // its key-up would go to another window
-		if (ev.window.event == SDL_WINDOWEVENT_FOCUS_LOST && lockedcursor == 1 && !getenv("HK_SHOT"))
+		if (ev.window.event == SDL_WINDOWEVENT_FOCUS_LOST && lockedcursor == 1 && !getenv("HK_SHOT") && !getenv("HK_DUMPFRAMES"))
 			LockCursor(0);
 		break;
 	case SDL_KEYDOWN:
@@ -701,7 +701,7 @@ static void Frame()
 	redraw = 1;
 #else
 	Uint32 flags = SDL_GetWindowFlags(window);
-	if (((flags & SDL_WINDOW_INPUT_FOCUS) || getenv("HK_SHOT")) && !(flags & SDL_WINDOW_MINIMIZED))
+	if (((flags & SDL_WINDOW_INPUT_FOCUS) || getenv("HK_SHOT") || getenv("HK_DUMPFRAMES")) && !(flags & SDL_WINDOW_MINIMIZED))
 		redraw = 1;
 	else
 		HKSleep(4);
