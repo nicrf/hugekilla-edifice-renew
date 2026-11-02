@@ -53,12 +53,12 @@ static Binding bindings[]=
 };
 #define NUMBINDINGS (int)(sizeof(bindings)/sizeof(bindings[0]))
 
-#define NUMSETTINGS 19
+#define NUMSETTINGS 20
 static const char *settinglabels[NUMSETTINGS]=
 {
 	"Fullscreen","VSync","Draw distance","Mouse sensitivity","Invert mouse","Volume",
 	"Voice volume","Microphone","Gun over walls","Explosions","Smoke","Impacts and splashes","Muzzle flash","Net stats",
-	"Graphics","Ultra: shadows","Ultra: grass","Ultra: water","Ultra: trees and rocks"
+	"Graphics","Ultra: shadows","Ultra: grass","Ultra: water","Ultra: trees and rocks","Ultra: clouds"
 };
 static int ultrawanted;    //Graphics: Ultra (renderer.h), when the renderer can
 
@@ -248,7 +248,7 @@ void SetIniValues(const char *filename,const char *keys[],const char *values[],i
 
 static void SaveOptions()
 {
-#define NUMNUMBERS 19
+#define NUMNUMBERS 20
 #define MAXPADVALUES 32
 	const char *keys[NUMBINDINGS+NUMNUMBERS+MAXPADVALUES];
 	const char *values[NUMBINDINGS+NUMNUMBERS+MAXPADVALUES];
@@ -283,9 +283,10 @@ static void SaveOptions()
 	sprintf(numbers[16],"%d",rultraprefs.grass);
 	sprintf(numbers[17],"%d",rultraprefs.water);
 	sprintf(numbers[18],"%d",rultraprefs.vegetation);
+	sprintf(numbers[19],"%d",rultraprefs.clouds);
 	const char *numberkeys[NUMNUMBERS]={"changeres","vsync","drawdistance","mousesensitivity","mousereverse","volume",
 		"voicevolume","voicemic","fxviewmodel","fxexplosions","fxsmoke","fximpacts","fxmuzzleflash","netstats",
-		"graphics","ultrashadows","ultragrass","ultrawater","ultravegetation"};
+		"graphics","ultrashadows","ultragrass","ultrawater","ultravegetation","ultraclouds"};
 	for(int i=0;i<NUMNUMBERS;i++)
 	{
 		keys[n]=numberkeys[i];
@@ -366,6 +367,7 @@ void LoadOptions()
 	if(ini.GetValues("ultrashadows")) rultraprefs.shadows=Clampi(ini.GetValuei("ultrashadows"),0,2);
 	if(ini.GetValues("ultragrass")) rultraprefs.grass=Clampi(ini.GetValuei("ultragrass"),0,2);
 	if(ini.GetValues("ultrawater")) rultraprefs.water=Clampi(ini.GetValuei("ultrawater"),0,1);
+	if(ini.GetValues("ultraclouds")) rultraprefs.clouds=ini.GetValuei("ultraclouds")!=0;
 	if(ini.GetValues("ultravegetation")) rultraprefs.vegetation=Clampi(ini.GetValuei("ultravegetation"),0,2);
 	ApplyGraphics();
 }
@@ -466,6 +468,7 @@ static void ChangeSetting(int row,int dir)
 	case 16: rultraprefs.grass=(rultraprefs.grass+(dir<0?2:1))%3; break;
 	case 17: rultraprefs.water=!rultraprefs.water; break;
 	case 18: rultraprefs.vegetation=(rultraprefs.vegetation+(dir<0?2:1))%3; break;
+	case 19: rultraprefs.clouds=!rultraprefs.clouds; break;
 	}
 }
 
@@ -500,6 +503,7 @@ static void SettingText(int row,char *text)
 	case 16: strcpy(text,rultraprefs.grass==0?"Off":rultraprefs.grass==1?"Low":"High"); break;
 	case 17: strcpy(text,rultraprefs.water?"Reflections":"Sky only"); break;
 	case 18: strcpy(text,rultraprefs.vegetation==0?"Off":rultraprefs.vegetation==1?"Near":"Far"); break;
+	case 19: strcpy(text,rultraprefs.clouds?"Volumetric":"Classic layers"); break;
 	}
 }
 
