@@ -2,6 +2,7 @@
 #include "hugekilla.h"
 #include "multiplay.h"
 #include "gameplay.h"
+#include "smoke.h"
 #include "stdio.h"
 
 GameData gd;
@@ -260,6 +261,7 @@ void GReset()
 int GCanClaimObject(int pnum,int sonum)
 {
 	ServerObject *to=&sobject[sonum];
+	if(to->type==SMOKECLOUD) return 0;   //smoke can't be carried
 	if(to->type==DOME)
 	{
 		return 1;

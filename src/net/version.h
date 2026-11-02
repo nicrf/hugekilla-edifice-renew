@@ -64,7 +64,9 @@ struct PeerVersion
 #define HELLOCAP_PROPS 64        // REQUESTENTER: the client has the rocks and trees that block (props.h,
                                  // docs/PROPS.md) and obeys PROPSMODE; INFO: the server has them on
                                  // (sv.ini props) and refuses clients without this bit
-// 128: reserved (smoke grenade)
+#define HELLOCAP_SMOKE 128       // REQUESTENTER: the client draws smoke grenades (SMOKECLOUD server objects,
+                                 // smoke.h) and may throw them (THROWSMOKE); INFO: the server has them.
+                                 // Clients without it never get a smoke object (an empty slot)
 #define HELLOCOOKIE_SIZE 8
 #define HELLOCAPS_MAX (1+HELLOCOOKIE_SIZE)
 

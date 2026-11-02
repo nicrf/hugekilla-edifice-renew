@@ -20,6 +20,9 @@
 #define KILLEDPOSITION 14
 #define REMOTEGAMEDATA 15
 #include "voicemsg.h"    //VOICE 16 (5 is SIMPLE, sock.h)
+//a smoke grenade thrown (smoke.h): FIREGUN's layout (reload 0), client to server.
+//Only from a client the server told it takes them (SMOKEMODE 1)
+#define THROWSMOKE 20
 
 
 //simple messages
@@ -65,6 +68,10 @@
 //with its own. Only to clients whose REQUESTENTER has HELLOCAP_PROPS (version.h), at
 //the join and when the server's props setting changes.
 #define PROPSMODE 30
+//smoke grenades (smoke.h): msg 1 = this server takes them now, 0 = not (a player
+//without HELLOCAP_SMOKE is in: he wouldn't see the smoke). Only to clients with
+//HELLOCAP_SMOKE, at the join and when it changes.
+#define SMOKEMODE 40
 //DELETEPLAYER: msg = the player who left, msg2 = reason (0 timed out, 1 left, 2
 //kicked). With PLAYERLEFT_KEEPSLOTS (M11 phase 3b, docs/M11.md) the others keep
 //their numbers and the slot is free; without it everyone after msg moves down one

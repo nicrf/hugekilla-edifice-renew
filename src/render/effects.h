@@ -34,6 +34,10 @@ void FxMuzzleGlow(const Vector &pos,float size,float bright,float rot);
 //pushes the smoke it crosses aside, leaving a tunnel that closes again
 void FxBulletThroughSmoke(const Vector &from,const Vector &to);
 
+//Classic: the smoke grenades' clouds (smoke.h) as thick sprites; after the scene and
+//the muzzle flashes (Ultra raymarches them with the explosions' smoke instead)
+void FxDrawSmokeClouds();
+
 //procedural textures of the effects (LoadTextures)
 void FxLoadTextures();
 //moves and draws the effects: Draw (redrawing.cpp), with the scene's camera; layer

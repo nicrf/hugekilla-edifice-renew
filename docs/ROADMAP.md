@@ -209,7 +209,8 @@ Demande de l'utilisateur : un rendu « fou » (eau réaliste à vagues, herbe au
 - *Fait (3) :* nuages volumétriques (couche lancée en rayons au quart de la taille, bruit 3D, éclairage par le soleil et le ciel).
 - *Fait (4) :* les arbres et les gros rochers bloquent (`docs/PROPS.md`) : mêmes props chez tous, calculés d'après le relief (cartes sauvegardées comprises, sans changer leur format), collisions des joueurs, des balles (celles du serveur aussi) et des grenades, construction refusée dedans, dessinés aussi en Classic ; réglage serveur `props` (Server Setup « Rocks and trees »), capacité `HELLOCAP_PROPS` au protocole 5, les builds sans elle refusés quand il est actif.
 - *Fait (5) :* fumée volumétrique : la fumée des explosions lancée en rayons (masses de densité érodées par un bruit 3D, éclairées par le soleil et le ciel, demi-taille, suréchantillonnage selon la profondeur), et les balles qui y laissent un tunnel qui se referme (visuel, côté client).
-- *Suites demandées :* grenade fumigène (gameplay, réseau) : PR suivante. Note d'équité : depuis (4), seuls les buissons et petites pierres d'Ultra peuvent encore cacher un joueur qu'un joueur Classic voit.
+- *Fait (6) :* grenade fumigène : second mode de la grenade, volée et posée par le serveur (objet serveur `SMOKECLOUD`, 25 s), envoyée aux seuls clients qui l'annoncent (`HELLOCAP_SMOKE`), permise seulement quand tous les joueurs l'ont ; elle cache sans arrêter les balles, aussi opaque en Classic (sprites épais) qu'en Ultra (lancée en rayons). Détails dans `BUILD.md`.
+- Note d'équité : depuis (4), seuls les buissons et petites pierres d'Ultra peuvent encore cacher un joueur qu'un joueur Classic voit ; la fumée des grenades fumigènes cache autant dans les deux modes.
 
 ### M14 - Portage web (L puis M)
 Le rendu ne pose pas de difficulté après M13 : SDL2 et sokol_gfx sont supportés par Emscripten. Les vrais obstacles sont le réseau et l'environnement du navigateur.

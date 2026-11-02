@@ -23,6 +23,7 @@
 #include "hugekilla.h"
 #include "playing.h"
 #include "land.h"
+#include "smoke.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -215,6 +216,15 @@ struct FxTunnel
 };
 #define FXTUNNELLIFE 3.5f
 static std::vector<FxTunnel> tunnels;
+
+//how open a tunnel still is, 1..0: wide open for a second, then closing
+static float TunnelOpen(float age)
+{
+	float k=(age/FXTUNNELLIFE-.3f)/.7f;
+	if(k<0) return 1;
+	if(k>1) return 0;
+	return 1-k*k*(3-2*k);
+}
 
 //its own random numbers: rand() is the game's (AI, respawn positions)
 static unsigned fxrand=12345;
@@ -467,6 +477,27 @@ static void GrenadeTrails(float dt)
 				continue;
 			}
 			Smoke(o.pos+RndDir()*.05f,RndDir()*.15f+Vector(0,.25f,0),0,Rnd(1.1f,1.7f),.15f,Rnd(.6f,.9f),Rnd(.7f,.82f),.5f);
+		}
+	}
+}
+
+//smoke grenades in flight (smoke.h, server objects): a lighter, thicker trail
+static void SmokeGrenadeTrails(float dt)
+{
+	static float since[MAXSERVEROBJS];
+	for(int i=0;i<MAXSERVEROBJS;i++)
+	{
+		const ServerObject &o=sobject[i];
+		if(o.type!=SMOKECLOUD||SmokeCloudAge(i)>=0)
+		{
+			since[i]=0;
+			continue;
+		}
+		since[i]+=dt;
+		while(since[i]>=.03f)
+		{
+			since[i]-=.03f;
+			Smoke(o.pos+RndDir()*.05f,RndDir()*.2f+Vector(0,.3f,0),0,Rnd(1.4f,2),.2f,Rnd(.8f,1.1f),Rnd(.8f,.9f),.6f);
 		}
 	}
 }
@@ -732,7 +763,15 @@ void DrawEffects(int layer)
 		started=1;
 		lasttime=curtime;
 		if(fxprefs.smoke) GrenadeTrails(dt);
+		SmokeGrenadeTrails(dt);   //gameplay: not an option
 		Update(dt);
+	}
+	//Ultra: the raymarched smoke of the frame, the smoke grenades' clouds even
+	//without any particle
+	if(layer==1&&RUltra())
+	{
+		CameraFromModelView();
+		SubmitVolumes();
 	}
 	if(parts.empty()&&lights.empty()) return;
 	CameraFromModelView();
@@ -792,7 +831,6 @@ void DrawEffects(int layer)
 
 	//solid things, by alpha in the scene's fog, far ones first
 	int ultra=RUltra();
-	if(ultra&&layer==1) SubmitVolumes();
 	static std::vector<SortItem> order;
 	order.clear();
 	for(size_t i=0;i<parts.size();i++)
@@ -876,14 +914,43 @@ void DrawEffects(int layer)
 	RDepthMask(1);
 }
 
+//where the smoke grenade cloud of sobject[i] is now: its middle (lifted from the
+//ground), radius and opacity; 0 if it isn't a cloud
+static int Cloud(int i,Vector *center,float *radius,float *strength)
+{
+	float age=SmokeCloudAge(i);
+	if(age<0) return 0;
+	*radius=SmokeRadius(age);
+	*strength=SmokeStrength(age);
+	if(*radius<.05f||*strength<=0) return 0;
+	*center=sobject[i].pos;
+	MakeClose(center);
+	return 1;
+}
+
 void FxBulletThroughSmoke(const Vector &from,const Vector &to)
 {
-	if(!RUltra()) return;   //Classic keeps its smoke as it was
 	Vector seg=to-from;
 	float len2=DotProduct(seg,seg);
 	if(len2<1e-6f) return;
 	int crossed=0;
-	for(size_t i=0;i<parts.size();i++)
+	//the smoke grenades' clouds, in both modes (the same sight lines)
+	for(int i=0;i<MAXSERVEROBJS&&!crossed;i++)
+	{
+		Vector c;
+		float r,s;
+		if(sobject[i].type!=SMOKECLOUD||!Cloud(i,&c,&r,&s)) continue;
+		Vector a=from;
+		MakeClose(&a);
+		c+=Vector(0,r*.45f,0);
+		float t=DotProduct(c-a,seg)/len2;
+		if(t<0) t=0;
+		if(t>1) t=1;
+		Vector off=c-(a+seg*t);
+		crossed=DotProduct(off,off)<r*r;
+	}
+	if(!RUltra()&&!crossed) return;   //Classic keeps the explosions' smoke as it was
+	for(size_t i=0;RUltra()&&i<parts.size();i++)
 	{
 		FxParticle &p=parts[i];
 		if(p.kind!=FX_SMOKE||p.age<0) continue;
@@ -928,6 +995,29 @@ static void SubmitVolumes()
 {
 	static RUltraSmoke s;
 	s.numvol=s.numtun=0;
+	//the smoke grenades first: they are the game's, the explosions' only looks
+	for(int i=0;i<MAXSERVEROBJS;i++)
+	{
+		Vector c;
+		float r,str;
+		if(sobject[i].type!=SMOKECLOUD||!Cloud(i,&c,&r,&str)) continue;
+		float age=SmokeCloudAge(i);
+		for(int k=0;k<SMOKE_LUMPS&&s.numvol<RSMOKE_MAXVOLUMES;k++)
+		{
+			float part[4];
+			SmokePart(i,k,SMOKE_LUMPS,r,age,part);
+			float *v=s.vol[s.numvol],*in=s.info[s.numvol];
+			v[0]=c.x+part[0];
+			v[1]=c.y+part[1];
+			v[2]=c.z+part[2];
+			v[3]=part[3];
+			in[0]=1.25f*str;
+			in[1]=.8f;   //whitish, as smoke grenades
+			in[2]=.85f;
+			in[3]=.5f;   //a solid core: the noise never opens a hole in it
+			s.numvol++;
+		}
+	}
 	static std::vector<SortItem> near;
 	near.clear();
 	for(size_t i=0;i<parts.size();i++)
@@ -938,7 +1028,6 @@ static void SubmitVolumes()
 		SortItem it={-DotProduct(d,d),(int)i};   //the sort puts far first: nearest first here
 		near.push_back(it);
 	}
-	if(near.empty()) return;
 	std::sort(near.begin(),near.end());
 	for(size_t k=0;k<near.size()&&s.numvol<RSMOKE_MAXVOLUMES;k++)
 	{
@@ -958,6 +1047,7 @@ static void SubmitVolumes()
 		in[3]=0;
 		s.numvol++;
 	}
+	if(!s.numvol) return;
 	for(size_t i=0;i<tunnels.size();i++)
 	{
 		const FxTunnel &tn=tunnels[i];
@@ -973,8 +1063,92 @@ static void SubmitVolumes()
 		e[0]=b.x;
 		e[1]=b.y;
 		e[2]=b.z;
-		e[3]=(1-k)*(1-k);
+		e[3]=TunnelOpen(tn.age);
 		s.numtun++;
 	}
 	RUltraSetSmoke(s);
+}
+
+//Classic: the smoke grenades' clouds as thick sprites, about as opaque as Ultra's
+//lumps (a line through the middle crosses 4 to 6 of them), thinned along the
+//bullets' tunnels as Ultra's; inside one, the view goes grey. Drawn after the
+//others' muzzle flashes (redrawing.cpp), which it hides as Ultra does.
+void FxDrawSmokeClouds()
+{
+	if(RUltra()) return;   //raymarched with the explosions' smoke (SubmitVolumes)
+	struct Sprite
+	{
+		Vector pos;
+		float size,rot,a,depth;
+		bool operator<(const Sprite &o) const { return depth>o.depth; }
+	};
+	static std::vector<Sprite> sprites;
+	sprites.clear();
+	CameraFromModelView();
+	float inside=0;
+	for(int i=0;i<MAXSERVEROBJS;i++)
+	{
+		Vector c;
+		float r,str;
+		if(sobject[i].type!=SMOKECLOUD||!Cloud(i,&c,&r,&str)) continue;
+		float age=SmokeCloudAge(i);
+		for(int k=0;k<SMOKE_SPRITES;k++)
+		{
+			float part[4];
+			SmokePart(i,k,SMOKE_SPRITES,r,age,part);
+			Sprite sp;
+			sp.pos=c+Vector(part[0],part[1],part[2]);
+			sp.size=part[3];   //the outline of Ultra's lumps
+			sp.rot=k*1.7f+age*(k&1?.05f:-.05f);
+			sp.a=.8f*str;
+			//a bullet's tunnel thins the sprites it goes through, as Ultra's
+			for(size_t t=0;t<tunnels.size();t++)
+			{
+				Vector a=tunnels[t].from;
+				MakeClose(&a);
+				Vector seg=tunnels[t].to-tunnels[t].from;
+				float len2=DotProduct(seg,seg);
+				if(len2<1e-6f) continue;
+				float h=DotProduct(sp.pos-a,seg)/len2;
+				if(h<0) h=0;
+				if(h>1) h=1;
+				Vector off=sp.pos-(a+seg*h);
+				float d=sqrtf(DotProduct(off,off)),reach=sp.size*.5f;
+				if(d<reach) sp.a*=1-.85f*TunnelOpen(tunnels[t].age)*(1-d/reach);
+			}
+			sp.depth=DotProduct(sp.pos-cameye,camfwd);
+			sprites.push_back(sp);
+		}
+		//the camera in the cloud: grey, thicker towards the middle
+		Vector mid=c+Vector(0,r*.45f,0)-cameye;
+		mid.y/=.6f;
+		float d=sqrtf(DotProduct(mid,mid))/r;
+		if(d<1)
+		{
+			float in=Clamp01((1-d)*2.5f)*str*.97f;
+			if(in>inside) inside=in;
+		}
+	}
+	if(sprites.empty()) return;
+	std::sort(sprites.begin(),sprites.end());
+	RPushAttrib(RATTR_ENABLE|RATTR_COLOR|RATTR_POLYGON|RATTR_CURRENT|RATTR_TEXTURE);
+	RDisable(RCAP_CULL);
+	REnable(RCAP_BLEND|RCAP_DEPTHTEST|RCAP_TEXTURE);
+	RDepthMask(0);
+	RBlendFunc(RBLEND_ALPHA);
+	TexBind(TEX_FX_SMOKE);
+	RBegin(RP_QUADS);
+	for(size_t k=0;k<sprites.size();k++)
+		Billboard(sprites[k].pos,sprites[k].size,sprites[k].rot,.78f,.79f,.8f,sprites[k].a);
+	REnd();
+	if(inside>0)
+	{
+		//a sheet across the view (glow texture: the same grey everywhere at its middle)
+		RDisable(RCAP_DEPTHTEST|RCAP_FOG|RCAP_TEXTURE);
+		RBegin(RP_QUADS);
+		Billboard(cameye+camfwd*.6f,3,0,.7f,.71f,.72f,inside);
+		REnd();
+	}
+	RPopAttrib();
+	RDepthMask(1);
 }

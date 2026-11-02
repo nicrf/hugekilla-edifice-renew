@@ -17,6 +17,7 @@
 #include "hkkeys.h"
 #include "hktime.h"
 #include "effects.h"
+#include "smoke.h"
 #include "gamepad.h"
 #include "touch.h"
 #include "props.h"
@@ -145,6 +146,12 @@ Player *GetPlayer(int num)
 
 void FireGun(Player *cur)
 {
+	//the grenade's second mode: a smoke grenade the server flies (smoke.cpp)
+	if(cur->weapon==4&&SmokeModeOn())
+	{
+		ThrowSmokeGrenade(cur);
+		return;
+	}
 	if(curtime>=cur->nextfiretime)
 	if(TryFireGun(GetLocalNum(),cur->pos,cur->dir,0))
 	{
@@ -738,7 +745,8 @@ void Play()
 		}
 		
 	}
-	TickObjects(sf);	
+	TickObjects(sf);
+	TickSmoke(sf);
 	
 	for(int i=0;i<numplayers;i++)
 	if(GetPlayer(i)->playstate>=10)
@@ -1548,7 +1556,9 @@ void HandleKey(DWORD key,DWORD flags)
 	if(key==controls.jump) GetLocalPlayer()->jump=1;
 	if(key==controls.jetpack) GetLocalPlayer()->jetpack=1;
 	if(key==controls.hangglide) GetLocalPlayer()->hangglide=1;
-	if(key>='1'&&key<='7') SwitchGun(key-'1');
+	//the grenade's key again: frag or smoke grenades
+	if(key=='5'&&GetLocalPlayer()->weapon==4) SmokeToggleMode();
+	else if(key>='1'&&key<='7') SwitchGun(key-'1');
 	if(key==controls.screenshot) GetLocalPlayer()->takescreenshot=1;
 	if(key==controls.seemoney) GetLocalPlayer()->seemoney=1;
 	if(key==controls.claim)

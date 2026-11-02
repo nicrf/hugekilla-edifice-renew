@@ -35,7 +35,7 @@ status=0
 # other tests join as older builds (without HELLOCAP_PROPS): props 0 for them
 for run in net_handshake net_identity net_join net_fuzz net_voice net_voice@1 net_voice@2 \
 		net_voice@3 net_voice@10 net_voice@26 net_voice@40 net_map net_anticheat \
-		net_cookie net_cookie@require net_slots net_props@on net_props@off; do
+		net_cookie net_cookie@require net_slots net_props@on net_props@off net_smoke; do
 	t="${run%@*}"
 	log="$LOGDIR/$run.log"
 	args=()
