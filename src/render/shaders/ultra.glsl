@@ -552,6 +552,11 @@ void main() {
 @include_block scene_ub
 layout(binding=1) uniform texture2D skylut;
 layout(binding=1) uniform sampler lutsmp;
+layout(binding=15) uniform texture2D cloudtex;
+layout(binding=11) uniform sampler cloudsmp;
+layout(binding=1) uniform sky_fs_params {
+	vec4 screen;        // xy: 1/size of the frame, z: volumetric clouds on
+};
 @include_block sky_fn
 
 in vec3 dir;
@@ -560,6 +565,16 @@ out vec4 frag_color;
 void main() {
 	vec3 d = normalize(dir);
 	vec3 c = sky_color(d);
+	if (screen.z > 0.5) {
+		// the clouds (a quarter of the size, filtered up) over the sky, the sun behind them
+		vec4 cl = texture(sampler2D(cloudtex, cloudsmp), gl_FragCoord.xy * screen.xy);
+		float cs0 = dot(d, sundir.xyz);
+		float disk0 = smoothstep(0.99995, 0.99999, cs0) * 60.0 * sundir.w;
+		c += suncolor.rgb * disk0 * (cl.a - 1.0);
+		c = c * cl.a + cl.rgb;
+		frag_color = vec4(groundcolor.w > 0.5 ? watercolor.rgb * 0.3 : c, 1.0);
+		return;
+	}
 	float cs = dot(d, sundir.xyz);
 	// the sun's glow in the haze, narrower than the LUT can hold
 	c += suncolor.rgb * skyzenith.w * hg_phase(cs, 0.92) * 0.05;
@@ -1310,3 +1325,95 @@ void main() {
 @end
 
 @program vegshadow vegshadow_vs shadow_fs
+
+//---------------------------------------------------------------- volumetric clouds
+
+// a layer of clouds, raymarched at a quarter of the frame's size: density from a
+// tiling 3D noise (two octaves) carved by a coverage that drifts with the wind, lit
+// by the sun through a few steps towards it and by the sky; the sky pass reads it
+@fs clouds_fs
+@include_block common
+layout(binding=14) uniform texture3D noise3d;
+layout(binding=10) uniform sampler noisesmp;
+layout(binding=0) uniform clouds_params {
+	mat4 ndctodir;      // clip (far plane) to a world direction
+	vec4 texel;         // xy: 1/target size, zw: -
+	vec4 eye;           // xyz: camera, w: time
+	vec4 layer;         // x: base height, y: top height, z: coverage, w: density
+	vec4 sun;           // xyz: towards the sun, w: -
+	vec4 suncol;        // rgb: the sun's light
+	vec4 ambient;       // rgb: the sky's light
+	vec4 wind;          // xy: drift per second
+};
+
+out vec4 frag_color;
+
+float cloud_density(vec3 p) {
+	vec3 q = p + vec3(wind.x, 0.0, wind.y) * eye.w;
+	float base = texture(sampler3D(noise3d, noisesmp), q * 0.0018).r;
+	float detail = texture(sampler3D(noise3d, noisesmp), q * 0.0071 + vec3(0.3, 0.1, 0.7)).r;
+	float h = clamp((p.y - layer.x) / (layer.y - layer.x), 0.0, 1.0);
+	// rounder at the bottom, thinner at the top
+	float shape = smoothstep(0.0, 0.15, h) * smoothstep(1.0, 0.55, h);
+	float d = base * shape - (1.0 - layer.z);
+	d = d - (1.0 - detail) * 0.18;
+	return max(d, 0.0) * layer.w;
+}
+
+void main() {
+	vec2 uv = gl_FragCoord.xy * texel.xy;
+	vec2 ndc = uv * 2.0 - 1.0;
+	vec4 d4 = ndctodir * vec4(ndc.x, texel.z > 0.5 ? -ndc.y : ndc.y, 1.0, 1.0);
+	vec3 rd = normalize(d4.xyz / d4.w);
+	vec3 ro = eye.xyz;
+	if (rd.y < 0.01 && ro.y < layer.x) {
+		frag_color = vec4(0.0, 0.0, 0.0, 1.0);
+		return;
+	}
+	// the slab between base and top along the ray
+	float t0 = (layer.x - ro.y) / rd.y;
+	float t1 = (layer.y - ro.y) / rd.y;
+	if (t0 > t1) { float tt = t0; t0 = t1; t1 = tt; }
+	t0 = max(t0, 0.0);
+	t1 = min(t1, 6000.0);
+	if (t1 <= t0) {
+		frag_color = vec4(0.0, 0.0, 0.0, 1.0);
+		return;
+	}
+	const int steps = 40;
+	float dt = (t1 - t0) / float(steps);
+	float t = t0 + dt * hash12(gl_FragCoord.xy);
+	float trans = 1.0;
+	vec3 light = vec3(0.0);
+	float cs = dot(rd, sun.xyz);
+	// forward scattering towards the sun, and some back
+	float g1 = 0.75;
+	float g2 = -0.25;
+	float phase = 0.7 * (1.0 - g1 * g1) / pow(1.0 + g1 * g1 - 2.0 * g1 * cs, 1.5) +
+		0.3 * (1.0 - g2 * g2) / pow(1.0 + g2 * g2 - 2.0 * g2 * cs, 1.5);
+	phase /= 4.0 * PI;
+	for (int i = 0; i < steps; i++) {
+		vec3 p = ro + rd * t;
+		float dens = cloud_density(p);
+		if (dens > 0.001) {
+			// light reaching here: a few steps towards the sun
+			float od = 0.0;
+			for (int j = 1; j <= 4; j++) od += cloud_density(p + sun.xyz * (float(j) * 28.0));
+			float tl = exp(-od * 28.0 * 1.2);
+			float powder = 1.0 - exp(-dens * 60.0);
+			float hfrac = clamp((p.y - layer.x) / (layer.y - layer.x), 0.0, 1.0);
+			vec3 s = suncol.rgb * tl * phase * mix(1.0, powder * 2.0, 0.5) * 6.0 + ambient.rgb * mix(0.45, 1.0, hfrac);
+			float a = exp(-dens * dt);
+			light += trans * s * (1.0 - a);
+			trans *= a;
+			if (trans < 0.02) break;
+		}
+		t += dt;
+	}
+	// far clouds fade into the haze
+	float fade = exp(-t0 * 0.00025);
+	frag_color = vec4(light * fade, mix(1.0, trans, fade));
+}
+@end
+
+@program clouds post_vs clouds_fs

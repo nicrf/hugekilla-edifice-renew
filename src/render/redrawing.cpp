@@ -1751,7 +1751,7 @@ void Draw(float offset)
 		ultrascene=1;
 	}
 
-	DrawCloudBox(cur->pos);
+	if(!ultrascene||!rultraprefs.clouds) DrawCloudBox(cur->pos);   //Ultra: volumetric clouds instead
 	if(GetSkySettings()->lightning&&curtime>nextlightning)
 	{
 		float c=.5+RND*.5;

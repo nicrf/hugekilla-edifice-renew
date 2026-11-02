@@ -159,7 +159,12 @@ static void FreeTarget(Target &t)
 }
 
 #define NUMBLOOM 6
-static Target hdr,hdrdepth,scenecopy,lindepth,refl,refldepth,bloom[NUMBLOOM],rays,ldr,shadowatlas;
+static Target hdr,hdrdepth,scenecopy,lindepth,refl,refldepth,bloom[NUMBLOOM],rays,ldr,shadowatlas,clouds;
+static sg_shader shclouds;
+static sg_pipeline cloudspipe;
+static sg_image noise3dimg;
+static sg_view noise3d;
+static sg_sampler noisesampler;
 static int targetw,targeth,shadowsize;
 
 //textures
@@ -364,6 +369,9 @@ void RUltraInit()
 	d=Fullscreen(shcomposite,SG_PIXELFORMAT_RGBA8,"ultra composite");
 	compositepipe=sg_make_pipeline(&d);
 	//into the frame, which has a depth buffer (cleared for the HUD)
+	shclouds=sg_make_shader(clouds_shader_desc(b));
+	d=Fullscreen(shclouds,SG_PIXELFORMAT_RGBA16F,"ultra clouds");
+	cloudspipe=sg_make_pipeline(&d);
 	d=Fullscreen(shfxaa,SG_PIXELFORMAT_RGBA8,"ultra fxaa");
 	d.depth.pixel_format=SG_PIXELFORMAT_DEPTH;
 	d.depth.compare=SG_COMPAREFUNC_ALWAYS;
@@ -372,6 +380,13 @@ void RUltraInit()
 	linclamp=Sampler(SG_FILTER_LINEAR,SG_FILTER_NEAREST,SG_WRAP_CLAMP_TO_EDGE,1);
 	pointclamp=Sampler(SG_FILTER_NEAREST,SG_FILTER_NEAREST,SG_WRAP_CLAMP_TO_EDGE,1);
 	linrepeat=Sampler(SG_FILTER_LINEAR,SG_FILTER_LINEAR,SG_WRAP_REPEAT,4);
+	{
+		sg_sampler_desc nd;
+		memset(&nd,0,sizeof(nd));
+		nd.min_filter=nd.mag_filter=SG_FILTER_LINEAR;
+		nd.wrap_u=nd.wrap_v=nd.wrap_w=SG_WRAP_REPEAT;
+		noisesampler=sg_make_sampler(&nd);
+	}
 	hdsampler=Sampler(SG_FILTER_LINEAR,SG_FILTER_LINEAR,SG_WRAP_REPEAT,8);
 	sg_sampler_desc sd;
 	memset(&sd,0,sizeof(sd));
@@ -399,6 +414,7 @@ static void FreeTargets()
 	for(int i=0;i<NUMBLOOM;i++) FreeTarget(bloom[i]);
 	FreeTarget(rays);
 	FreeTarget(ldr);
+	FreeTarget(clouds);
 	targetw=targeth=0;
 }
 
@@ -429,6 +445,7 @@ static void EnsureTargets(int w,int h)
 	}
 	MakeTarget(rays,rw,rh,SG_PIXELFORMAT_RGBA16F,0,"ultra god rays");
 	MakeTarget(ldr,w,h,SG_PIXELFORMAT_RGBA8,0,"ultra ldr");
+	MakeTarget(clouds,w/4>1?w/4:1,h/4>1?h/4:1,SG_PIXELFORMAT_RGBA16F,0,"ultra clouds");
 	targetw=w;
 	targeth=h;
 }
@@ -569,6 +586,62 @@ static void MakeWaterNormals()
 	wnormal=TexView(wnormalimg);
 }
 
+//a tiling 3D noise for the clouds: billowy (inverted cell distances) over a value
+//noise, three octaves, in one channel
+static void MakeNoise3D()
+{
+	const int n=64;
+	std::vector<unsigned char> px((size_t)n*n*n);
+	auto hash=[](int x,int y,int z,int p)
+	{
+		x=((x%p)+p)%p;
+		y=((y%p)+p)%p;
+		z=((z%p)+p)%p;
+		unsigned v=(unsigned)x*73856093u^(unsigned)y*19349663u^(unsigned)z*83492791u;
+		v^=v>>13;
+		v*=0x5bd1e995u;
+		v^=v>>15;
+		return v;
+	};
+	for(int z=0;z<n;z++)
+		for(int y=0;y<n;y++)
+			for(int x=0;x<n;x++)
+			{
+				float sum=0,amp=1,norm=0;
+				for(int o=0;o<3;o++)
+				{
+					int cells=4<<o;
+					float fx=(float)x*cells/n,fy=(float)y*cells/n,fz=(float)z*cells/n;
+					int cx=(int)fx,cy=(int)fy,cz=(int)fz;
+					float best=9;
+					for(int k=-1;k<=1;k++)
+						for(int j=-1;j<=1;j++)
+							for(int i=-1;i<=1;i++)
+							{
+								unsigned h=hash(cx+i,cy+j,cz+k,cells);
+								float px_=cx+i+(h&255)/255.0f,py_=cy+j+((h>>8)&255)/255.0f,pz_=cz+k+((h>>16)&255)/255.0f;
+								float d=(px_-fx)*(px_-fx)+(py_-fy)*(py_-fy)+(pz_-fz)*(pz_-fz);
+								if(d<best) best=d;
+							}
+					sum+=amp*(1-Clamp(sqrtf(best),0,1));
+					norm+=amp;
+					amp*=0.5f;
+				}
+				px[((size_t)z*n+y)*n+x]=(unsigned char)(Clamp(sum/norm,0,1)*255);
+			}
+	sg_image_desc id;
+	memset(&id,0,sizeof(id));
+	id.type=SG_IMAGETYPE_3D;
+	id.width=id.height=n;
+	id.num_slices=n;
+	id.pixel_format=SG_PIXELFORMAT_R8;
+	id.data.mip_levels[0].ptr=px.data();
+	id.data.mip_levels[0].size=px.size();
+	id.label="ultra cloud noise";
+	noise3dimg=sg_make_image(&id);
+	noise3d=TexView(noise3dimg);
+}
+
 //the water's grid: rings around the camera, denser near it, out to where the land ends
 static void MakeWaterGrid()
 {
@@ -680,6 +753,7 @@ static void LoadAssets()
 	snprintf(msg,sizeof(msg),"%d of %d HD textures (data/hd)",n,HDLAYERS);
 	Log(msg);
 	MakeWaterNormals();
+	MakeNoise3D();
 	MakeWaterGrid();
 	MakeGrass();
 }
@@ -1278,11 +1352,18 @@ static void DrawSky(const Mat4 &proj,const Mat4 &view)
 	memset(&b,0,sizeof(b));
 	b.views[VIEW_skylut]=skylut;
 	b.samplers[SMP_lutsmp]=lutsampler;
+	b.views[VIEW_cloudtex]=clouds.tex;
+	b.samplers[SMP_cloudsmp]=linclamp;
 	sg_apply_bindings(&b);
 	sky_vs_params_t vs;
 	vs.ndctodir=inv;
 	sg_range r={&vs,sizeof(vs)};
 	sg_apply_uniforms(UB_sky_vs_params,&r);
+	sky_fs_params_t fs;
+	Set4(fs.screen,1.0f/targetw,1.0f/targeth,rultraprefs.clouds?1.0f:0.0f,0);
+	r.ptr=&fs;
+	r.size=sizeof(fs);
+	sg_apply_uniforms(UB_sky_fs_params,&r);
 	sg_range s={&sp,sizeof(sp)};
 	sg_apply_uniforms(UB_scene_params,&s);
 	sg_draw(0,3,1);
@@ -1577,6 +1658,40 @@ void RUltraDrawScene(const RSokolFrame &f,const RSokolCmd *cmds,int n)
 		p=Pass(&refl,1,0,1,"ultra reflection");
 		sg_begin_pass(&p);
 		sg_end_pass();
+	}
+
+	//the clouds, a quarter of the size, which the sky reads
+	if(rultraprefs.clouds)
+	{
+		Mat4 rot=scene.view;
+		rot.m[12]=rot.m[13]=rot.m[14]=0;
+		Mat4 inv;
+		if(RSokolInverse(Mat4Mul(proj,rot),&inv))
+		{
+			Fullpass(clouds,cloudspipe,"ultra clouds",0);
+			sg_bindings b;
+			memset(&b,0,sizeof(b));
+			b.views[VIEW_noise3d]=noise3d;
+			b.samplers[SMP_noisesmp]=noisesampler;
+			sg_apply_bindings(&b);
+			clouds_params_t cp;
+			memset(&cp,0,sizeof(cp));
+			cp.ndctodir=inv;
+			Set4(cp.texel,1.0f/clouds.w,1.0f/clouds.h,f.origintopleft?1.0f:0.0f,0);
+			Set4(cp.eye,scene.eye[0],scene.eye[1],scene.eye[2],scene.time);
+			//the classic layer's height; more of them under an overcast sky
+			float base=scene.waterheight+150;
+			Set4(cp.layer,base,base+120,0.48f+overcast*0.32f,0.045f);
+			Set4(cp.sun,sun.x,sun.y,sun.z,0);
+			Set4(cp.suncol,suncolor[0],suncolor[1],suncolor[2],0);
+			Set4(cp.ambient,skyzenith[0]*0.9f,skyzenith[1]*0.9f,skyzenith[2]*0.95f,0);
+			float wa=0.6f+0.3f*sinf(scene.time*0.05f);
+			Set4(cp.wind,cosf(wa)*7,sinf(wa)*7,0,0);
+			sg_range r={&cp,sizeof(cp)};
+			sg_apply_uniforms(UB_clouds_params,&r);
+			sg_draw(0,3,1);
+			sg_end_pass();
+		}
 	}
 
 	//4. the scene

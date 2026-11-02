@@ -200,10 +200,11 @@ int RUltra();                 //on and supported
 
 //sub-options (Options, Ultra rows): shadows 0 off, 1 two cascades, 2 four;
 //grass 0 off, 1 low, 2 high; water 0 sky reflection only, 1 planar reflection;
-//vegetation (trees, bushes, rocks) 0 off, 1 near, 2 far
+//vegetation (trees, bushes, rocks) 0 off, 1 near, 2 far; clouds 0 the map's
+//layers, 1 volumetric
 struct RUltraPrefs
 {
-	int shadows,grass,water,vegetation;
+	int shadows,grass,water,vegetation,clouds;
 };
 extern RUltraPrefs rultraprefs;
 
