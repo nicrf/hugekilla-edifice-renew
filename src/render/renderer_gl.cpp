@@ -111,3 +111,16 @@ void RBackendReadDepth(int x,int y,float *depth)
 {
 	glReadPixels(x,y,1,1,GL_DEPTH_COMPONENT,GL_FLOAT,depth);
 }
+
+//no Ultra graphics with fixed-function GL: Classic only
+int RBackendUltraSupported()
+{
+	return 0;
+}
+
+void RBackendUltraMark(int mark,const RState &state,const RUltraScene *scene)
+{
+	(void)mark;
+	(void)state;
+	(void)scene;
+}

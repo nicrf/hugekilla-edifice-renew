@@ -178,7 +178,7 @@ jobs:
 
       - name: Draw the menus and a game
         shell: bash
-        timeout-minutes: 10
+        timeout-minutes: 25   # the Ultra scenes are slow on the software renderers
         run: |
           if [ "$RUNNER_OS" = Linux ]; then
             xvfb-run -a -s "-screen 0 1280x1024x24" python3 tests/render_smoke.py build/linux-debug/Edifice --out shots

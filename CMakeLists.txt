@@ -226,8 +226,18 @@ if(HK_RENDER_SOKOL)
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/render/shaders/edifice.glsl ${HK_SHDC}
     COMMENT "sokol-shdc: src/render/shaders/edifice.glsl"
     VERBATIM)
+  # the Ultra graphics (renderer_ultra.cpp): desktop APIs only, the web stays Classic
+  add_custom_command(OUTPUT ${HK_SHADER_DIR}/ultra.glsl.h
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${HK_SHADER_DIR}
+    COMMAND ${HK_SHDC} --input ${CMAKE_CURRENT_SOURCE_DIR}/src/render/shaders/ultra.glsl
+            --output ${HK_SHADER_DIR}/ultra.glsl.h --slang glsl410:hlsl5:metal_macos
+            --ifdef --no-log-cmdline --errfmt ${HK_SHDC_ERRFMT}
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/render/shaders/ultra.glsl ${HK_SHDC}
+    COMMENT "sokol-shdc: src/render/shaders/ultra.glsl"
+    VERBATIM)
   set(HK_RENDER_SOURCES src/render/renderer_sokol.cpp src/render/texture_sokol.cpp
-    src/render/sokol_native.cpp src/render/sokol_gfx_impl.cpp ${HK_SHADER_DIR}/edifice.glsl.h)
+    src/render/sokol_native.cpp src/render/sokol_gfx_impl.cpp src/render/renderer_ultra.cpp
+    ${HK_SHADER_DIR}/edifice.glsl.h ${HK_SHADER_DIR}/ultra.glsl.h)
 elseif(EMSCRIPTEN)
   message(FATAL_ERROR "the web build draws with sokol_gfx (WebGL2): HK_RENDER_SOKOL=ON")
 else()
@@ -315,6 +325,7 @@ if(EMSCRIPTEN)
     "SHELL:--shell-file ${HK_WEB_DIR}/shell.html"
     "SHELL:--preload-file ${DATA_DIR}@/data"
     "SHELL:--exclude-file *.DS_Store"
+    "SHELL:--exclude-file ${DATA_DIR}/hd"   # the Ultra graphics' textures: desktop only
     $<$<CONFIG:Debug>:-sASSERTIONS=2>)
   file(GLOB_RECURSE DATA_FILES CONFIGURE_DEPENDS ${DATA_DIR}/*)
   set_property(TARGET Edifice APPEND PROPERTY LINK_DEPENDS

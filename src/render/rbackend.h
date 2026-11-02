@@ -19,6 +19,7 @@ struct RState
 	int texture;          //registry slot, -1: none bound (GL's texture 0)
 	int viewport[4],scissor[4];
 	Mat4 projection,modelview;
+	int material;         //RMAT_* (Ultra only; 0 otherwise)
 };
 
 //a run of vertices of the batch drawn as one primitive type
@@ -33,6 +34,18 @@ void RBackendDraw(const RState &state,const RVertex *verts,const RCmd *cmds,int 
 void RBackendClear(const RState &state,int color,int depth);
 void RBackendReadPixels(int x,int y,int w,int h,int bgr,unsigned char *out);
 void RBackendReadDepth(int x,int y,float *depth);
+
+//Ultra graphics (renderer.h); the GL backend has none
+int RBackendUltraSupported();
+enum
+{
+	RMARK_BEGIN,
+	RMARK_WATER,
+	RMARK_GRASS,
+	RMARK_END
+};
+//a point of the scene, recorded in order with the draws (state: the matrices there)
+void RBackendUltraMark(int mark,const RState &state,const RUltraScene *scene);
 
 //texture_gl.cpp: binds the slot's texture if it isn't already
 void TexBackendBind(int slot);

@@ -4,12 +4,14 @@
 #include "fileio.h"
 #include "textures.h"
 
-//BMP is all the data has; PNG and TGA cost little and take an alpha channel.
+//BMP is all the classic data has; PNG and TGA cost little and take an alpha channel;
+//JPEG for the Ultra graphics' HD textures (data/hd).
 //Files are read through HKReadFile (UTF-8 paths, case lookup), so no stdio here.
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_BMP
 #define STBI_ONLY_PNG
 #define STBI_ONLY_TGA
+#define STBI_ONLY_JPEG   //data/hd (Ultra graphics)
 #define STBI_NO_STDIO
 #define STBI_NO_LINEAR
 #define STBI_NO_HDR
