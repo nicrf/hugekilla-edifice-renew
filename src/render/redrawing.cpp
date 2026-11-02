@@ -346,7 +346,9 @@ void DrawMip(float fcx,float fcy,float fhcx,float fhcy,int prevsize,int newsize,
 
 //draw a few layers of clouds (not really a box)
 
-void DrawCloudBox(Vector pos)
+//layers 0: only the state the scene is drawn in afterwards (texturing on...), without
+//the layers themselves (Ultra's volumetric clouds replace them)
+void DrawCloudBox(Vector pos,int layers=1)
 {
 	RDisable(RCAP_DEPTHTEST);
 	REnable(RCAP_TEXTURE);
@@ -379,7 +381,7 @@ void DrawCloudBox(Vector pos)
 	float of=(float)1/repeats;
 	
 	int x;
-	for(x=-repeats;x<repeats;x++)
+	for(x=-repeats;x<repeats&&layers;x++)
 	{
 		RBegin(RP_TRISTRIP);
 		fx=(float)x/repeats;
@@ -393,7 +395,7 @@ void DrawCloudBox(Vector pos)
 		}
 		REnd();
 	}
-	if(GetSkySettings()->usemist)
+	if(GetSkySettings()->usemist&&layers)
 	{
 		highest-=60;
 		RBlendFunc(RBLEND_ALPHA);
@@ -1751,7 +1753,7 @@ void Draw(float offset)
 		ultrascene=1;
 	}
 
-	if(!ultrascene||!rultraprefs.clouds) DrawCloudBox(cur->pos);   //Ultra: volumetric clouds instead
+	DrawCloudBox(cur->pos,!ultrascene||!rultraprefs.clouds);   //Ultra: volumetric clouds instead of the layers
 	if(GetSkySettings()->lightning&&curtime>nextlightning)
 	{
 		float c=.5+RND*.5;
