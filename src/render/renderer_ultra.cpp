@@ -1685,7 +1685,7 @@ void RUltraDrawScene(const RSokolFrame &f,const RSokolCmd *cmds,int n)
 		Fullpass(rays,rayspipe,"ultra god rays",0);
 		sg_bindings b;
 		memset(&b,0,sizeof(b));
-		b.views[VIEW_src]=hdr.tex;
+		b.views[VIEW_src]=scenecopy.tex;
 		b.views[VIEW_depth]=lindepth.tex;
 		b.samplers[SMP_linsmp]=linclamp;
 		b.samplers[SMP_pointsmp]=pointclamp;
