@@ -253,7 +253,7 @@ struct RUltraScene
 struct RUltraSmoke
 {
 	float vol[RSMOKE_MAXVOLUMES][4];    //center (world, near the camera), radius
-	float info[RSMOKE_MAXVOLUMES][4];   //density (0..1.5), grey (albedo), vertical squash, -
+	float info[RSMOKE_MAXVOLUMES][4];   //density (0..1.5), grey (albedo), vertical squash, solid core (the noise never takes it away)
 	int numvol;
 	float tunfrom[RSMOKE_MAXTUNNELS][4];   //start, radius
 	float tunto[RSMOKE_MAXTUNNELS][4];     //end, strength 0..1 (fades as it closes)

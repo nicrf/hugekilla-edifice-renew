@@ -70,6 +70,10 @@ void ResetPlayer(int num);
 void SendServerVars(int num);
 void ChangeTeam(int player,int team);
 void SendUpdateServerObject(int num);
+//smoke grenades (smoke.h): the client's throw to the server; server: every client
+//in the game understands them
+void SendThrowSmoke(const Vector &pos,const Vector &dir);
+int ServerSmokeAllowed();
 void CreateInstallation(Vector pos,char team);
 void ClaimObject(int pnum);
 void ScoreReset();

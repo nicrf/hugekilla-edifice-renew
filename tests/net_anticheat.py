@@ -19,7 +19,7 @@ Three clients join a local server like net_voice.py, as builds before phase 3a
 The server log (its stderr) must show each event."""
 import math, os, socket, struct, sys, time
 
-SERVER = ("127.0.0.1", 27020)
+SERVER = ("127.0.0.1", int(os.environ.get("NET_TEST_PORT", "27020")))   # see run_netplay_tests.sh
 REQUESTENTER, INFO, PLAYERPOSITION, BLOCKS, SIMPLE, FIREGUN, KILLEDPOSITION = 1, 2, 3, 7, 5, 10, 14
 REQUESTINFO, ENTER, PORTACK, JOINGAME, PING, PINGREPLY = 1, 2, 4, 8, 12, 13
 KILLED, CHANGETEAM, CREDITS = 19, 20, 24

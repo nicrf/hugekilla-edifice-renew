@@ -61,6 +61,9 @@ struct PeerVersion
                                  // without renumbering, M11 phase 3b); INFO: the server keeps slots
 #define HELLOCAP_POSSEQ 32       // REQUESTENTER: its PLAYERPOSITIONs end with a uint16 sequence number
                                  // (POSITIONSEQSIZE, netmsg.h); the server drops those without one
+#define HELLOCAP_SMOKE 128       // REQUESTENTER: the client draws smoke grenades (SMOKECLOUD server objects,
+                                 // smoke.h) and may throw them (THROWSMOKE); INFO: the server has them.
+                                 // Clients without it never get a smoke object (an empty slot)
 #define HELLOCOOKIE_SIZE 8
 #define HELLOCAPS_MAX (1+HELLOCOOKIE_SIZE)
 

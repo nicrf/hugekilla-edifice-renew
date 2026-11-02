@@ -3,6 +3,11 @@
 # fresh server per test. Fails if a test fails, the server dies, or
 # AddressSanitizer reports anything. Used by CI on Linux; also works locally:
 #   tests/run_netplay_tests.sh build/linux-debug/Edifice
+# The server uses the user folder's net.ini: to keep a real game's settings and port
+# (27020) out of it, give it a folder of its own and its port, e.g.
+#   HK_USERDIR=/tmp/hk-net/ NET_TEST_PORT=37020 tests/run_netplay_tests.sh <binary>
+# with net.ini there (CRLF): infosendport=37020, datasendport=37021, lobby= (empty),
+# servervisibility=lan; the tests talk to NET_TEST_PORT (27020 without it).
 # Linux needs Xvfb (a virtual display) unless DISPLAY is already set.
 set -u
 BIN="$1"
@@ -30,7 +35,7 @@ status=0
 # net_cookie@require: the same server vars plus ac_requirecookie 1 (docs/M11.md)
 for run in net_handshake net_identity net_join net_fuzz net_voice net_voice@1 net_voice@2 \
 		net_voice@3 net_voice@10 net_voice@26 net_voice@40 net_map net_anticheat \
-		net_cookie net_cookie@require net_slots; do
+		net_cookie net_cookie@require net_slots net_smoke; do
 	t="${run%@*}"
 	log="$LOGDIR/$run.log"
 	args=()

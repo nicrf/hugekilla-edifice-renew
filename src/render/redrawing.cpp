@@ -19,6 +19,7 @@
 #include "multiplay.h"
 #include "sound.h"
 #include "effects.h"
+#include "smoke.h"
 #include "ui.h"
 #include "hktime.h"
 #include <string.h>
@@ -1445,6 +1446,8 @@ void Redraw()
 	float offset=-1.2;
 	sprintf(tmptext,"%d",(int)(GetLocalPlayer()->ammoingun[GetLocalPlayer()->weapon]));
 	UIText(.37f+offset,-.94f,tmptext,.065f);
+	//the grenade's mode (smoke.h): above its count
+	if(GetLocalPlayer()->weapon==4&&SmokeModeOn()) UIText(.37f+offset,-.875f,"smoke",.04f);
 	sprintf(tmptext,"%d",(int)(GetLocalPlayer()->life));
 	UIText(.57f+offset,-.94f,tmptext,.065f);
 	int flags[3];
@@ -1554,7 +1557,7 @@ void Redraw()
 		}
 		for(i=0;i<MAXSERVEROBJS;i++)
 		{
-			if(sobject[i].type)
+			if(sobject[i].type&&sobject[i].type!=SMOKECLOUD)
 			{
 				theypos=sobject[i].pos;
 				theypos.y=0;
@@ -1674,8 +1677,11 @@ void Draw(float offset)
 	//debug aid: HK_FXTEST=<seconds>, a grenade's explosion 14 units ahead 1 s after the
 	//first frame then every <seconds> (3 if less than 2), and 2 s after each a burst
 	//of 6 bullets from the camera through its smoke, as if fired by the player
-	//(captures of the smoke and of the tunnel the bullets leave; times on stderr)
-	static const char *fxtest=getenv("HK_FXTEST");
+	//(captures of the smoke and of the tunnel the bullets leave; times on stderr).
+	//HK_SMOKETEST=<seconds>: the same with a smoke grenade (host only) dropped there,
+	//the burst 5 s after (the cloud grown)
+	static const char *smoketest=getenv("HK_SMOKETEST");
+	static const char *fxtest=smoketest?smoketest:getenv("HK_FXTEST");
 	if(fxtest)
 	{
 		static DWORD start,lastburst;
@@ -1688,22 +1694,25 @@ void Draw(float offset)
 		int period=atoi(fxtest)>=2?atoi(fxtest)*1000:3000;
 		int since=(int)(curtime-start)-1000;
 		static int lastboom=-1;
-		Vector at=cur->pos+cur->fwd*14;
+		//HK_FXDIST: how far ahead (14), small to see from inside the smoke
+		static float dist=getenv("HK_FXDIST")?(float)atof(getenv("HK_FXDIST")):14;
+		Vector at=cur->pos+cur->fwd*dist;
 		float ground=GetLandSmooth(at.x,at.z);
 		if(since>=0&&since/period!=lastboom)
 		{
 			lastboom=since/period;
 			at.y=ground+.5f;
-			FxExplosion(at);
+			if(smoketest&&server) ServerThrowSmoke(GetLocalNum(),at+Vector(0,2,0),Vector(0,-1,0));
+			else if(!smoketest) FxExplosion(at);
 			shots=0;
-			fprintf(stderr,"FXTEST: explosion at %.1f,%.1f,%.1f (time %u)\n",at.x,at.y,at.z,(unsigned)curtime);
+			fprintf(stderr,"FXTEST: %s at %.1f,%.1f,%.1f (time %u)\n",smoketest?"smoke grenade":"explosion",at.x,at.y,at.z,(unsigned)curtime);
 		}
 		int phase=since>=0?since%period:-1;
-		if(phase>=2000&&shots<6&&curtime-lastburst>=60)
+		if(phase>=(smoketest?5000:2000)&&shots<6&&curtime-lastburst>=60)
 		{
-			//a gun's spread around the smoke's middle, 2 units above the ground
+			//a gun's spread around the smoke's middle, 2 units above the ground (3 in a cloud)
 			Vector side=CrossProduct(cur->fwd,Vector(0,1,0));
-			Vector aim=Vector(at.x,ground+2,at.z)+side*((shots%3-1)*.25f)+Vector(0,(shots/3)*.3f-.15f,0);
+			Vector aim=Vector(at.x,ground+(smoketest?3:2),at.z)+side*((shots%3-1)*.25f)+Vector(0,(shots/3)*.3f-.15f,0);
 			Vector from=cur->pos-Vector(0,.3f,0);
 			Vector to=from+Normalize(aim-from)*30;
 			//in ticks' segments, as TickObjects moves bullets
@@ -1779,7 +1788,7 @@ void Draw(float offset)
 		us.landsize=LANDGRIDSIZE;
 		//the flags and stations stay in the open
 		for(int i=0;i<MAXSERVEROBJS&&us.numavoid<32;i++)
-			if(sobject[i].type)
+			if(sobject[i].type&&sobject[i].type!=SMOKECLOUD)
 			{
 				Vector p=sobject[i].pos;
 				MakeClose(&p);
@@ -1956,6 +1965,13 @@ void Draw(float offset)
 	}
 	for(i=0;i<MAXSERVEROBJS;i++)
 	{
+		if(sobject[i].type==SMOKECLOUD)
+		{
+			//in flight: the grenade (the cloud is effects.cpp's)
+			if(SmokeCloudAge(i)<0&&MakeClose(&sobject[i].pos))
+				projectile[2].Draw(sobject[i].pos,Vector(0,0,1),Vector(1,0,0));
+			continue;
+		}
 		if(sobject[i].type)
 		{
 			if(sobject[i].type==1) sobject[i].dir=Normalize(CrossProduct(sobject[i].dir,Vector(0,1,0))*.01+sobject[i].dir);
@@ -2168,6 +2184,7 @@ void Draw(float offset)
 	REnable(RCAP_TEXTURE);
 	DrawGunExplosions(0);
 	if(!fxprefs.viewmodel) DrawGunExplosions(1);
+	FxDrawSmokeClouds();   //Classic: after the muzzle flashes, which it hides
 	
 	
 	

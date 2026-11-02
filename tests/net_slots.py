@@ -19,7 +19,7 @@ local server: slots 1 to 4.
 The server log (its stderr) must show the drops."""
 import math, os, socket, struct, sys, time
 
-SERVER = ("127.0.0.1", 27020)
+SERVER = ("127.0.0.1", int(os.environ.get("NET_TEST_PORT", "27020")))   # see run_netplay_tests.sh
 REQUESTENTER, INFO, PLAYERPOSITION, SIMPLE, FIREGUN = 1, 2, 3, 5, 10
 REQUESTINFO, ENTER, EXIT, PORTACK, PLAYERNAMES, JOINGAME, DELETEPLAYER, PING, PINGREPLY = 1, 2, 3, 4, 6, 8, 11, 12, 13
 KILLED, CHANGETEAM, SERVERHIT = 19, 20, 28

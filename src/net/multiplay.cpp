@@ -6,6 +6,7 @@
 #include "models.h"
 #include "cfgfile.h"
 #include "multiplay.h"
+#include "smoke.h"
 #include "land.h"
 #include "hugekilla.h"
 #include "redrawing.h"
@@ -137,7 +138,7 @@ static void SendRequestEnter()
 	int len=2+nl+1;
 	len+=WriteVersionTrailer(&buf[len]);
 	int cookie=haveentercookie&&entercookieip==infosock.dest.sin_addr.s_addr;
-	len+=WriteHelloCaps(&buf[len],HELLOCAP_COOKIE|HELLOCAP_SERVERHITS|HELLOCAP_STABLESLOTS|HELLOCAP_POSSEQ,
+	len+=WriteHelloCaps(&buf[len],HELLOCAP_COOKIE|HELLOCAP_SERVERHITS|HELLOCAP_STABLESLOTS|HELLOCAP_POSSEQ|HELLOCAP_SMOKE,
 		cookie?entercookie:0);
 	infosock.Send(buf,len);
 	infosock.Flush();
@@ -189,7 +190,7 @@ static void SendInfo(SOCKADDR_IN dest)
 	buf[len++]=(char)sv.capturelimit;
 	//capabilities (M11 phases 2, 3a and 3b, version.h; ignored by older clients)
 	buf[len++]=(char)((ac_enable?HELLOCAP_COOKIE|(ac_requirecookie?HELLOCAP_REQUIRECOOKIE:0)|
-		(ac_serverhits?HELLOCAP_SERVERHITS:0):0)|(ac_stableslots?HELLOCAP_STABLESLOTS:0));
+		(ac_serverhits?HELLOCAP_SERVERHITS:0):0)|(ac_stableslots?HELLOCAP_STABLESLOTS:0)|HELLOCAP_SMOKE);
 	infosock.dest=dest;
 	infosock.Send(buf,len);
 	infosock.Flush();
@@ -221,6 +222,8 @@ static int ValidPlayer(int n)
 {
 	return n>=0&&n<MAXPLAYERS;
 }
+
+static ServerObject SObjectFor(int num,int i);   //what client i gets of sobject[num]
 
 static int ValidSObj(int n)
 {
@@ -780,6 +783,22 @@ static void AcSendHitMode(int i)
 	clientsock[i].SendReliable(mode.b,sizeof(mode.b),0);
 }
 
+//smoke grenades: only when every player in the game would see them (an older
+//client never gets the smoke: its player would see through it)
+int ServerSmokeAllowed()
+{
+	for(int i=1;i<numplayers;i++)
+		if(slotused[i]&&!(acplayer[i].caps&HELLOCAP_SMOKE)) return 0;
+	return 1;
+}
+
+static void SendSmokeMode(int i,int allowed)
+{
+	if(!(acplayer[i].caps&HELLOCAP_SMOKE)) return;
+	SimpleBuf mode=MakeSimple(SMOKEMODE,allowed,0);
+	clientsock[i].SendReliable(mode.b,sizeof(mode.b),0);
+}
+
 //every server frame: where each player is (the shooters' lag), and the hit mode
 //again to the clients when ac_serverhits or ac_enable change on the console
 static void AcServerFrame()
@@ -790,6 +809,13 @@ static void AcServerFrame()
 		for(int i=1;i<numplayers;i++)
 			if(GetPlayer(i)->playstate>=10) AcSendHitMode(i);
 	lastmode=mode;
+	//smoke grenades: an older client joining or leaving switches them
+	static int lastsmoke=-1;
+	int smoke=ServerSmokeAllowed();
+	if(smoke!=lastsmoke&&lastsmoke>=0)
+		for(int i=1;i<numplayers;i++)
+			if(slotused[i]&&GetPlayer(i)->playstate>=10) SendSmokeMode(i,smoke);
+	lastsmoke=smoke;
 	for(int i=0;i<numplayers;i++)
 	{
 		Player *pl=GetPlayer(i);
@@ -1009,6 +1035,7 @@ void Disconnect()
 	server=0;
 	connected=0;
 	clientserverhits=0;
+	SmokeSetAllowed(0);
 	numplayers=0;
 	memset(slotused,0,sizeof(slotused));
 	VoiceReset();
@@ -1102,7 +1129,7 @@ void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pn
 				static ServerObjectSnapshot snapshot;
 				static char sobjectbuf[SNAPSHOTSIZE];
 				snapshot.type=SERVEROBJECTSNAPSHOT;
-				memcpy(snapshot.obj,sobject,sizeof(snapshot.obj));
+				for(int o=0;o<MAXSERVEROBJS;o++) snapshot.obj[o]=SObjectFor(o,pnum);
 				int snapsize=WriteSnapshot(sobjectbuf,sizeof(sobjectbuf),&snapshot);
 				clientsock[pnum].SendReliable(sobjectbuf,snapsize,0);
 				SendServerVars(pnum); 
@@ -1131,6 +1158,7 @@ void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pn
 				GetPlayer(pnum)->playstate=10;
 				AcJoin(pnum);
 				AcSendHitMode(pnum);
+				SendSmokeMode(pnum,ServerSmokeAllowed());
 				
 				ConsoleDisplayText("received blockinfo acknowledgement, sending objects and join game");
 				break;
@@ -1426,6 +1454,19 @@ void ServerLoop()
 					TryFireGun(i,firegun.pos,firegun.dir,firegun.reload);
 					break;
 				}
+				case THROWSMOKE:
+				{
+					//a smoke grenade: a grenade of its magazine, at its rate (AcFire)
+					FireGunDirection throwsmoke;
+					if(!ReadFireGun(&msg,clen,&throwsmoke)) break;
+					if(NetEvents()) fprintf(stderr,"net: smoke grenade from player %d\n",i);
+					if(!(acplayer[i].caps&HELLOCAP_SMOKE)||!ServerSmokeAllowed()) break;
+					if(GetPlayer(i)->weapon!=4||GetPlayer(i)->playstate!=10) break;
+					throwsmoke.reload=0;
+					if(!AcFire(i,&throwsmoke)) break;
+					ServerThrowSmoke(i,throwsmoke.pos,throwsmoke.dir);
+					break;
+				}
 				case KILLEDPOSITION:
 				{
 					KilledPosition kp;
@@ -1560,6 +1601,7 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 					connected=1;
 					SetLocalNum(msg2);
 					clientserverhits=0;   //until this server says otherwise (HITMODE)
+					SmokeSetAllowed(0);   //and SMOKEMODE
 					GetLocalPlayer()->playstate=1;
 					GetLocalPlayer()->timeout=curtime+PEERTIMEOUT;
 					numplayers=msg2+1;
@@ -1622,6 +1664,12 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 				SetSoundPosition(msg2+1,GetPlayer(msg)->pos);
 				if(msg2<500) PlaySound(msg2+1,0);
 				else PlaySound(msg2,0);
+				break;
+			}
+		case SMOKEMODE:
+			{
+				//this server takes smoke grenades now, or no longer (smoke.h)
+				if(connected) SmokeSetAllowed(msg);
 				break;
 			}
 		case HITMODE:
@@ -1814,14 +1862,20 @@ void ClientLoop()
 					static ServerObjectSnapshot snapshot;
 					memcpy(snapshot.obj,sobject,sizeof(snapshot.obj));   //keeps the (unsent) timeouts
 					if(ReadSnapshot(&msg,msglen,&snapshot))
+					{
 						memcpy(sobject,snapshot.obj,sizeof(snapshot.obj));
+						for(int o=0;o<MAXSERVEROBJS;o++) SmokeReceived(o);
+					}
 					break;
 				}
 			case UPDATESERVEROBJECT:
 				{
 					UpdateServerObject update;
 					if(ReadUpdateServerObject(&msg,msglen,&update)&&ValidSObj(update.num))
+					{
 						ReceiveUpdateServerObject(&update);
+						SmokeReceived(update.num);
+					}
 					break;
 				}
 			case KILLEDPOSITION:
@@ -2740,6 +2794,21 @@ int TryFireGun(int num,Vector pos,Vector dir,char reload)
 	return 1;
 }
 
+//the local player threw a smoke grenade: to the server, which flies it (smoke.cpp)
+void SendThrowSmoke(const Vector &pos,const Vector &dir)
+{
+	if(server) return;
+	FireGunDirection t;
+	t.type=THROWSMOKE;
+	t.pnum=GetLocalNum();
+	t.reload=0;
+	t.dir=dir;
+	t.pos=pos;
+	char buf[FIREGUNSIZE];
+	int size=WriteFireGun(buf,sizeof(buf),&t);
+	datasock.SendReliable(buf,size,0);
+}
+
 //sends to all computers to play this sound
 
 void HavePain(int sound,int targ)
@@ -2890,20 +2959,39 @@ void ChangeTeam(int player,int team)
 //updates the position of an server controlled object (sent reliably so it only
 //needs to be done once.
 
+//server object num as client i gets it: a smoke grenade (smoke.h) with its age
+//now, or an empty slot for a client that doesn't know them
+static ServerObject SObjectFor(int num,int i)
+{
+	ServerObject o=sobject[num];
+	if(o.type!=SMOKECLOUD) return o;
+	if(SmokeHiddenFrom(o.type,(acplayer[i].caps&HELLOCAP_SMOKE)!=0))
+	{
+		memset(&o,0,sizeof(o));
+		o.attached=-1;
+		return o;
+	}
+	float d[3]={o.dir.x,o.dir.y,o.dir.z};
+	if(SmokeLanded(d)) SmokeEncode(d,1,SMOKE_LIFETIME-(float)(int)(o.timeout-curtime)/1000);
+	o.dir=Vector(d[0],d[1],d[2]);
+	return o;
+}
+
 void SendUpdateServerObject(int num)
 {
 	if(!ValidSObj(num)) return;
 	UpdateServerObject update;
 	update.type=UPDATESERVEROBJECT;
 	update.num=num;
-	update.updated=sobject[num];   //timeout is not sent
 	char buf[UPDATESERVEROBJECTSIZE];
-	int size=WriteUpdateServerObject(buf,sizeof(buf),&update);
 	if(server)
 	{
 		for(int i=1;i<numplayers;i++)
 		{
-			if(slotused[i]) clientsock[i].SendReliable(buf,size,0);
+			if(!slotused[i]) continue;
+			update.updated=SObjectFor(num,i);   //timeout is not sent
+			int size=WriteUpdateServerObject(buf,sizeof(buf),&update);
+			clientsock[i].SendReliable(buf,size,0);
 		}
 	}
 }

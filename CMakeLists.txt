@@ -263,6 +263,7 @@ set(SOURCES
   src/game/land.cpp
   src/game/mapfile.cpp
   src/game/playing.cpp
+  src/game/smoke.cpp
   src/game/structures.cpp
   src/game/Vector.cpp
   src/net/lobby.cpp
@@ -502,11 +503,15 @@ add_test(NAME signaling COMMAND signaling_test)
 add_executable(input_test tests/input_test.cpp)
 target_include_directories(input_test PRIVATE ${SRC}/ui)
 add_test(NAME input COMMAND input_test)
+# smoke grenades: the cloud over its life, its parts, its flight, the wire state (smoke.h)
+add_executable(smoke_test tests/smoke_test.cpp)
+target_include_directories(smoke_test PRIVATE ${HK_TEST_INCLUDES})
+add_test(NAME smoke COMMAND smoke_test)
 if(EMSCRIPTEN)
   # the web build's unit tests run in Node.js (the toolchain's emulator), on the
   # real files (fileio_test makes folders)
   foreach(t worldrandom_test wire_test voice_test anticheat_test hmac_test fileio_test map_test
-      lobby_test signaling_test input_test)
+      lobby_test signaling_test input_test smoke_test)
     target_link_options(${t} PRIVATE -sNODERAWFS=1 -sALLOW_MEMORY_GROWTH=1 -sSTACK_SIZE=1MB)
   endforeach()
   target_link_options(lobby_test PRIVATE -sFETCH=1)   # lobby.cpp's emscripten_fetch
@@ -615,7 +620,7 @@ endif()
 option(EDIFICE_WERROR "Treat warnings in the game code as errors" OFF)
 if(EDIFICE_WERROR)
   set(HK_WERROR_TARGETS Edifice worldrandom_test wire_test voice_test anticheat_test hmac_test
-    fileio_test map_test lobby_test signaling_test)
+    fileio_test map_test lobby_test signaling_test smoke_test)
   if(EDIFICE_GNS)
     list(APPEND HK_WERROR_TARGETS gns_loopback_test gns_netplay_test gns_p2p_test)
   endif()

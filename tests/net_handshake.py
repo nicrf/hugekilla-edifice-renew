@@ -1,9 +1,9 @@
 """Checks the netplay version handshake against a running local server:
     HK_AUTOSTART=1 <Edifice binary> &  then  python3 tests/net_handshake.py
 (server info port 27020, see data/net.ini)."""
-import socket, struct, sys, time
+import os, socket, struct, sys, time
 
-SERVER = ("127.0.0.1", 27020)
+SERVER = ("127.0.0.1", int(os.environ.get("NET_TEST_PORT", "27020")))   # see run_netplay_tests.sh
 SIMPLE, INFO, REQUESTENTER, CHATMESSAGE = 5, 2, 1, 8
 REQUESTINFO, ENTER, SERVERFULL, VERSIONMISMATCH = 1, 2, 15, 26
 MAGIC = 0x31564445

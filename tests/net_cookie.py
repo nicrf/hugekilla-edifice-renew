@@ -13,7 +13,7 @@ The test reads HK_AC_VARS for ac_cookietime (the expiry check needs it short)
 and the mode. tests/run_netplay_tests.sh runs both."""
 import os, socket, struct, sys, time
 
-SERVER = ("127.0.0.1", 27020)
+SERVER = ("127.0.0.1", int(os.environ.get("NET_TEST_PORT", "27020")))   # see run_netplay_tests.sh
 SIMPLE, INFO, REQUESTENTER, CHATMESSAGE = 5, 2, 1, 8
 REQUESTINFO, ENTER, VERSIONMISMATCH, ENTERCOOKIE = 1, 2, 26, 27
 CAP_COOKIE, CAP_HASCOOKIE, CAP_REQUIRECOOKIE = 1, 2, 4

@@ -1585,7 +1585,7 @@ void main() {
 // thinned where bullets went through (capsules that close again, effects.cpp).
 // Lit by the sun (a few steps towards it, the scene's shadow where the ray enters)
 // and the sky. The ray stops at the scene's depth: the smoke is cut softly by what
-// stands in it. Hard caps: 10 lumps and 6 tunnels a pixel, 28 steps, 3 to the sun.
+// stands in it. Hard caps: 12 lumps and 6 tunnels a pixel, 28 steps, 3 to the sun.
 @fs smokevol_fs
 @include_block common
 @include_block scene_ub
@@ -1603,7 +1603,7 @@ layout(binding=0) uniform smokevol_params {
 	vec4 frame;         // xy: 1/size of the frame, z: number of tunnels, w: time
 	vec4 camfwd;        // xyz: the camera's forward, world
 	vec4 vols[48];      // xyz: center, w: radius
-	vec4 info[48];      // x: density, y: grey, z: vertical squash
+	vec4 info[48];      // x: density, y: grey, z: vertical squash, w: solid core (smoke grenades)
 	vec4 tfrom[16];     // xyz: start, w: radius
 	vec4 tto[16];       // xyz: end, w: strength
 };
@@ -1613,7 +1613,7 @@ layout(binding=0) uniform smokevol_params {
 layout(location=0) out vec4 frag_color;
 layout(location=1) out vec4 frag_depth;
 
-#define MAXHIT 10
+#define MAXHIT 12
 #define MAXTHIT 6
 int hit[MAXHIT];
 int nhit;
@@ -1624,6 +1624,7 @@ int nthit;
 float smoke_density(vec3 p, bool detail, out float grey) {
 	float d = 0.0;
 	float g = 0.0;
+	float core = 0.0;
 	for (int k = 0; k < MAXHIT; k++) {
 		if (k >= nhit) break;
 		int i = hit[k];
@@ -1634,6 +1635,7 @@ float smoke_density(vec3 p, bool detail, out float grey) {
 			float w = info[i].x * f * f * (3.0 - 2.0 * f);
 			d += w;
 			g += w * info[i].y;
+			core += w * info[i].w;
 		}
 	}
 	grey = d > 1e-4 ? g / d : 0.5;
@@ -1649,6 +1651,9 @@ float smoke_density(vec3 p, bool detail, out float grey) {
 	// (the cell noise sits mostly high: stretched so billows and gaps both show)
 	float n = smoothstep(0.4, 0.95, n1) * 0.8 + smoothstep(0.3, 1.0, n2) * 0.2;
 	d = max(n + cover * 0.12 - (1.0 - cover) * 0.85 - 0.1, 0.0) * (1.0 + cover);
+	// a smoke grenade has no hole in its middle, whatever the noise (its edges
+	// still break into billows)
+	d = max(d, core * smoothstep(0.35, 0.85, cover));
 	for (int k = 0; k < MAXTHIT; k++) {
 		if (k >= nthit) break;
 		int i = thit[k];
@@ -1756,7 +1761,7 @@ void main() {
 			// the sky's light, less under more smoke
 			float sk = exp(-smoke_density(p + vec3(0.0, 1.2, 0.0), false, g2) * 1.2);
 			vec3 albedo = srgb_to_linear(vec3(grey));
-			vec3 s = albedo * (suncolor.rgb * shadow * tl * phase * 0.6 + sky * mix(0.35, 1.0, sk));
+			vec3 s = albedo * (suncolor.rgb * shadow * tl * phase * 0.6 + sky * mix(0.55, 1.0, sk));
 			float a = exp(-dens * 2.2 * dt);
 			light += trans * s * (1.0 - a);
 			trans *= a;

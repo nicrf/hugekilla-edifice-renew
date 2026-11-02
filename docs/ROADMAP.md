@@ -208,7 +208,8 @@ Demande de l'utilisateur : un rendu « fou » (eau réaliste à vagues, herbe au
 - *Fait (2) :* arbres, buissons et rochers instanciés, placés de façon déterministe d'après le relief, LOD, vent, ombres, reflets ; visuels seulement (voir la note d'équité ci-dessous).
 - *Fait (3) :* nuages volumétriques (couche lancée en rayons au quart de la taille, bruit 3D, éclairage par le soleil et le ciel).
 - *Fait (4) :* fumée volumétrique : la fumée des explosions lancée en rayons (masses de densité érodées par un bruit 3D, éclairées par le soleil et le ciel, demi-taille, suréchantillonnage selon la profondeur), et les balles qui y laissent un tunnel qui se referme (visuel, côté client).
-- *Suites demandées :* grenade fumigène (gameplay, réseau) : PR suivante. Note d'équité : la végétation et les rochers d'Ultra peuvent cacher un joueur qu'un joueur Classic voit.
+- *Fait (5) :* grenade fumigène : second mode de la grenade, volée et posée par le serveur (objet serveur `SMOKECLOUD`, 25 s), envoyée aux seuls clients qui l'annoncent (`HELLOCAP_SMOKE`), permise seulement quand tous les joueurs l'ont ; elle cache sans arrêter les balles, aussi opaque en Classic (sprites épais) qu'en Ultra (lancée en rayons). Détails dans `BUILD.md`.
+- Note d'équité : la végétation et les rochers d'Ultra peuvent cacher un joueur qu'un joueur Classic voit.
 
 ### M14 - Portage web (L puis M)
 Le rendu ne pose pas de difficulté après M13 : SDL2 et sokol_gfx sont supportés par Emscripten. Les vrais obstacles sont le réseau et l'environnement du navigateur.
