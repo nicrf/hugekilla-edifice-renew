@@ -19,6 +19,7 @@ void RSokolReadColor(sg_image image,int x,int y,int w,int h,unsigned char *rgba)
 int RSokolReadDepth(sg_image image,int x,int y,float *depth);   //0 if it couldn't
 int RSokolOriginTopLeft();                //Metal, D3D11: the image's first row is the top
 int RSokolSoftwareRenderer();             //Mesa's software GL: no anisotropic filtering (Ultra)
+void RSokolDumpFrame(sg_image image,int w,int h);   //HK_DUMPFRAMES, after the frame's sg_commit
 
 //renderer_sokol.cpp
 void RSokolEndFrame();                    //RPresent: draws, presents, frees what the frame replaced
