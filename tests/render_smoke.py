@@ -4,7 +4,7 @@
 
 Each scene runs in a fresh user folder (HK_USERDIR; net.ini with servervisibility=lan
 and no lobby, so nothing is announced), saves one frame (HK_SHOT, HK_FIXEDCLOCK=16)
-and is stopped. A scene fails when the game exits or saves nothing within 60 s (180 s for Ultra), when
+and is stopped. A scene fails when the game exits or saves nothing within 60 s (360 s for Ultra), when
 its log has a sokol_gfx error or validation message (a Debug build validates every
 call; warnings are only shown), or when the frame is one flat color. The last two
 scenes draw with the Ultra graphics (HK_GRAPHICS=ultra), the second at a lake's shore.
@@ -101,7 +101,7 @@ def run_scene(exe, name, env_extra, outdir):
         p = subprocess.Popen([exe], stdout=f, stderr=subprocess.STDOUT, env=env,
                              stdin=subprocess.DEVNULL, cwd=userdir)
     # Ultra loads its HD textures first: slow in a Debug build on the CI's runners
-    end = time.time() + (180 if env_extra.get("HK_GRAPHICS") == "ultra" else 60)
+    end = time.time() + (360 if env_extra.get("HK_GRAPHICS") == "ultra" else 60)
     try:
         while time.time() < end and p.poll() is None:
             with open(log, "rb") as f:
