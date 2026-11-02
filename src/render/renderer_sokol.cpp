@@ -126,7 +126,9 @@ void RBackendInit()
 	desc.logger.func=Log;
 	desc.image_pool_size=2048;      //textures (some 300), and those replaced in a frame
 	desc.view_pool_size=2048;
-	desc.pipeline_pool_size=NUMPIPES+16;
+	//the classic pipelines, and Ultra's: its own variants of them (HDR, lit, smoke) and its passes
+	desc.pipeline_pool_size=4*NUMPIPES+64;
+	desc.shader_pool_size=64;
 	//a frame applies two blocks per command, 256 bytes each at worst; split if more
 	desc.uniform_buffer_size=16*1024*1024;
 	sg_setup(&desc);
