@@ -4,6 +4,7 @@
 //player (phases 2 and 3) can run the same steps and get the same result.
 
 #include <math.h>
+#include <string.h>
 #include "movement.h"
 #include "land.h"   //WATERHEIGHT
 
@@ -291,4 +292,117 @@ void MovePlayer(Player *cur,const MoveInput &in,float sf,const ServerVars &sv,co
 		ev->splashpos=cur->pos;
 	}
 	cur->pos+=cur->vel*sf;
+}
+
+//---- input commands (docs/M16.md, phases 2 and 3) ----
+
+void GetMoveState(const Player *p,MoveState *s)
+{
+	s->pos=p->pos;
+	s->vel=p->vel;
+	s->thrustfuel=p->thrustfuel;
+	s->roll=p->roll;
+	s->runtime=p->runtime;
+	s->legframe=p->legframe;
+	s->hanggliding=p->hanggliding;
+	s->jump=p->jump;
+}
+
+void SetMoveState(Player *p,const MoveState &s)
+{
+	p->pos=s.pos;
+	p->vel=s.vel;
+	p->thrustfuel=s.thrustfuel;
+	p->roll=s.roll;
+	p->runtime=s.runtime;
+	p->legframe=s.legframe;
+	p->hanggliding=s.hanggliding;
+	p->jump=s.jump;
+}
+
+static const float YAWUNIT=6.28318530718f/65536;   //radians per step of MoveCmd::yaw
+static const float PITCHUNIT=1/10000.f;
+
+//-127..127 of a stick's -1..1
+static signed char PadByte(float v)
+{
+	int i=(int)lrintf(v*127);
+	if(i>127) i=127;
+	if(i<-127) i=-127;
+	return (signed char)i;
+}
+
+MoveCmd MakeMoveCmd(const Player *p,int padactive,float padfwd,float padstrafe,unsigned int num)
+{
+	MoveCmd c;
+	memset(&c,0,sizeof(c));
+	c.keys=(p->up?MOVEKEY_UP:0)|(p->down?MOVEKEY_DOWN:0)|(p->lstrafe?MOVEKEY_LEFT:0)|
+		(p->rstrafe?MOVEKEY_RIGHT:0)|(p->jetpack?MOVEKEY_JETPACK:0)|(p->hangglide?MOVEKEY_GLIDE:0)|
+		(p->jump?MOVEKEY_JUMP:0);
+	if(padactive)
+	{
+		c.keys|=MOVEKEY_PAD;
+		c.padfwd=PadByte(padfwd);
+		c.padstrafe=PadByte(padstrafe);
+	}
+	//fwd is (sin, 0, cos) of the heading, tilt (cos, sin, 0) of the pitch
+	c.yaw=(unsigned short)((int)lrintf(atan2f(p->fwd.x,p->fwd.z)/YAWUNIT)&0xFFFF);
+	int pitch=(int)lrintf(atan2f(p->tilt.y,p->tilt.x)/PITCHUNIT);
+	if(pitch>32767) pitch=32767;
+	if(pitch<-32767) pitch=-32767;
+	c.pitch=(short)pitch;
+	c.weapon=(unsigned char)p->weapon;
+	c.flags=p->playstate==10?MOVECMD_ALIVE:0;
+	unsigned long long n=num;
+	c.msec=(unsigned char)((n+1)*1000/60-n*1000/60);
+	return c;
+}
+
+void MoveCmdView(const MoveCmd &c,Vector *fwd,Vector *tilt,Vector *dir)
+{
+	float yaw=c.yaw*YAWUNIT;
+	float pitch=c.pitch*PITCHUNIT;
+	*fwd=Vector(sinf(yaw),0,cosf(yaw));
+	*tilt=Vector(cosf(pitch),sinf(pitch),0);
+	*dir=Normalize(tilt->x*(*fwd)+Vector(0,tilt->y,0));
+}
+
+void WrapPlayerPos(Vector *pos)
+{
+	if(pos->x<LANDGRIDSIZE) pos->x+=LANDGRIDSIZE;
+	if(pos->z<LANDGRIDSIZE) pos->z+=LANDGRIDSIZE;
+	if(pos->x>LANDGRIDSIZE*2) pos->x-=LANDGRIDSIZE;
+	if(pos->z>LANDGRIDSIZE*2) pos->z-=LANDGRIDSIZE;
+}
+
+void ApplyMoveCmd(Player *p,const MoveCmd &c,float speedpenalty,float sf,const ServerVars &sv,
+	const MoveWorld &w,MoveEvents *ev,int keepview)
+{
+	p->up=(c.keys&MOVEKEY_UP)!=0;
+	p->down=(c.keys&MOVEKEY_DOWN)!=0;
+	p->lstrafe=(c.keys&MOVEKEY_LEFT)!=0;
+	p->rstrafe=(c.keys&MOVEKEY_RIGHT)!=0;
+	p->jetpack=(c.keys&MOVEKEY_JETPACK)!=0;
+	p->hangglide=(c.keys&MOVEKEY_GLIDE)!=0;
+	p->jump=(c.keys&MOVEKEY_JUMP)!=0;
+	Vector fwd,tilt,dir;
+	MoveCmdView(c,&fwd,&tilt,&dir);
+	Vector keptfwd=p->fwd,kepttilt=p->tilt,keptdir=p->dir;
+	p->fwd=fwd;
+	p->tilt=tilt;
+	p->dir=dir;
+	WrapPlayerPos(&p->pos);
+	MoveInput in;
+	in.local=1;   //its glider folds when the key is let go: the key comes with the command
+	in.pad=(c.keys&MOVEKEY_PAD)!=0;
+	in.padfwd=c.padfwd/127.f;
+	in.padstrafe=c.padstrafe/127.f;
+	in.speedpenalty=speedpenalty;
+	MovePlayer(p,in,sf,sv,w,ev);
+	if(keepview)
+	{
+		p->fwd=keptfwd;
+		p->tilt=kepttilt;
+		p->dir=keptdir;
+	}
 }

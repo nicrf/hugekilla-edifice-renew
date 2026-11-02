@@ -1,6 +1,10 @@
 // Unit test of src/net/wire.h (roadmap M6): exact little-endian bytes, round
-// trips, and readers/writers that stop at the end of their buffer.
+// trips, and readers/writers that stop at the end of their buffer. Also the M16
+// messages built on it (src/net/netsync.h: INPUTCMD, SNAPSHOT) and the second
+// capability byte of REQUESTENTER (src/net/version.cpp).
 #include "wire.h"
+#include "netsync.h"
+#include "version.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -99,6 +103,96 @@ int main()
 	CHECK(raw[0]==4&&raw[3]==1&&WireGetU32(raw)==0x01020304);
 	WirePutU16(raw,0xBEEF);
 	CHECK(raw[0]==0xEF&&WireGetU16(raw)==0xBEEF);
+
+	// M16 (src/net/netsync.h): INPUTCMD, exact bytes and round trip
+	{
+		InputCmdMessage m;
+		memset(&m,0,sizeof(m));
+		m.type=INPUTCMD;
+		m.n=2;
+		m.firstcmd=0x01020304;
+		m.acksnap=7;
+		m.cmd[0].keys=MOVEKEY_UP|MOVEKEY_PAD;
+		m.cmd[0].padfwd=-127;
+		m.cmd[0].padstrafe=5;
+		m.cmd[0].yaw=0xABCD;
+		m.cmd[0].pitch=-2;
+		m.cmd[0].weapon=3;
+		m.cmd[0].flags=MOVECMD_ALIVE;
+		m.cmd[0].msec=17;
+		m.cmd[1]=m.cmd[0];
+		m.cmd[1].msec=16;
+		unsigned char ib[64];
+		int n=WriteInputCmd(ib,sizeof(ib),&m);
+		CHECK(n==INPUTCMDHEADER+2*MOVECMDSIZE);
+		const unsigned char head[]={INPUTCMD,2, 4,3,2,1, 7,0,0,0,
+			MOVEKEY_UP|MOVEKEY_PAD,0x81,5, 0xCD,0xAB, 0xFE,0xFF, 3,1,17};
+		CHECK(memcmp(ib,head,sizeof(head))==0);
+		InputCmdMessage o;
+		CHECK(ReadInputCmd(ib,n,&o));
+		CHECK(o.n==2&&o.firstcmd==0x01020304&&o.acksnap==7);
+		CHECK(o.cmd[0].padfwd==-127&&o.cmd[0].pitch==-2&&o.cmd[0].yaw==0xABCD&&o.cmd[1].msec==16);
+		// cut short, no command, or more than 4: dropped
+		CHECK(!ReadInputCmd(ib,n-1,&o));
+		ib[1]=0;
+		CHECK(!ReadInputCmd(ib,n,&o));
+		ib[1]=5;
+		CHECK(!ReadInputCmd(ib,sizeof(ib),&o));
+		m.n=5;
+		CHECK(WriteInputCmd(ib,sizeof(ib),&m)==0);
+		// serial numbers across the wrap
+		CHECK(CmdNewer(1,0xFFFFFFFFu)&&!CmdNewer(0xFFFFFFFFu,1)&&!CmdNewer(5,5));
+	}
+	// SNAPSHOT with only our own player (phase 2): floats exact
+	{
+		SnapshotMessage s;
+		memset(&s,0,sizeof(s));
+		s.type=SNAPSHOT;
+		s.tick=100;
+		s.lastcmd=0xFFFFFFF0u;
+		s.self=1;
+		s.state.pos[0]=700.123456f;
+		s.state.vel[1]=-1e-7f;
+		s.state.thrustfuel=.5f;
+		s.state.speedpenalty=1.1f;
+		s.state.flags=SYNCSTATE_GLIDING|SYNCSTATE_JUMP;
+		s.state.playstate=10;
+		s.state.life=-5;
+		unsigned char sb[SNAPSHOTSELFSIZE+4];
+		int n=WriteSnapshotSelf(sb,sizeof(sb),&s);
+		CHECK(n==SNAPSHOTSELFSIZE);
+		SnapshotMessage o;
+		memset(&o,0x55,sizeof(o));
+		CHECK(ReadSnapshotSelf(sb,n,&o));
+		CHECK(o.tick==100&&o.basetick==0&&o.lastcmd==0xFFFFFFF0u&&o.self==1&&o.n==0);
+		CHECK(o.state.pos[0]==700.123456f&&o.state.vel[1]==-1e-7f&&o.state.thrustfuel==.5f&&o.state.speedpenalty==1.1f);
+		CHECK(o.state.flags==(SYNCSTATE_GLIDING|SYNCSTATE_JUMP)&&o.state.playstate==10&&o.state.life==-5);
+		CHECK(!ReadSnapshotSelf(sb,n-1,&o));
+		s.self=0;
+		CHECK(WriteSnapshotSelf(sb,sizeof(sb),&s)==SNAPSHOTSELFSIZE-SYNCSTATESIZE);
+	}
+	// the second capability byte (version.h): after the cookie, or after caps;
+	// absent (a 0.7 build): 0
+	{
+		char hello[VERSIONTRAILER_MAX+HELLOCAPS_MAX];
+		int t=WriteVersionTrailer(hello);
+		const unsigned char cookie[HELLOCOOKIE_SIZE]={1,2,3,4,5,6,7,8};
+		int c=WriteHelloCaps(hello+t,HELLOCAP_COOKIE|HELLOCAP_INPUTS,cookie);
+		CHECK(c==2+HELLOCOOKIE_SIZE&&(unsigned char)hello[t+c-1]==HELLOCAP_INPUTS>>8);
+		HelloCaps caps;
+		ReadHelloCaps(hello,t+c,&caps);
+		CHECK(caps.caps==(HELLOCAP_COOKIE|HELLOCAP_HASCOOKIE|HELLOCAP_INPUTS)&&caps.cookie[7]==8);
+		ReadHelloCaps(hello,t+c-1,&caps);   //0.7: the cookie and nothing after
+		CHECK(caps.caps==(HELLOCAP_COOKIE|HELLOCAP_HASCOOKIE));
+		ReadHelloCaps(hello,t+5,&caps);     //cut in the cookie: neither it nor caps2
+		CHECK(caps.caps==HELLOCAP_COOKIE);
+		c=WriteHelloCaps(hello+t,HELLOCAP_SMOKE|HELLOCAP_INPUTS,0);
+		CHECK(c==2);
+		ReadHelloCaps(hello,t+c,&caps);
+		CHECK(caps.caps==(HELLOCAP_SMOKE|HELLOCAP_INPUTS));
+		ReadHelloCaps(hello,t+1,&caps);
+		CHECK(caps.caps==HELLOCAP_SMOKE);
+	}
 
 	if(failures) { printf("%d failure(s)\n",failures); return 1; }
 	printf("wire: all checks passed\n");

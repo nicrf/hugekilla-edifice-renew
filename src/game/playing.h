@@ -168,6 +168,15 @@ extern DWORD simtick;         //ticks simulated since the start
 void PlayDrawBegin();
 void PlayDrawEnd();
 void SyncLogFrame();   //HK_SYNCLOG: where each player is drawn (tests/net_sync.py)
+//HK_SYNCLOG: the server's state of the local player against its prediction (phase 3)
+void SyncLogPredict(unsigned int cmd,float poserr,float velerr,int corrected,int replayed,float shift);
+//phase 3: the local player moved by shift outside a tick (the server corrected its
+//prediction): smoothed on screen; Reset forgets what is left of it
+void PlayCorrection(Vector shift);
+void PlayCorrectionReset();
+struct MoveWorld;
+const MoveWorld &GetMoveWorld();   //the land a player moves on (movement.h)
+Vector RandomSpawnPos();           //where a player comes back to life
 void HandleKey(DWORD key,DWORD flags);
 void HandleKeyUp(DWORD key,DWORD flags);
 int HandleConsoleKey(DWORD key,DWORD flags);

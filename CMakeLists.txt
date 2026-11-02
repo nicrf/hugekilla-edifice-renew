@@ -265,6 +265,7 @@ set(SOURCES
   src/game/mapfile.cpp
   src/game/playing.cpp
   src/game/movement.cpp
+  src/game/predict.cpp
   src/game/props.cpp
   src/game/propsgame.cpp
   src/game/smoke.cpp
@@ -468,7 +469,7 @@ enable_testing()
 add_executable(worldrandom_test tests/worldrandom_test.cpp)
 target_include_directories(worldrandom_test PRIVATE ${SRC}/game)
 add_test(NAME worldrandom COMMAND worldrandom_test)
-add_executable(wire_test tests/wire_test.cpp)
+add_executable(wire_test tests/wire_test.cpp src/net/version.cpp)   # + the M16 messages (netsync.h), caps2
 target_include_directories(wire_test PRIVATE ${SRC}/net)
 add_test(NAME wire COMMAND wire_test)
 add_executable(voice_test tests/voice_test.cpp)
@@ -516,7 +517,12 @@ add_executable(smoke_test tests/smoke_test.cpp)
 target_include_directories(smoke_test PRIVATE ${HK_TEST_INCLUDES})
 add_test(NAME smoke COMMAND smoke_test)
 
-add_executable(movement_test tests/movement_test.cpp src/game/movement.cpp src/game/Vector.cpp)
+# a player's move, input commands, prediction and its replay (docs/M16.md). The move is
+# compiled without fused multiply-adds (an ARM Mac and an x86 PC then round the same):
+# the server and a predicting client must agree (a source property: the game's too)
+set_source_files_properties(src/game/movement.cpp PROPERTIES COMPILE_OPTIONS
+  "$<IF:$<CXX_COMPILER_ID:MSVC>,/fp:precise,-ffp-contract=off>")
+add_executable(movement_test tests/movement_test.cpp src/game/movement.cpp src/game/predict.cpp src/game/Vector.cpp)
 target_include_directories(movement_test PRIVATE ${HK_TEST_INCLUDES} ${SRC}/render)   # ase.h (playing.h)
 add_test(NAME movement COMMAND movement_test)
 if(EMSCRIPTEN)
@@ -689,7 +695,8 @@ if(EDIFICE_FUZZ)
   hk_fuzzer(hello tests/fuzz/fuzz_hello.cpp src/net/version.cpp src/game/Vector.cpp)
   foreach(msg Position:PlayerPosition FireGun:FireGunDirection KilledPosition:KilledPosition
       UpdateServerObject:UpdateServerObject Snapshot:ServerObjectSnapshot
-      ServerVars:ServerVarsMessage RGD:RemoteGameDataMessage LandInfo:LandInfo)
+      ServerVars:ServerVarsMessage RGD:RemoteGameDataMessage LandInfo:LandInfo
+      InputCmd:InputCmdMessage SnapshotSelf:SnapshotMessage)
     string(REPLACE ":" ";" pair ${msg})
     list(GET pair 0 msgname)
     list(GET pair 1 msgtype)

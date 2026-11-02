@@ -9,6 +9,7 @@
 #include "multiplay.h"   //the game's types (DWORD, Vector, LandDefs, ServerVars...)
 #include "multiplaystruct.h"
 #include "netmsg.h"
+#include "netsync.h"     //M16: INPUTCMD, SNAPSHOT
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

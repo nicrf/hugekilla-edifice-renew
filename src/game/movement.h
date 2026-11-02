@@ -9,6 +9,7 @@
 #define MOVEMENTH
 
 #include "playing.h"   //Player, ServerVars
+#include "netsync.h"   //MoveCmd
 
 //what is not the player's own state
 struct MoveInput
@@ -50,5 +51,33 @@ void AimPlayer(Player *p);
 //one step of sf (40 ms of the original game per unit) for a player in the game
 //(playstate 10, or 11 waiting to respawn: it falls but doesn't walk, jump or fly)
 void MovePlayer(Player *p,const MoveInput &in,float sf,const ServerVars &sv,const MoveWorld &w,MoveEvents *ev);
+
+//---- input commands (docs/M16.md, phases 2 and 3; the wire format is netsync.h) ----
+
+//what of a player a move changes: what the client predicts and the server sends back
+struct MoveState
+{
+	Vector pos,vel;
+	float thrustfuel,roll,runtime;
+	int legframe;
+	char hanggliding,jump;
+};
+void GetMoveState(const Player *p,MoveState *s);
+void SetMoveState(Player *p,const MoveState &s);
+
+//the command of the local player's keys, view and stick (pad: -1..1, used if
+//active) for one tick; num: its number (the tick), for the 16/17 ms it lasts
+MoveCmd MakeMoveCmd(const Player *p,int padactive,float padfwd,float padstrafe,unsigned int num);
+//the view a command carries: fwd, tilt, and the direction the move uses (without
+//the aim's wobble, so that the server and the client agree)
+void MoveCmdView(const MoveCmd &c,Vector *fwd,Vector *tilt,Vector *dir);
+//x and z into LANDGRIDSIZE..2*LANDGRIDSIZE, as Play() keeps the local player
+void WrapPlayerPos(Vector *pos);
+//one tick of a command for player p (playstate as it is): its keys, the stick, its
+//view (kept on the player if keepview is 0, the server; else only for the move,
+//the client's own view stays the mouse's), then MovePlayer. Deterministic: the same
+//commands from the same state give the same state, to the bit.
+void ApplyMoveCmd(Player *p,const MoveCmd &c,float speedpenalty,float sf,const ServerVars &sv,
+	const MoveWorld &w,MoveEvents *ev,int keepview);
 
 #endif

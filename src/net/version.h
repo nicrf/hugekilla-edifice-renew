@@ -48,10 +48,11 @@ struct PeerVersion
 	char version[16];
 };
 
-// Capabilities (M11 phases 2, 3a and 3b, docs/M11.md; props, docs/PROPS.md), still
-// protocol 5. After the version trailer, where builds before them stop reading:
-//   REQUESTENTER: ... trailer | uint8 caps | cookie[HELLOCOOKIE_SIZE] if caps & HELLOCAP_HASCOOKIE
-//   INFO:         ... trailer | 4 bytes of details | uint8 caps
+// Capabilities (M11 phases 2, 3a and 3b, docs/M11.md; props, docs/PROPS.md; M16,
+// docs/M16.md), still protocol 5. After the version trailer, where builds before them
+// stop reading; the second byte (bits 256 and up) after what the 0.7 builds read:
+//   REQUESTENTER: ... trailer | uint8 caps | cookie[HELLOCOOKIE_SIZE] if caps & HELLOCAP_HASCOOKIE | uint8 caps2
+//   INFO:         ... trailer | 4 bytes of details | uint8 caps | uint8 caps2
 #define HELLOCAP_COOKIE 1        // REQUESTENTER: the client answers ENTERCOOKIE; INFO: the server sends it
 #define HELLOCAP_HASCOOKIE 2     // REQUESTENTER: the cookie follows
 #define HELLOCAP_REQUIRECOOKIE 4 // INFO: clients without HELLOCAP_COOKIE are refused (ac_requirecookie)
@@ -67,18 +68,21 @@ struct PeerVersion
 #define HELLOCAP_SMOKE 128       // REQUESTENTER: the client draws smoke grenades (SMOKECLOUD server objects,
                                  // smoke.h) and may throw them (THROWSMOKE); INFO: the server has them.
                                  // Clients without it never get a smoke object (an empty slot)
+#define HELLOCAP_INPUTS 256      // REQUESTENTER: the client sends numbered input commands (INPUTCMD) and
+                                 // predicts its own player from the server's state; INFO: the server
+                                 // moves such players itself (sv_authmove, M16 phases 2 and 3)
 #define HELLOCOOKIE_SIZE 8
-#define HELLOCAPS_MAX (1+HELLOCOOKIE_SIZE)
+#define HELLOCAPS_MAX (2+HELLOCOOKIE_SIZE)
 
 struct HelloCaps
 {
-	int caps;            // 0: a build without capabilities
+	int caps;            // 0: a build without capabilities; caps2 << 8 included
 	unsigned char cookie[HELLOCOOKIE_SIZE];   // valid if caps & HELLOCAP_HASCOOKIE
 };
 
 int WriteVersionTrailer(char *buf);
 void ReadVersionTrailer(const char *buf, int len, PeerVersion *out);
-// caps byte of a REQUESTENTER, and the cookie if not 0; returns its size
+// caps bytes of a REQUESTENTER, the cookie between them if not 0; returns their size
 int WriteHelloCaps(char *buf, int caps, const unsigned char *cookie);
 // buf, len: from the start of the version trailer of a REQUESTENTER. caps 0 if
 // there is no trailer or nothing after it; HELLOCAP_HASCOOKIE dropped if the

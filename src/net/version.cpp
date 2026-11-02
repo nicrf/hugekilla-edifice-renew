@@ -45,9 +45,14 @@ int WriteHelloCaps(char *buf,int caps,const unsigned char *cookie)
 	if(cookie) caps|=HELLOCAP_HASCOOKIE;
 	else caps&=~HELLOCAP_HASCOOKIE;
 	buf[0]=(char)caps;
-	if(!cookie) return 1;
-	memcpy(buf+1,cookie,HELLOCOOKIE_SIZE);
-	return 1+HELLOCOOKIE_SIZE;
+	int len=1;
+	if(cookie)
+	{
+		memcpy(buf+1,cookie,HELLOCOOKIE_SIZE);
+		len+=HELLOCOOKIE_SIZE;
+	}
+	buf[len++]=(char)(caps>>8);   //caps2: after what the 0.7 builds read (M16)
+	return len;
 }
 
 void ReadHelloCaps(const char *buf,int len,HelloCaps *out)
@@ -60,9 +65,17 @@ void ReadHelloCaps(const char *buf,int len,HelloCaps *out)
 	int pos=11+p[10];   //the version as written (writers stop at 15)
 	if(pos>=len) return;
 	out->caps=p[pos++];
-	if((out->caps&HELLOCAP_HASCOOKIE)&&pos+HELLOCOOKIE_SIZE<=len)
+	if(out->caps&HELLOCAP_HASCOOKIE)
+	{
+		if(pos+HELLOCOOKIE_SIZE>len)
+		{
+			out->caps&=~HELLOCAP_HASCOOKIE;   //cut short: nothing after it either
+			return;
+		}
 		memcpy(out->cookie,p+pos,HELLOCOOKIE_SIZE);
-	else out->caps&=~HELLOCAP_HASCOOKIE;
+		pos+=HELLOCOOKIE_SIZE;
+	}
+	if(pos<len) out->caps|=p[pos]<<8;   //caps2, absent from the 0.7 builds: 0
 }
 
 int VersionCompatible(const PeerVersion *peer,char *reason,int reasonsize)
