@@ -1865,9 +1865,37 @@ void RUltraDrawScene(const RSokolFrame &f,const RSokolCmd *cmds,int n)
 	DrawSky(proj,scene.view);
 	d.Reset();
 	int copied=0;
+	int volsmoke=rultrasmoke.numvol>0;
+	//the gun's depth-only clear (DrawViewModel): the last one, followed by draws
+	//with the gun's own projection (the scene starts with one too, Draw)
+	int gunclear=-1;
+	for(int k=1;volsmoke&&k<n;k++)
+	{
+		const RSokolCmd &c=cmds[k];
+		if(c.mark>=0||c.viewport[2]||c.pipe%2) continue;
+		for(int j=k+1;j<n;j++)
+			if(cmds[j].mark<0&&cmds[j].viewport[2])
+			{
+				if(!SameMat(f.uniforms[cmds[j].uniforms].proj,proj)) gunclear=k;
+				break;
+			}
+	}
 	for(int k=1;k<n;k++)
 	{
 		const RSokolCmd &c=cmds[k];
+		//the volume smoke goes in just before the gun, cut by the whole scene's
+		//depth, and the gun is drawn over it
+		if(volsmoke&&k==gunclear)
+		{
+			sg_end_pass();
+			CopyScene(f,proj);
+			copied=1;
+			DrawVolumeSmoke(f,proj);
+			volsmoke=0;
+			p=Pass(&hdr,1,&hdrdepth,0,"ultra scene, view model");
+			sg_begin_pass(&p);
+			d.Reset();
+		}
 		if(c.mark==RMARK_WATER)
 		{
 			if(!copied)
@@ -1909,8 +1937,7 @@ void RUltraDrawScene(const RSokolFrame &f,const RSokolCmd *cmds,int n)
 		else d.Classic(c);
 	}
 	sg_end_pass();
-	//the volume smoke wants the depth of everything drawn (the copy for the water came before some)
-	int volsmoke=rultrasmoke.numvol>0;
+	//no gun drawn: the volume smoke over everything (the copy for the water came before some)
 	if(!copied||volsmoke) CopyScene(f,proj);
 	if(volsmoke) DrawVolumeSmoke(f,proj);
 	rultrasmoke.numvol=rultrasmoke.numtun=0;
