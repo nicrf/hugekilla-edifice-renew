@@ -1528,3 +1528,288 @@ void main() {
 @end
 
 @program clouds post_vs clouds_fs
+
+//---------------------------------------------------------------- smoke
+
+// the effects' smoke puffs (effects.cpp), billboards drawn as round lumps: lit by
+// the sun (wrapped, shadowed, brighter towards it) and the sky, soft where they
+// cross the scene (the scene's eye depth so far)
+@fs smoke_fs
+@include_block common
+@include_block scene_ub
+layout(binding=0) uniform texture2D tex;
+layout(binding=0) uniform sampler smp;
+layout(binding=1) uniform texture2D skylut;
+layout(binding=1) uniform sampler lutsmp;
+layout(binding=9) uniform texture2D scenedepth;
+layout(binding=6) uniform sampler pointsmp;
+layout(binding=7) uniform texture2D shadowmap;
+layout(binding=4) uniform sampler shadowsmp;
+layout(binding=1) uniform smoke_fs_params {
+	vec4 screen;        // xy: 1/size of the frame
+};
+@include_block sky_fn
+@include_block shadow_fn
+
+in vec2 uv;
+in vec4 color;
+in vec3 eye;
+
+out vec4 frag_color;
+
+void main() {
+	vec4 c = texture(sampler2D(tex, smp), uv) * clamp(color, 0.0, 1.0);
+	vec2 q = (uv - 0.5) * 2.0;
+	vec3 ne = normalize(vec3(q.x, q.y, sqrt(max(1.0 - dot(q, q), 0.0)) + 0.35));
+	vec3 n = normalize((invview * vec4(ne, 0.0)).xyz);
+	vec3 wpos = (invview * vec4(eye, 1.0)).xyz;
+	vec3 v = normalize(eyepos.xyz - wpos);
+	float shadow = shadow_at(wpos, vec3(0.0, 1.0, 0.0), -eye.z);
+	float wrap = max(dot(n, sundir.xyz) * 0.6 + 0.4, 0.0);
+	float phase = hg_phase(dot(-v, sundir.xyz), 0.45) * 4.0 * PI;
+	vec3 albedo = srgb_to_linear(c.rgb);
+	vec3 lit = albedo * (suncolor.rgb * wrap * shadow * (0.25 + 0.2 * phase) + hemi_sky() * 0.85);
+	float sd = textureLod(sampler2D(scenedepth, pointsmp), gl_FragCoord.xy * screen.xy, 0.0).r;
+	float soft = clamp((sd - (-eye.z)) / 0.8, 0.0, 1.0);
+	frag_color = vec4(apply_fog(lit, wpos), c.a * soft);
+}
+@end
+
+@program smoke hdrdraw_vs smoke_fs
+
+//---------------------------------------------------------------- volumetric smoke
+
+// the smoke of explosions (and smoke grenades) as lumps of density, raymarched at
+// half the frame's size after the scene: each lump is an ellipsoid whose density
+// falls off to its edge, the sum carved by a drifting 3D noise into billows, then
+// thinned where bullets went through (capsules that close again, effects.cpp).
+// Lit by the sun (a few steps towards it, the scene's shadow where the ray enters)
+// and the sky. The ray stops at the scene's depth: the smoke is cut softly by what
+// stands in it. Hard caps: 10 lumps and 6 tunnels a pixel, 28 steps, 3 to the sun.
+@fs smokevol_fs
+@include_block common
+@include_block scene_ub
+layout(binding=1) uniform texture2D skylut;
+layout(binding=1) uniform sampler lutsmp;
+layout(binding=9) uniform texture2D scenedepth;
+layout(binding=6) uniform sampler pointsmp;
+layout(binding=7) uniform texture2D shadowmap;
+layout(binding=4) uniform sampler shadowsmp;
+layout(binding=14) uniform texture3D noise3d;
+layout(binding=10) uniform sampler noisesmp;
+layout(binding=0) uniform smokevol_params {
+	mat4 ndctodir;      // clip (far plane) to a world direction
+	vec4 texel;         // xy: 1/size of this (half-size) target, z: flip y, w: number of lumps
+	vec4 frame;         // xy: 1/size of the frame, z: number of tunnels, w: time
+	vec4 camfwd;        // xyz: the camera's forward, world
+	vec4 vols[48];      // xyz: center, w: radius
+	vec4 info[48];      // x: density, y: grey, z: vertical squash
+	vec4 tfrom[16];     // xyz: start, w: radius
+	vec4 tto[16];       // xyz: end, w: strength
+};
+@include_block sky_fn
+@include_block shadow_fn
+
+layout(location=0) out vec4 frag_color;
+layout(location=1) out vec4 frag_depth;
+
+#define MAXHIT 10
+#define MAXTHIT 6
+int hit[MAXHIT];
+int nhit;
+int thit[MAXTHIT];
+int nthit;
+
+// the lumps' density at p, and their grey; detail: the noise and the tunnels
+float smoke_density(vec3 p, bool detail, out float grey) {
+	float d = 0.0;
+	float g = 0.0;
+	for (int k = 0; k < MAXHIT; k++) {
+		if (k >= nhit) break;
+		int i = hit[k];
+		vec3 q = (p - vols[i].xyz) / vols[i].w;
+		q.y /= info[i].z;
+		float f = 1.0 - dot(q, q);
+		if (f > 0.0) {
+			float w = info[i].x * f * f * (3.0 - 2.0 * f);
+			d += w;
+			g += w * info[i].y;
+		}
+	}
+	grey = d > 1e-4 ? g / d : 0.5;
+	if (d < 0.002 || !detail) return d;
+	// billows that rise and turn slowly: as the clouds, the noise is eroded by the
+	// lumps' falloff, so the core stays dense and the edges break into puffs
+	vec3 rise = vec3(0.13, -0.35, 0.07) * frame.w;
+	vec3 q = p + rise;
+	float warp = texture(sampler3D(noise3d, noisesmp), q * 0.09 + vec3(0.5, 0.2, 0.1)).r;
+	float n1 = texture(sampler3D(noise3d, noisesmp), q * 0.19 + warp * 0.25).r;
+	float n2 = texture(sampler3D(noise3d, noisesmp), (p + rise * 1.6) * 0.52 + vec3(0.31, 0.17, 0.73)).r;
+	float cover = clamp(d, 0.0, 1.0);
+	// (the cell noise sits mostly high: stretched so billows and gaps both show)
+	float n = smoothstep(0.4, 0.95, n1) * 0.8 + smoothstep(0.3, 1.0, n2) * 0.2;
+	d = max(n + cover * 0.12 - (1.0 - cover) * 0.85 - 0.1, 0.0) * (1.0 + cover);
+	for (int k = 0; k < MAXTHIT; k++) {
+		if (k >= nthit) break;
+		int i = thit[k];
+		vec3 a = tfrom[i].xyz;
+		vec3 ba = tto[i].xyz - a;
+		float h = clamp(dot(p - a, ba) / dot(ba, ba), 0.0, 1.0);
+		float dist = length(p - a - ba * h);
+		float r = tfrom[i].w;
+		float s = tto[i].w;
+		// empty at the core, a little thicker at the rim: the smoke pushed aside
+		float carve = 1.0 - smoothstep(r * 0.3, r, dist);
+		float rim = smoothstep(r * 0.6, r, dist) * (1.0 - smoothstep(r, r * 1.8, dist));
+		d *= 1.0 - s * carve + s * 0.5 * rim;
+	}
+	return d;
+}
+
+float eye_depth(vec2 uv) {
+	return textureLod(sampler2D(scenedepth, pointsmp), uv, 0.0).r;
+}
+
+void main() {
+	vec2 uv = gl_FragCoord.xy * texel.xy;
+	vec2 ndc = uv * 2.0 - 1.0;
+	vec4 d4 = ndctodir * vec4(ndc.x, texel.z > 0.5 ? -ndc.y : ndc.y, 1.0, 1.0);
+	vec3 rd = normalize(d4.xyz / d4.w);
+	vec3 ro = eyepos.xyz;
+	// the scene's depth here: the nearest of the 2x2 pixels of the frame (the
+	// upsampling picks the half-size pixels whose depth matches)
+	vec2 fp = (floor(gl_FragCoord.xy) * 2.0 + 0.5) * frame.xy;
+	float sd = min(min(eye_depth(fp), eye_depth(fp + vec2(frame.x, 0.0))),
+		min(eye_depth(fp + vec2(0.0, frame.y)), eye_depth(fp + frame.xy)));
+	frag_depth = vec4(sd, 0.0, 0.0, 1.0);
+	float tscene = sd / max(dot(rd, camfwd.xyz), 1e-3);
+	// the lumps along the ray
+	nhit = 0;
+	float t0 = 1e9;
+	float t1 = 0.0;
+	int nv = int(texel.w);
+	for (int i = 0; i < 48; i++) {
+		if (i >= nv || nhit >= MAXHIT) break;
+		vec3 oc = ro - vols[i].xyz;
+		float r = vols[i].w;
+		float b = dot(oc, rd);
+		float h = b * b - (dot(oc, oc) - r * r);
+		if (h <= 0.0 || info[i].x < 0.002) continue;
+		h = sqrt(h);
+		float a0 = -b - h;
+		float a1 = -b + h;
+		if (a1 <= 0.0 || a0 >= tscene) continue;
+		hit[nhit] = i;
+		nhit++;
+		t0 = min(t0, a0);
+		t1 = max(t1, a1);
+	}
+	t0 = max(t0, 0.0);
+	t1 = min(t1, tscene);
+	if (nhit == 0 || t1 <= t0) {
+		frag_color = vec4(0.0);
+		return;
+	}
+	// the tunnels that come near the ray (the closest points of two segments)
+	nthit = 0;
+	int nt = int(frame.z);
+	for (int i = 0; i < 16; i++) {
+		if (i >= nt || nthit >= MAXTHIT) break;
+		vec3 a = tfrom[i].xyz;
+		vec3 u = tto[i].xyz - a;
+		vec3 q0 = ro + rd * t0;
+		vec3 v = rd * (t1 - t0);
+		vec3 w = a - q0;
+		float A = dot(u, u), B = dot(u, v), C = max(dot(v, v), 1e-6), D = dot(u, w), E = dot(v, w);
+		float den = A * C - B * B;
+		float sc = den > 1e-6 ? clamp((B * E - C * D) / den, 0.0, 1.0) : 0.0;
+		float tc = clamp((B * sc + E) / C, 0.0, 1.0);
+		sc = clamp((B * tc - D) / max(A, 1e-6), 0.0, 1.0);
+		vec3 dd = a + u * sc - q0 - v * tc;
+		if (dot(dd, dd) < tfrom[i].w * tfrom[i].w * 4.0 && tto[i].w > 0.01) {
+			thit[nthit] = i;
+			nthit++;
+		}
+	}
+	const int STEPS = 28;
+	float dt = (t1 - t0) / float(STEPS);
+	float t = t0 + dt * hash12(gl_FragCoord.xy);
+	float trans = 1.0;
+	vec3 light = vec3(0.0);
+	// a broad forward lobe and some even scattering
+	float phase = mix(hg_phase(dot(rd, sundir.xyz), 0.5), 1.0 / (4.0 * PI), 0.5) * 4.0 * PI;
+	// the scene's shadow (the sun behind a hill), once where the smoke starts
+	float shadow = -1.0;
+	vec3 sky = hemi_sky();
+	const float sunstep = 0.8;
+	for (int i = 0; i < STEPS; i++) {
+		vec3 p = ro + rd * t;
+		float grey;
+		float dens = smoke_density(p, true, grey);
+		if (dens > 0.002) {
+			if (shadow < 0.0) shadow = mix(0.3, 1.0, shadow_at(p, vec3(0.0, 1.0, 0.0), dot(p - ro, camfwd.xyz)));
+			float od = 0.0;
+			float g2;
+			for (int j = 1; j <= 3; j++) od += smoke_density(p + sundir.xyz * (sunstep * float(j)), false, g2);
+			// Beer's law, with a softer lobe for the light scattered many times
+			float tl = exp(-od * sunstep * 2.0) * 0.7 + exp(-od * sunstep * 0.5) * 0.3;
+			// the sky's light, less under more smoke
+			float sk = exp(-smoke_density(p + vec3(0.0, 1.2, 0.0), false, g2) * 1.2);
+			vec3 albedo = srgb_to_linear(vec3(grey));
+			vec3 s = albedo * (suncolor.rgb * shadow * tl * phase * 0.6 + sky * mix(0.35, 1.0, sk));
+			float a = exp(-dens * 2.2 * dt);
+			light += trans * s * (1.0 - a);
+			trans *= a;
+			if (trans < 0.01) break;
+		}
+		t += dt;
+	}
+	float alpha = 1.0 - trans;
+	// the air between the eye and the smoke, as over the scene
+	vec3 pf = ro + rd * t0;
+	if (groundcolor.w < 0.5) light = mix(light, fog_color(rd) * alpha, fog_amount(pf));
+	frag_color = vec4(hdr_safe(light), alpha);
+}
+@end
+
+@program smokevol post_vs smokevol_fs
+
+// the half-size smoke over the scene: of the four nearest half-size pixels, those
+// whose depth is that of this pixel (no smoke bleeding over a near edge)
+@fs smokecomp_fs
+layout(binding=0) uniform texture2D smokecol;
+layout(binding=1) uniform texture2D smokedepth;
+@image_sample_type smokedepth unfilterable_float
+@image_sample_type smokecol unfilterable_float
+layout(binding=9) uniform texture2D scenedepth;
+layout(binding=6) uniform sampler pointsmp;
+layout(binding=0) uniform smokecomp_params {
+	vec4 texel;         // xy: 1/size of the frame, zw: 1/size of the smoke
+};
+
+out vec4 frag_color;
+
+void main() {
+	float d = textureLod(sampler2D(scenedepth, pointsmp), gl_FragCoord.xy * texel.xy, 0.0).r;
+	vec2 hp = gl_FragCoord.xy * 0.5 - 0.5;
+	vec2 b = floor(hp);
+	vec2 f = hp - b;
+	vec4 acc = vec4(0.0);
+	float wsum = 0.0;
+	for (int y = 0; y < 2; y++) {
+		for (int x = 0; x < 2; x++) {
+			vec2 o = vec2(float(x), float(y));
+			vec2 uv = (b + o + 0.5) * texel.zw;
+			float dh = textureLod(sampler2D(smokedepth, pointsmp), uv, 0.0).r;
+			vec2 bw = mix(1.0 - f, f, o);
+			float rel = abs(dh - d) / max(min(d, dh), 0.1);
+			float w = bw.x * bw.y / (0.002 + rel) + 1e-5;
+			acc += textureLod(sampler2D(smokecol, pointsmp), uv, 0.0) * w;
+			wsum += w;
+		}
+	}
+	frag_color = acc / wsum;
+}
+@end
+
+@program smokecomp post_vs smokecomp_fs

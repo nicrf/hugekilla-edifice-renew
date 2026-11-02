@@ -216,7 +216,8 @@ enum RMaterial
 	RMAT_TERRAIN,         //heightmap land: splatted grass, rock, sand, snow, dirt
 	RMAT_BLOCK,           //building blocks (TEX_BLOCK0+i: HD wall<i> if there is one)
 	RMAT_MODEL,           //.cob models, with their normals
-	RMAT_FOLIAGE          //models that sway in the wind (trees, flowers)
+	RMAT_FOLIAGE,         //models that sway in the wind (trees, flowers)
+	RMAT_SMOKE            //smoke puffs: lit by the sun and the sky, soft where they meet the scene
 };
 void RSetMaterial(int material);
 
@@ -258,6 +259,23 @@ struct RUltraScene
 	const RProp *props;
 	int numprops;
 };
+//the volumetric smoke of a frame (effects.cpp): lumps of density raymarched after
+//the scene, and the tunnels bullets leave through them (capsules where it thins)
+#define RSMOKE_MAXVOLUMES 48
+#define RSMOKE_MAXTUNNELS 16
+struct RUltraSmoke
+{
+	float vol[RSMOKE_MAXVOLUMES][4];    //center (world, near the camera), radius
+	float info[RSMOKE_MAXVOLUMES][4];   //density (0..1.5), grey (albedo), vertical squash, -
+	int numvol;
+	float tunfrom[RSMOKE_MAXTUNNELS][4];   //start, radius
+	float tunto[RSMOKE_MAXTUNNELS][4];     //end, strength 0..1 (fades as it closes)
+	int numtun;
+};
+//this frame's smoke, between RUltraBegin and RUltraEnd (nothing in Classic)
+void RUltraSetSmoke(const RUltraSmoke &smoke);
+extern RUltraSmoke rultrasmoke;   //what the next Ultra frame draws, then emptied
+
 void RUltraBegin(const RUltraScene &scene);
 void RUltraWater();           //the water surface, here in the drawing order
 void RUltraGrass();           //the grass on the land near the camera

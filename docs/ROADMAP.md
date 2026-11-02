@@ -208,7 +208,8 @@ Demande de l'utilisateur : un rendu « fou » (eau réaliste à vagues, herbe au
 - *Fait (2) :* arbres, buissons et rochers instanciés, placés de façon déterministe d'après le relief, LOD, vent, ombres, reflets ; visuels seulement (voir la note d'équité ci-dessous).
 - *Fait (3) :* nuages volumétriques (couche lancée en rayons au quart de la taille, bruit 3D, éclairage par le soleil et le ciel).
 - *Fait (4) :* les arbres et les gros rochers bloquent (`docs/PROPS.md`) : mêmes props chez tous, calculés d'après le relief (cartes sauvegardées comprises, sans changer leur format), collisions des joueurs, des balles (celles du serveur aussi) et des grenades, construction refusée dedans, dessinés aussi en Classic ; réglage serveur `props` (Server Setup « Rocks and trees »), capacité `HELLOCAP_PROPS` au protocole 5, les builds sans elle refusés quand il est actif.
-- *Suites demandées :*, fumée volumétrique, grenade fumigène (gameplay, réseau) : PR suivantes. Note d'équité : depuis (4), seuls les buissons et petites pierres d'Ultra peuvent encore cacher un joueur qu'un joueur Classic voit.
+- *Fait (5) :* fumée volumétrique : la fumée des explosions lancée en rayons (masses de densité érodées par un bruit 3D, éclairées par le soleil et le ciel, demi-taille, suréchantillonnage selon la profondeur), et les balles qui y laissent un tunnel qui se referme (visuel, côté client).
+- *Suites demandées :* grenade fumigène (gameplay, réseau) : PR suivante. Note d'équité : depuis (4), seuls les buissons et petites pierres d'Ultra peuvent encore cacher un joueur qu'un joueur Classic voit.
 
 ### M14 - Portage web (L puis M)
 Le rendu ne pose pas de difficulté après M13 : SDL2 et sokol_gfx sont supportés par Emscripten. Les vrais obstacles sont le réseau et l'environnement du navigateur.

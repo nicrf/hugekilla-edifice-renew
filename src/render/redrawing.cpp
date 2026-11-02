@@ -1672,8 +1672,48 @@ static Player *DebugCamera(Player *cur)
 void Draw(float offset)
 {
 	Player *cur=DebugCamera(GetLocalPlayer());
-	
-	
+	//debug aid: HK_FXTEST=<seconds>, a grenade's explosion 14 units ahead 1 s after the
+	//first frame then every <seconds> (3 if less than 2), and 2 s after each a burst
+	//of 6 bullets from the camera through its smoke, as if fired by the player
+	//(captures of the smoke and of the tunnel the bullets leave; times on stderr)
+	static const char *fxtest=getenv("HK_FXTEST");
+	if(fxtest)
+	{
+		static DWORD start,lastburst;
+		static int started,shots;
+		if(!started)
+		{
+			started=1;
+			start=curtime;
+		}
+		int period=atoi(fxtest)>=2?atoi(fxtest)*1000:3000;
+		int since=(int)(curtime-start)-1000;
+		static int lastboom=-1;
+		Vector at=cur->pos+cur->fwd*14;
+		float ground=GetLandSmooth(at.x,at.z);
+		if(since>=0&&since/period!=lastboom)
+		{
+			lastboom=since/period;
+			at.y=ground+.5f;
+			FxExplosion(at);
+			shots=0;
+			fprintf(stderr,"FXTEST: explosion at %.1f,%.1f,%.1f (time %u)\n",at.x,at.y,at.z,(unsigned)curtime);
+		}
+		int phase=since>=0?since%period:-1;
+		if(phase>=2000&&shots<6&&curtime-lastburst>=60)
+		{
+			//a gun's spread around the smoke's middle, 2 units above the ground
+			Vector side=CrossProduct(cur->fwd,Vector(0,1,0));
+			Vector aim=Vector(at.x,ground+2,at.z)+side*((shots%3-1)*.25f)+Vector(0,(shots/3)*.3f-.15f,0);
+			Vector from=cur->pos-Vector(0,.3f,0);
+			Vector to=from+Normalize(aim-from)*30;
+			//in ticks' segments, as TickObjects moves bullets
+			for(int k=0;k<3;k++) FxBulletThroughSmoke(from+(to-from)*(k/3.f),from+(to-from)*((k+1)/3.f));
+			lastburst=curtime;
+			if(++shots==6) fprintf(stderr,"FXTEST: burst done (time %u)\n",(unsigned)curtime);
+		}
+	}
+
 	static int frame;
 
 	frame++;

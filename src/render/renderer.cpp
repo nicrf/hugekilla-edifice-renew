@@ -397,6 +397,14 @@ void RUltraBegin(const RUltraScene &scene)
 	RBackendUltraMark(RMARK_BEGIN,state,&scene);
 }
 
+RUltraSmoke rultrasmoke;
+
+void RUltraSetSmoke(const RUltraSmoke &smoke)
+{
+	if(!inscene) return;
+	rultrasmoke=smoke;
+}
+
 static void Mark(int mark)
 {
 	if(!inscene) return;

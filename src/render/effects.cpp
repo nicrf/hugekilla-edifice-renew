@@ -193,6 +193,7 @@ struct FxParticle
 	float rot,spin;         //billboard rotation, radians and radians a second
 	float r,g,b,a;
 	Vector drift;           //smoke: the speed it settles to (rising air, wind)
+	int vol;                //smoke: Ultra raymarches it as a lump of density (no billboard)
 };
 
 struct FxLight
@@ -205,6 +206,15 @@ struct FxLight
 #define FXMAXLIGHTS 32
 static std::vector<FxParticle> parts;
 static std::vector<FxLight> lights;
+
+//Ultra: where bullets went through volume smoke, closing again over a few seconds
+struct FxTunnel
+{
+	Vector from,to;
+	float age;
+};
+#define FXTUNNELLIFE 3.5f
+static std::vector<FxTunnel> tunnels;
 
 //its own random numbers: rand() is the game's (AI, respawn positions)
 static unsigned fxrand=12345;
@@ -408,8 +418,22 @@ void FxExplosion(const Vector &at)
 		FxLight l={pos,0,.4f,8};
 		lights.push_back(l);
 	}
-	//the smoke that stays: sooty puffs taking over from the fire as it dies down
-	if(fxprefs.smoke)
+	//the smoke that stays: sooty puffs taking over from the fire as it dies down;
+	//Ultra raymarches fewer, bigger lumps that linger (the noise gives the detail)
+	if(fxprefs.smoke&&RUltra())
+		for(int i=0;i<6;i++)
+		{
+			Vector d=RndDir();
+			d.y=fabsf(d.y)*.5f;
+			FxParticle *p=Spawn(FX_SMOKE,pos+d*Rnd(.3f,1.4f),d*Rnd(.3f,.9f)+Vector(0,Rnd(.4f,.8f),0),Rnd(7,10),Rnd(1.2f,1.7f),Rnd(3.2f,4.4f));
+			if(!p) break;
+			p->age=-Rnd(.1f,.35f);
+			p->r=p->g=p->b=Rnd(.42f,.52f);
+			p->a=Rnd(.75f,.95f);
+			p->drift=Vector(.3f,.35f,.12f);
+			p->vol=1;
+		}
+	else if(fxprefs.smoke)
 		for(int i=0;i<10;i++)
 		{
 			Vector d=RndDir();
@@ -517,6 +541,17 @@ static void Update(float dt)
 			}
 		}
 		p.pos+=p.vel*dt;
+		i++;
+	}
+	for(size_t i=0;i<tunnels.size();)
+	{
+		tunnels[i].age+=dt;
+		if(tunnels[i].age>=FXTUNNELLIFE)
+		{
+			tunnels[i]=tunnels.back();
+			tunnels.pop_back();
+			continue;
+		}
 		i++;
 	}
 	for(size_t i=0;i<lights.size();)
@@ -682,6 +717,8 @@ static int InLayer(const FxParticle &p,int layer)
 	return (p.pos.y<WATERHEIGHT-.25f)==(layer==0);
 }
 
+static void SubmitVolumes();
+
 void DrawEffects(int layer)
 {
 	//once a frame, even when Draw runs twice (stereo)
@@ -754,11 +791,14 @@ void DrawEffects(int layer)
 	RPopAttrib();
 
 	//solid things, by alpha in the scene's fog, far ones first
+	int ultra=RUltra();
+	if(ultra&&layer==1) SubmitVolumes();
 	static std::vector<SortItem> order;
 	order.clear();
 	for(size_t i=0;i<parts.size();i++)
 	{
 		int kind=parts[i].kind;
+		if(parts[i].vol&&ultra) continue;   //raymarched instead (SubmitVolumes)
 		if((kind==FX_DEBRIS||kind==FX_SMOKE||kind==FX_RING||kind==FX_DROP||kind==FX_BUBBLE)&&InLayer(parts[i],layer))
 		{
 			SortItem s={DotProduct(parts[i].pos-cameye,camfwd),(int)i};
@@ -786,6 +826,7 @@ void DrawEffects(int layer)
 		{
 			if(bound>=0) REnd();
 			TexBind(tex);
+			RSetMaterial(tex==TEX_FX_SMOKE?RMAT_SMOKE:RMAT_NONE);   //Ultra only
 			RBegin(RP_QUADS);
 			bound=tex;
 		}
@@ -830,6 +871,110 @@ void DrawEffects(int layer)
 		}
 	}
 	REnd();
+	RSetMaterial(RMAT_NONE);
 	RPopAttrib();
 	RDepthMask(1);
+}
+
+void FxBulletThroughSmoke(const Vector &from,const Vector &to)
+{
+	if(!RUltra()) return;   //Classic keeps its smoke as it was
+	Vector seg=to-from;
+	float len2=DotProduct(seg,seg);
+	if(len2<1e-6f) return;
+	int crossed=0;
+	for(size_t i=0;i<parts.size();i++)
+	{
+		FxParticle &p=parts[i];
+		if(p.kind!=FX_SMOKE||p.age<0) continue;
+		float t=DotProduct(p.pos-from,seg)/len2;
+		if(t<0) t=0;
+		if(t>1) t=1;
+		Vector off=p.pos-(from+seg*t);
+		float d=sqrtf(DotProduct(off,off));
+		float size=p.size0+(p.size1-p.size0)*Ease(p.age/p.life);
+		float r=size*(p.vol?1.1f:.6f)+.3f;
+		if(d>=r) continue;
+		if(p.vol)
+		{
+			//a lump only drifts a little: the tunnel carved in its density shows the way
+			crossed=1;
+			Vector dir=d>1e-3f?off*(1/d):Normalize(CrossProduct(seg,Vector(0,1,0)));
+			p.vel+=dir*(.35f*(1-d/r));
+			continue;
+		}
+		//pushed out of the bullet's way, harder near it, and a little thinner
+		Vector dir=d>1e-3f?off*(1/d):Normalize(CrossProduct(seg,Vector(0,1,0)));
+		float k=1-d/r;
+		p.vel+=dir*(2.5f*k);
+		p.a*=1-.15f*k;
+	}
+	if(!crossed) return;
+	//the newest tunnels win: the oldest is the most closed
+	FxTunnel tn={from,to,0};
+	if((int)tunnels.size()<RSMOKE_MAXTUNNELS) tunnels.push_back(tn);
+	else
+	{
+		size_t old=0;
+		for(size_t i=1;i<tunnels.size();i++)
+			if(tunnels[i].age>tunnels[old].age) old=i;
+		tunnels[old]=tn;
+	}
+}
+
+//Ultra: the volume puffs (the nearest ones if there are too many) and the tunnels,
+//near the camera, into this frame's raymarched smoke
+static void SubmitVolumes()
+{
+	static RUltraSmoke s;
+	s.numvol=s.numtun=0;
+	static std::vector<SortItem> near;
+	near.clear();
+	for(size_t i=0;i<parts.size();i++)
+	{
+		const FxParticle &p=parts[i];
+		if(!p.vol||p.age<0) continue;
+		Vector d=p.pos-cameye;
+		SortItem it={-DotProduct(d,d),(int)i};   //the sort puts far first: nearest first here
+		near.push_back(it);
+	}
+	if(near.empty()) return;
+	std::sort(near.begin(),near.end());
+	for(size_t k=0;k<near.size()&&s.numvol<RSMOKE_MAXVOLUMES;k++)
+	{
+		const FxParticle &p=parts[near[k].index];
+		float t=p.age/p.life;
+		float size=p.size0+(p.size1-p.size0)*Ease(t);
+		//thickens quickly, then thins out as it spreads
+		float dens=p.a*Clamp01(t*6)*(1-t)*(1-t*.3f);
+		float *v=s.vol[s.numvol],*in=s.info[s.numvol];
+		v[0]=p.pos.x;
+		v[1]=p.pos.y;
+		v[2]=p.pos.z;
+		v[3]=size;
+		in[0]=dens;
+		in[1]=p.r;
+		in[2]=.9f;   //a bit flatter than round: smoke spreads sideways
+		in[3]=0;
+		s.numvol++;
+	}
+	for(size_t i=0;i<tunnels.size();i++)
+	{
+		const FxTunnel &tn=tunnels[i];
+		Vector a=tn.from;
+		MakeClose(&a);
+		Vector b=a+(tn.to-tn.from);
+		float k=tn.age/FXTUNNELLIFE;
+		float *f=s.tunfrom[s.numtun],*e=s.tunto[s.numtun];
+		f[0]=a.x;
+		f[1]=a.y;
+		f[2]=a.z;
+		f[3]=.75f*(1-.4f*k);   //narrows as it closes
+		e[0]=b.x;
+		e[1]=b.y;
+		e[2]=b.z;
+		e[3]=(1-k)*(1-k);
+		s.numtun++;
+	}
+	RUltraSetSmoke(s);
 }

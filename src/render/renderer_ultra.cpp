@@ -122,7 +122,8 @@ static unsigned short Half(float f)
 
 static sg_shader shhdr,shlit,shshadow,shsky,shwater,shgrass,shcopy,shdown,shup,shrays,shcomposite,shfxaa;
 #define NUMKEYS (2*6*2*2*3*2)     //renderer_sokol.cpp's classic pipeline keys
-static sg_pipeline hdrpipes[NUMKEYS],litpipes[NUMKEYS];
+static sg_pipeline hdrpipes[NUMKEYS],litpipes[NUMKEYS],smokepipes[NUMKEYS];
+static sg_shader shsmoke;
 static sg_pipeline shadowpipe,skypipe,waterpipe,grasspipe,copypipe,downpipe,uppipe,rayspipe,compositepipe,fxaapipe;
 static sg_sampler linclamp,pointclamp,linrepeat,hdsampler,shadowsampler,lutsampler;
 static int inited,failed;
@@ -168,8 +169,9 @@ static void FreeTarget(Target &t)
 
 #define NUMBLOOM 6
 static Target hdr,hdrdepth,scenecopy,lindepth,refl,refldepth,bloom[NUMBLOOM],rays,ldr,shadowatlas,clouds;
-static sg_shader shclouds;
-static sg_pipeline cloudspipe;
+static sg_shader shclouds,shsmokevol,shsmokecomp;
+static sg_pipeline cloudspipe,smokevolpipe,smokecomppipe;
+static Target smokevol,smokevoldepth;   //half size: the raymarched smoke and the depth it used
 static sg_image noise3dimg;
 static sg_view noise3d;
 static sg_sampler noisesampler;
@@ -233,6 +235,17 @@ static sg_pipeline HdrPipe(int key)
 	d.label="ultra classic";
 	hdrpipes[key]=sg_make_pipeline(&d);
 	return hdrpipes[key];
+}
+
+static sg_pipeline SmokePipe(int key)
+{
+	if(smokepipes[key].id) return smokepipes[key];
+	sg_pipeline_desc d=RSokolPipeDesc(key);
+	d.shader=shsmoke;
+	d.colors[0].pixel_format=SG_PIXELFORMAT_RGBA16F;
+	d.label="ultra smoke";
+	smokepipes[key]=sg_make_pipeline(&d);
+	return smokepipes[key];
 }
 
 static sg_pipeline LitPipe(int key)
@@ -377,9 +390,22 @@ void RUltraInit()
 	d=Fullscreen(shcomposite,SG_PIXELFORMAT_RGBA8,"ultra composite");
 	compositepipe=sg_make_pipeline(&d);
 	//into the frame, which has a depth buffer (cleared for the HUD)
+	shsmoke=sg_make_shader(smoke_shader_desc(b));
 	shclouds=sg_make_shader(clouds_shader_desc(b));
 	d=Fullscreen(shclouds,SG_PIXELFORMAT_RGBA16F,"ultra clouds");
 	cloudspipe=sg_make_pipeline(&d);
+	shsmokevol=sg_make_shader(smokevol_shader_desc(b));
+	d=Fullscreen(shsmokevol,SG_PIXELFORMAT_RGBA16F,"ultra volume smoke");
+	d.color_count=2;
+	d.colors[1].pixel_format=SG_PIXELFORMAT_R32F;
+	smokevolpipe=sg_make_pipeline(&d);
+	//premultiplied over the scene
+	shsmokecomp=sg_make_shader(smokecomp_shader_desc(b));
+	d=Fullscreen(shsmokecomp,SG_PIXELFORMAT_RGBA16F,"ultra smoke composite");
+	d.colors[0].blend.enabled=true;
+	d.colors[0].blend.src_factor_rgb=d.colors[0].blend.src_factor_alpha=SG_BLENDFACTOR_ONE;
+	d.colors[0].blend.dst_factor_rgb=d.colors[0].blend.dst_factor_alpha=SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+	smokecomppipe=sg_make_pipeline(&d);
 	d=Fullscreen(shfxaa,SG_PIXELFORMAT_RGBA8,"ultra fxaa");
 	d.depth.pixel_format=SG_PIXELFORMAT_DEPTH;
 	d.depth.compare=SG_COMPAREFUNC_ALWAYS;
@@ -425,6 +451,8 @@ static void FreeTargets()
 	FreeTarget(rays);
 	FreeTarget(ldr);
 	FreeTarget(clouds);
+	FreeTarget(smokevol);
+	FreeTarget(smokevoldepth);
 	targetw=targeth=0;
 }
 
@@ -456,6 +484,8 @@ static void EnsureTargets(int w,int h)
 	MakeTarget(rays,rw,rh,SG_PIXELFORMAT_RGBA16F,0,"ultra god rays");
 	MakeTarget(ldr,w,h,SG_PIXELFORMAT_RGBA8,0,"ultra ldr");
 	MakeTarget(clouds,w/4>1?w/4:1,h/4>1?h/4:1,SG_PIXELFORMAT_RGBA16F,0,"ultra clouds");
+	MakeTarget(smokevol,rw,rh,SG_PIXELFORMAT_RGBA16F,0,"ultra volume smoke");
+	MakeTarget(smokevoldepth,rw,rh,SG_PIXELFORMAT_R32F,0,"ultra volume smoke depth");
 	targetw=w;
 	targeth=h;
 }
@@ -1196,7 +1226,7 @@ static int SameMat(const Mat4 &a,const Mat4 &b)
 
 static int IsLit(const RSokolCmd &c)
 {
-	return c.mark<0&&c.material!=RMAT_NONE&&KeyPrim(c.pipe)==0;
+	return c.mark<0&&c.material!=RMAT_NONE&&c.material!=RMAT_SMOKE&&KeyPrim(c.pipe)==0;
 }
 
 static scene_params_t sp;
@@ -1315,6 +1345,55 @@ struct Drawer
 			sg_apply_uniforms(UB_lit_fs_params,&r);
 			material=c.material;
 			texslot=c.texslot;
+		}
+		sg_draw(c.first,c.count,1);
+	}
+
+	//smoke: lit, soft against the scene's depth (copied before it)
+	void Smoke(const RSokolCmd &c,const Target &depthcopy)
+	{
+		sg_pipeline p=SmokePipe(c.pipe);
+		int newpipe=p.id!=pipe.id;
+		if(newpipe)
+		{
+			sg_apply_pipeline(p);
+			pipe=p;
+			uniforms=material=texslot=-1;
+			view=0;
+		}
+		Viewport(c);
+		if(newpipe||c.view.id!=view)
+		{
+			sg_bindings b;
+			memset(&b,0,sizeof(b));
+			b.vertex_buffers[0]=f->vbuf;
+			b.views[VIEW_tex]=c.view;
+			b.views[VIEW_skylut]=skylut;
+			b.views[VIEW_scenedepth]=depthcopy.tex;
+			b.views[VIEW_shadowmap]=shadowatlas.tex;
+			b.samplers[SMP_smp]=f->samplers[c.sampler];
+			b.samplers[SMP_lutsmp]=lutsampler;
+			b.samplers[SMP_pointsmp]=pointclamp;
+			b.samplers[SMP_shadowsmp]=shadowsampler;
+			sg_apply_bindings(&b);
+			view=c.view.id;
+		}
+		if(newpipe)
+		{
+			sg_range r={&sp,sizeof(sp)};
+			sg_apply_uniforms(UB_scene_params,&r);
+			smoke_fs_params_t fs;
+			Set4(fs.screen,1.0f/w,1.0f/h,0,0);
+			r.ptr=&fs;
+			r.size=sizeof(fs);
+			sg_apply_uniforms(UB_smoke_fs_params,&r);
+		}
+		if(newpipe||c.uniforms!=uniforms)
+		{
+			const RSokolUniforms &u=f->uniforms[c.uniforms];
+			sg_range vs={&u.proj,sizeof(hdrdraw_vs_params_t)};
+			sg_apply_uniforms(UB_hdrdraw_vs_params,&vs);
+			uniforms=c.uniforms;
 		}
 		sg_draw(c.first,c.count,1);
 	}
@@ -1524,6 +1603,69 @@ static void Fullpass(const Target &dst,sg_pipeline pipe,const char *label,int lo
 
 #include "ultra_veg.inl"
 
+//the volumetric smoke (rultrasmoke, effects.cpp): raymarched at half size against
+//the scene's eye depth (lindepth, copied with everything drawn), then laid over hdr
+static void DrawVolumeSmoke(const RSokolFrame &f,const Mat4 &proj)
+{
+	const RUltraSmoke &s=rultrasmoke;
+	Mat4 rot=scene.view;
+	rot.m[12]=rot.m[13]=rot.m[14]=0;
+	Mat4 inv;
+	if(!RSokolInverse(Mat4Mul(proj,rot),&inv)) return;
+	Target outs[2]={smokevol,smokevoldepth};
+	sg_pass p=Pass(outs,2,0,1,"ultra volume smoke");
+	sg_begin_pass(&p);
+	sg_apply_pipeline(smokevolpipe);
+	sg_bindings b;
+	memset(&b,0,sizeof(b));
+	b.views[VIEW_skylut]=skylut;
+	b.samplers[SMP_lutsmp]=lutsampler;
+	b.views[VIEW_scenedepth]=lindepth.tex;
+	b.samplers[SMP_pointsmp]=pointclamp;
+	b.views[VIEW_shadowmap]=shadowatlas.tex;
+	b.samplers[SMP_shadowsmp]=shadowsampler;
+	b.views[VIEW_noise3d]=noise3d;
+	b.samplers[SMP_noisesmp]=noisesampler;
+	sg_apply_bindings(&b);
+	sg_range r={&sp,sizeof(sp)};
+	sg_apply_uniforms(UB_scene_params,&r);
+	static smokevol_params_t vp;
+	memset(&vp,0,sizeof(vp));
+	vp.ndctodir=inv;
+	int nv=s.numvol<RSMOKE_MAXVOLUMES?s.numvol:RSMOKE_MAXVOLUMES;
+	int nt=s.numtun<RSMOKE_MAXTUNNELS?s.numtun:RSMOKE_MAXTUNNELS;
+	Set4(vp.texel,1.0f/smokevol.w,1.0f/smokevol.h,f.origintopleft?1.0f:0.0f,(float)nv);
+	Set4(vp.frame,1.0f/targetw,1.0f/targeth,(float)nt,fmodf(scene.time,1000.0f));
+	const float *m=scene.view.m;
+	Set4(vp.camfwd,-m[2],-m[6],-m[10],0);
+	memcpy(vp.vols,s.vol,sizeof(float)*4*nv);
+	memcpy(vp.info,s.info,sizeof(float)*4*nv);
+	memcpy(vp.tfrom,s.tunfrom,sizeof(float)*4*nt);
+	memcpy(vp.tto,s.tunto,sizeof(float)*4*nt);
+	r.ptr=&vp;
+	r.size=sizeof(vp);
+	sg_apply_uniforms(UB_smokevol_params,&r);
+	sg_draw(0,3,1);
+	sg_end_pass();
+
+	p=Pass(&hdr,1,0,0,"ultra smoke composite");
+	sg_begin_pass(&p);
+	sg_apply_pipeline(smokecomppipe);
+	memset(&b,0,sizeof(b));
+	b.views[VIEW_smokecol]=smokevol.tex;
+	b.views[VIEW_smokedepth]=smokevoldepth.tex;
+	b.views[VIEW_scenedepth]=lindepth.tex;
+	b.samplers[SMP_pointsmp]=pointclamp;
+	sg_apply_bindings(&b);
+	smokecomp_params_t cp;
+	Set4(cp.texel,1.0f/targetw,1.0f/targeth,1.0f/smokevol.w,1.0f/smokevol.h);
+	r.ptr=&cp;
+	r.size=sizeof(cp);
+	sg_apply_uniforms(UB_smokecomp_params,&r);
+	sg_draw(0,3,1);
+	sg_end_pass();
+}
+
 void RUltraSetScene(const RUltraScene &s)
 {
 	scene=s;
@@ -1723,9 +1865,37 @@ void RUltraDrawScene(const RSokolFrame &f,const RSokolCmd *cmds,int n)
 	DrawSky(proj,scene.view);
 	d.Reset();
 	int copied=0;
+	int volsmoke=rultrasmoke.numvol>0;
+	//the gun's depth-only clear (DrawViewModel): the last one, followed by draws
+	//with the gun's own projection (the scene starts with one too, Draw)
+	int gunclear=-1;
+	for(int k=1;volsmoke&&k<n;k++)
+	{
+		const RSokolCmd &c=cmds[k];
+		if(c.mark>=0||c.viewport[2]||c.pipe%2) continue;
+		for(int j=k+1;j<n;j++)
+			if(cmds[j].mark<0&&cmds[j].viewport[2])
+			{
+				if(!SameMat(f.uniforms[cmds[j].uniforms].proj,proj)) gunclear=k;
+				break;
+			}
+	}
 	for(int k=1;k<n;k++)
 	{
 		const RSokolCmd &c=cmds[k];
+		//the volume smoke goes in just before the gun, cut by the whole scene's
+		//depth, and the gun is drawn over it
+		if(volsmoke&&k==gunclear)
+		{
+			sg_end_pass();
+			CopyScene(f,proj);
+			copied=1;
+			DrawVolumeSmoke(f,proj);
+			volsmoke=0;
+			p=Pass(&hdr,1,&hdrdepth,0,"ultra scene, view model");
+			sg_begin_pass(&p);
+			d.Reset();
+		}
 		if(c.mark==RMARK_WATER)
 		{
 			if(!copied)
@@ -1748,11 +1918,29 @@ void RUltraDrawScene(const RSokolFrame &f,const RSokolCmd *cmds,int n)
 			continue;
 		}
 		if(c.mark>=0) continue;
+		if(c.material==RMAT_SMOKE&&KeyPrim(c.pipe)==0)
+		{
+			//the scene's depth so far, for the smoke's soft edges
+			if(!copied)
+			{
+				sg_end_pass();
+				CopyScene(f,proj);
+				copied=1;
+				p=Pass(&hdr,1,&hdrdepth,0,"ultra scene, smoke");
+				sg_begin_pass(&p);
+				d.Reset();
+			}
+			d.Smoke(c,lindepth);
+			continue;
+		}
 		if(IsLit(c)) d.Lit(c);
 		else d.Classic(c);
 	}
 	sg_end_pass();
-	if(!copied) CopyScene(f,proj);
+	//no gun drawn: the volume smoke over everything (the copy for the water came before some)
+	if(!copied||volsmoke) CopyScene(f,proj);
+	if(volsmoke) DrawVolumeSmoke(f,proj);
+	rultrasmoke.numvol=rultrasmoke.numtun=0;
 
 	//5. post-processing: bloom
 	for(int i=0;i<NUMBLOOM;i++)
