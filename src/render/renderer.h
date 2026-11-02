@@ -246,6 +246,23 @@ struct RUltraScene
 	int landtexsize;
 	unsigned char snowground[16];
 };
+//the volumetric smoke of a frame (effects.cpp): lumps of density raymarched after
+//the scene, and the tunnels bullets leave through them (capsules where it thins)
+#define RSMOKE_MAXVOLUMES 48
+#define RSMOKE_MAXTUNNELS 16
+struct RUltraSmoke
+{
+	float vol[RSMOKE_MAXVOLUMES][4];    //center (world, near the camera), radius
+	float info[RSMOKE_MAXVOLUMES][4];   //density (0..1.5), grey (albedo), vertical squash, -
+	int numvol;
+	float tunfrom[RSMOKE_MAXTUNNELS][4];   //start, radius
+	float tunto[RSMOKE_MAXTUNNELS][4];     //end, strength 0..1 (fades as it closes)
+	int numtun;
+};
+//this frame's smoke, between RUltraBegin and RUltraEnd (nothing in Classic)
+void RUltraSetSmoke(const RUltraSmoke &smoke);
+extern RUltraSmoke rultrasmoke;   //what the next Ultra frame draws, then emptied
+
 void RUltraBegin(const RUltraScene &scene);
 void RUltraWater();           //the water surface, here in the drawing order
 void RUltraGrass();           //the grass on the land near the camera
