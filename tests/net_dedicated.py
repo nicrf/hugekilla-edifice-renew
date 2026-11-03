@@ -324,12 +324,11 @@ try:
     check("Stopped" in log_text(), "its log ends with Stopped")
     if LOBBY:
         check(listed() is None, "the game left the lobby at once (DELETE)")
-    # (not the game client's commands dropped for coming in bursts: a Debug build on a
-    # CI machine draws by fits and starts, its ticks then bunch up, which ac_cmdslack
-    # cuts as it should)
+    # (not "cmd", commands dropped for coming in bursts: on a loaded CI machine the
+    # clients, the Debug game most, send by fits and starts, which ac_cmdslack cuts as
+    # it should; net_authmove.py tests that check)
     events = [l for l in log_text().splitlines() if l.startswith("anticheat: ") and
-              re.match(r"anticheat: (kill|death|fire|ammo|build|state|ip|origin|cmd):", l) and
-              not l.startswith("anticheat: cmd: RealGame ")]
+              re.match(r"anticheat: (kill|death|fire|ammo|build|state|ip|origin):", l)]
     check(not events, "no anti-cheat event (%s)" % (events[:3] or "none"))
 except Abort:
     pass
