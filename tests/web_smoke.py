@@ -160,12 +160,18 @@ def main():
         check(page.evaluate("FS.analyzePath('/user/web_smoke.txt').exists"), "the user folder survives a reload")
         page.wait_for_timeout(5000)
         check(sample(page, os.path.join(args.out, "solo.png")) > 8, "a solo game draws (spawn screen)")
-        frames = page.evaluate("""() => new Promise(r => {
-            let n = 0; const t0 = performance.now();
-            function f() { n++; if (performance.now() - t0 < 2000) requestAnimationFrame(f); else r(n); }
-            requestAnimationFrame(f);
-        })""")
-        print("     %d animation frames in 2 s" % frames)
+        # a slow runner may still be loading the land (SwiftShader, two cores): frames
+        # of many seconds, a click then lost. Until it runs (10 frames in 2 s), 60 s at most
+        waited = time.time()
+        while True:
+            frames = page.evaluate("""() => new Promise(r => {
+                let n = 0; const t0 = performance.now();
+                function f() { n++; if (performance.now() - t0 < 2000) requestAnimationFrame(f); else r(n); }
+                requestAnimationFrame(f);
+            })""")
+            if frames >= 10 or time.time() - waited > 60:
+                break
+        print("     %d animation frames in 2 s (after %.0f s)" % (frames, time.time() - waited))
         # Play: a click anywhere, held a few frames as a player's (the game only
         # sees the shot if the button is still down at its next frame)
         page.mouse.move(512, 350)
