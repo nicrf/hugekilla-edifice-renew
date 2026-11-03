@@ -459,4 +459,138 @@ inline int SnapSample(const SnapRing *r,int pnum,uint32_t tick,float frac,SnapSt
 	return SNAPSAMPLE_EXTRAP;
 }
 
+//---- phase 5: shots at the tick seen, predicted grenades, timestamped events ----
+//(only between a client with HELLOCAP_TICKEVENTS and a server whose NETSYNCMODE
+//says so, with HELLOCAP_SNAPSHOTS)
+
+//FIREGUN and THROWSMOKE from such a client: the FIREGUN bytes (FIREGUNSIZE,
+//netmsg.h), then FIRETICKSIZE more, which older servers don't read:
+//  uint32 viewtick, uint8 viewfrac  the moment it drew the others when it shot (the
+//                                   server's tick and 1/256: phase 4's render time)
+//  uint32 cmd                       its last command applied: it shot from there
+//  uint16 objid                     its number for the grenade or smoke grenade it
+//                                   drew at once (0: a bullet, a reload)
+#define FIRETICKAT 27        //FIREGUNSIZE
+#define FIRETICKSIZE 11
+struct FireTick
+{
+	uint32_t viewtick;   //0: it doesn't draw the others from snapshots (yet)
+	unsigned char viewfrac;
+	uint32_t cmd;
+	uint16_t objid;
+};
+template<class IO> inline void SyncFireTick(IO &io,FireTick &t)
+{
+	io.u32(t.viewtick);
+	io.u8(t.viewfrac);
+	io.u32(t.cmd);
+	io.u16(t.objid);
+}
+//the extension alone: at msg+FIRETICKAT, len-FIRETICKAT bytes (0: there is none)
+inline int WriteFireTick(void *buf,int size,FireTick *t)
+{
+	ByteWriter w(buf,size);
+	SyncFireTick(w,*t);
+	return w.Ok()?w.Size():0;
+}
+inline int ReadFireTick(const void *buf,int len,FireTick *t)
+{
+	ByteReader r(buf,len);
+	SyncFireTick(r,*t);
+	return r.Ok();
+}
+//FIREGUN relayed by the server (a shot of someone else): the FIREGUN bytes, then
+//uint32 tick, the server's tick of the shot (older clients read FIREGUNSIZE bytes)
+#define FIRERELAYSIZE 4
+inline int ReadFireRelayTick(const void *msg,int len,uint32_t *tick)
+{
+	if(len<FIRETICKAT+FIRERELAYSIZE) return 0;
+	*tick=WireGetU32((const unsigned char *)msg+FIRETICKAT);
+	return 1;
+}
+
+//TICKEVENT (server to client, reliable): something that happened at a tick of the
+//server, which the client applies when the moment it draws the others reaches it
+//(the victim falls where it is seen; at once if it is about our own player):
+//  uint8 type (23), uint32 tick, uint8 kind, then by kind:
+//  TE_KILLED   uint8 killed, uint8 killer, uint8 haspos, float pos[3] if haspos
+//              (KILLED, KILLEDPOSITION: where it died)
+//  TE_PAIN     uint8 player, uint16 sound (PAIN: a hit, a death cry)
+//  TE_GRENADE  uint8 owner, uint16 objid, float pos[3], float vel[3], uint16 fuse ms
+//              (the server's grenade; its thrower's predicted copy has that objid)
+//  TE_EXPLODE  uint8 owner, uint16 objid, float pos[3] (where the server's went off)
+//  TE_SMOKE    uint8 owner, uint16 objid, uint8 slot (sobject: the server's smoke
+//              grenade, to its thrower: it takes the place of the predicted one)
+#define TICKEVENT 23
+#define TE_KILLED 1
+#define TE_PAIN 2
+#define TE_GRENADE 3
+#define TE_EXPLODE 4
+#define TE_SMOKE 5
+struct TickEvent
+{
+	char type;
+	uint32_t tick;
+	unsigned char kind;
+	unsigned char player;   //killed, hurt, owner
+	unsigned char other;    //TE_KILLED the killer, TE_SMOKE the slot
+	unsigned char haspos;   //TE_KILLED: pos is there
+	uint16_t num;           //TE_PAIN the sound; the objid
+	uint16_t ms;            //TE_GRENADE: ms before it goes off
+	float pos[3],vel[3];
+};
+template<class IO> inline void SyncTickEvent(IO &io,TickEvent &e)
+{
+	io.i8(e.type);
+	io.u32(e.tick);
+	io.u8(e.kind);
+	switch(e.kind)
+	{
+	case TE_KILLED:
+		io.u8(e.player);
+		io.u8(e.other);
+		io.u8(e.haspos);
+		if(e.haspos) for(int k=0;k<3;k++) io.f32(e.pos[k]);
+		break;
+	case TE_PAIN:
+		io.u8(e.player);
+		io.u16(e.num);
+		break;
+	case TE_GRENADE:
+		io.u8(e.player);
+		io.u16(e.num);
+		for(int k=0;k<3;k++) io.f32(e.pos[k]);
+		for(int k=0;k<3;k++) io.f32(e.vel[k]);
+		io.u16(e.ms);
+		break;
+	case TE_EXPLODE:
+		io.u8(e.player);
+		io.u16(e.num);
+		for(int k=0;k<3;k++) io.f32(e.pos[k]);
+		break;
+	case TE_SMOKE:
+		io.u8(e.player);
+		io.u16(e.num);
+		io.u8(e.other);
+		break;
+	}
+}
+#define TICKEVENTMAX (1+4+1+1+2+12+12+2)
+inline int WriteTickEvent(void *buf,int size,TickEvent *e)
+{
+	if(e->kind<TE_KILLED||e->kind>TE_SMOKE) return 0;
+	ByteWriter w(buf,size);
+	SyncTickEvent(w,*e);
+	return w.Ok()?w.Size():0;
+}
+//0 for an unknown kind, or cut short; haspos is 0 or 1. The players, slot and
+//floats are the caller's to check.
+inline int ReadTickEvent(const void *buf,int len,TickEvent *e)
+{
+	memset(e,0,sizeof(*e));
+	ByteReader r(buf,len);
+	SyncTickEvent(r,*e);
+	return r.Ok()&&e->kind>=TE_KILLED&&e->kind<=TE_SMOKE&&e->haspos<=1;
+}
+
 #endif

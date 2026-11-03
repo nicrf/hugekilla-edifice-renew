@@ -174,6 +174,30 @@ int main()
 	CHECK(fabsf(AcWrap(at[0]-512,512))<.01f);                        // half way: on the edge, not 256 off
 	CHECK(AcRewind(80,300)==80&&AcRewind(900,300)==300&&AcRewind(-5,300)==0);
 
+	// M16 phase 5: where a player was at a tick, as a client draws it
+	static AcTickRing tr;
+	memset(&tr,0,sizeof(tr));
+	CHECK(!AcTickAt(&tr,100,0,at,512,8));                            // nothing kept
+	for(unsigned int t=100;t<200;t++) AcTickAdd(&tr,t,510+(t-100)*.5f,50,100,t!=150);   // .5 a tick on x, dead at 150
+	CHECK(!AcTickAt(&tr,100,0,at,512,8));                            // 64 ticks kept: 100 is gone
+	CHECK(AcTickAt(&tr,140,0,at,512,8)&&fabsf(at[0]-530)<1e-4f);
+	CHECK(AcTickAt(&tr,140,.5f,at,512,8)&&fabsf(at[0]-530.25f)<1e-4f);  // between two ticks
+	CHECK(!AcTickAt(&tr,150,0,at,512,8));                            // dead then: not there
+	CHECK(AcTickAt(&tr,149,.5f,at,512,8)&&fabsf(at[0]-534.5f)<1e-4f);   // the next one dead: held
+	CHECK(AcTickAt(&tr,199,.5f,at,512,8)&&fabsf(at[0]-559.5f)<1e-4f);   // the newest: held
+	CHECK(!AcTickAt(&tr,200,0,at,512,8));                            // not yet
+	AcTickAdd(&tr,200,511.9f+512,50,100,1);
+	AcTickAdd(&tr,201,.1f,50,100,1);                                 // across the edge of the world
+	CHECK(AcTickAt(&tr,200,.5f,at,512,8)&&fabsf(AcWrap(at[0]-512,512))<1e-3f);
+	AcTickAdd(&tr,202,200,50,100,1);                                 // a respawn: not across it
+	CHECK(AcTickAt(&tr,201,.9f,at,512,8)&&fabsf(at[0]-.1f)<1e-4f);
+	// how far back a shot goes: from the server's last tick to what the shooter drew
+	CHECK(fabsf(AcShotLag(1000,980,128,30)-19.5f)<1e-4f);
+	CHECK(AcShotLag(1000,900,0,30)==30);                            // at most ac_lagcomp
+	CHECK(AcShotLag(1000,1003,0,30)==0&&AcShotLag(1000,1000,0,30)==0);  // ahead: not rewound
+	CHECK(AcShotLag(1000,980,0,0)==0);                              // ac_lagcomp 0: no rewind
+	CHECK(fabsf(AcShotLag(5,0xFFFFFFFEu,0,30)-7)<1e-4f);            // across the wrap of tick numbers
+
 	// M11 phase 3b: numbered positions, newest only
 	AcSeq q;
 	memset(&q,0,sizeof(q));

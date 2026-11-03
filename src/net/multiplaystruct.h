@@ -129,7 +129,7 @@ struct KilledPosition
 };
 
 
-void HandleFireGun(FireGunDirection *firegun);
+int HandleFireGun(FireGunDirection *firegun);   //the object it made, -1: none
 void ReceiveKillMessage(int killed,int killer);
 void ReceiveChangeTeam(int player,int team);
 void ReceiveUpdateServerObject(UpdateServerObject *update);

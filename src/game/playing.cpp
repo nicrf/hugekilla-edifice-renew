@@ -369,6 +369,108 @@ float GetHeight(Vector pos)
 	return height;
 }
 
+//a step of mysf of grenade o in flight: off the trunks, into the water, down to
+//the ground where it stays (effects: the splash and the sound of it landing)
+static void GrenadeFly(Object *o,float mysf,int effects)
+{
+	float prevy=o->pos.y;
+	Vector before=o->pos;
+	o->pos+=o->vel*mysf;
+	PropsBounce(o->pos,before,o->vel);   //a grenade off a trunk
+	//into the water (M13.5): a splash where it went in
+	if(effects&&fxprefs.impacts&&prevy>=WATERHEIGHT&&o->pos.y<WATERHEIGHT&&GetLandSmooth(o->pos.x,o->pos.z)<WATERHEIGHT)
+		FxWaterSplash(o->pos,2);
+	o->vel.y-=sv.gravity*mysf;
+	if(o->pos.y<GetHeight(o->pos)) 
+	{
+		o->vel=Vector(0,0,0);
+		if(!o->wasfroze)
+		{
+			o->wasfroze=1;
+			if(effects)
+			{
+				SetSoundPosition(191,o->pos);
+				PlaySound(191,0);
+			}
+		}
+	}
+}
+
+//ticks of flight of grenade o at once, as TickObjects would fly them (not going off)
+static void GrenadeFastForward(Object *o,int ticks)
+{
+	if(ticks>MAXTICKSPERFRAME*8) ticks=MAXTICKSPERFRAME*8;   //2 s: a grenade has landed by then
+	for(int t=0;t<ticks;t++)
+	{
+		int numsteps=Magnitude(o->vel)+1;
+		for(int k=0;k<numsteps;k++) GrenadeFly(o,sf/numsteps,0);
+		MakeClose(&o->pos);
+	}
+}
+
+//M16 phase 5 (docs/M16.md): the server's grenade (TE_GRENADE). Ours (owner: us):
+//the one we drew at once has its number; it flies on from where the server threw it
+//if that was elsewhere. Someone else's: made now (we draw its thrower at the
+//moment it threw it), and goes off when the server says (TE_EXPLODE).
+void GrenadeFromServer(int owner,int objid,Vector pos,Vector vel,int fusems)
+{
+	if(owner==GetLocalNum())
+	{
+		for(int i=0;i<MAXOBJS;i++)
+		{
+			Object *o=&object[i];
+			if(o->type!=4||o->pnum!=owner||o->objid!=objid||o->netobj) continue;
+			Vector d=pos-o->start;
+			d.x=fmodf(d.x+LANDGRIDSIZE*1.5f,LANDGRIDSIZE)-LANDGRIDSIZE/2;   //the world repeats
+			d.z=fmodf(d.z+LANDGRIDSIZE*1.5f,LANDGRIDSIZE)-LANDGRIDSIZE/2;
+			if(Magnitude(d)>.5f)
+			{
+				o->pos=pos;
+				o->vel=vel;
+				o->wasfroze=0;
+				MakeClose(&o->pos);
+				GrenadeFastForward(o,(int)(simtick-o->born));
+			}
+			return;
+		}
+		return;   //gone off already
+	}
+	int i;
+	for(i=0;i<MAXOBJS&&object[i].type;i++) {}
+	if(i==MAXOBJS) return;
+	Object *o=&object[i];
+	memset(o,0,sizeof(*o));
+	o->type=4;
+	o->pos=pos;
+	MakeClose(&o->pos);
+	o->vel=vel;
+	o->dir=Magnitude(vel)>0?Normalize(vel):Vector(0,0,1);
+	o->pnum=(char)owner;
+	o->object=&projectile[2];
+	o->objid=(unsigned short)objid;
+	o->netobj=1;
+	o->born=simtick;
+	o->start=o->pos;
+	o->timeout=curtime+fusems+1000;   //if the server never says, a second late
+	int soundnum=4*4+2;   //the throw, as HandleFireGun
+	SetSoundPosition(soundnum,GetPlayer(owner)->pos);
+	PlaySound(soundnum,0);
+}
+
+void GrenadeExplodes(int owner,int objid,Vector pos)
+{
+	for(int i=0;i<MAXOBJS;i++)
+	{
+		Object *o=&object[i];
+		if(o->type!=4||o->pnum!=owner||o->objid!=objid) continue;
+		o->pos=pos;
+		MakeClose(&o->pos);
+		o->vel=Vector(0,0,0);
+		o->timeout=curtime-1;   //off at its next step
+		return;
+	}
+}
+
 //move grenades/bullets/etc, check for collisions with players, and take actions.
 
 void TickObjects(float sf)
@@ -399,24 +501,7 @@ void TickObjects(float sf)
 			}
 			if(object[i].type==4)
 			{
-				float prevy=object[i].pos.y;
-				Vector before=object[i].pos;
-				object[i].pos+=object[i].vel*mysf;
-				PropsBounce(object[i].pos,before,object[i].vel);   //a grenade off a trunk
-				//into the water (M13.5): a splash where it went in
-				if(fxprefs.impacts&&prevy>=WATERHEIGHT&&object[i].pos.y<WATERHEIGHT&&GetLandSmooth(object[i].pos.x,object[i].pos.z)<WATERHEIGHT)
-					FxWaterSplash(object[i].pos,2);
-				object[i].vel.y-=sv.gravity*mysf;
-				if(object[i].pos.y<GetHeight(object[i].pos)) 
-				{
-					object[i].vel=Vector(0,0,0);
-					if(!object[i].wasfroze)
-					{
-						object[i].wasfroze=1;
-						SetSoundPosition(191,object[i].pos);
-						PlaySound(191,0);
-					}
-				}
+				GrenadeFly(&object[i],mysf,1);
 				if(curtime>object[i].timeout)
 				{
 					AcGrenade(&object[i]);   //server: remote players hit (M11)
@@ -431,7 +516,9 @@ void TickObjects(float sf)
 						float mag=Magnitude(object[i].pos-cmppos);
 						if(mag<8)
 						{
-							cur->vel+=Normalize(cmppos-object[i].pos)*(1/(mag+2))*4;
+							//(the server pushes the players it moves: our own comes back pushed)
+							if(!(cur==GetLocalPlayer()&&NetPredicting()))
+								cur->vel+=Normalize(cmppos-object[i].pos)*(1/(mag+2))*4;
 							//the server's grenade does the damage when it decides hits (M11)
 							if(cur==GetLocalPlayer()&&cur->life>0&&!ServerDecidesHits())
 							{
@@ -530,16 +617,20 @@ void TickObjects(float sf)
 					if(Magnitude(hdiff)<.5&&vdiff<2&&vdiff>0&&cur->life>0)
 					{
 						//the push stays here and at once; the damage is the server's when
-						//it decides hits (M11 phase 3a: SERVERHIT, KILLED)
+						//it decides hits (M11 phase 3a: SERVERHIT, KILLED). Not on a player the
+						//server moves (M16): it doesn't push it, the push would be corrected
+						//away. Debug aid (tests/net_hitreg.py): HK_NOPUSH=1, never pushed.
 						int counted=!ServerDecidesHits();
+						static int nopush=getenv("HK_NOPUSH")!=0;
+						float push=NetPredicting()||nopush?0.f:1.f;
 						if(object[i].type==1)
 						{
-							cur->vel+=Normalize(object[i].vel)*.3;
+							cur->vel+=Normalize(object[i].vel)*.3*push;
 							if(counted) cur->life-=(sv.highbulletdamage+RND*sv.highbulletdamage)*Magnitude(object[i].vel);
 						}
 						if(object[i].type==3)
 						{
-							cur->vel+=Normalize(object[i].vel)*0.1;
+							cur->vel+=Normalize(object[i].vel)*0.1*push;
 							if(counted) cur->life-=(sv.lowbulletdamage+RND*sv.lowbulletdamage)*Magnitude(object[i].vel);
 						}
 						object[i].type=0;
@@ -625,9 +716,22 @@ const MoveWorld &GetMoveWorld()
 	return moveworld;
 }
 
-//where a player comes back to life: anywhere, not into a tree or a rock (props.h)
+//where a player comes back to life: anywhere, not into a tree or a rock (props.h).
+//Debug aid (tests/net_hitreg.py): HK_SPAWNAT="x,z,dx,dz" puts the n-th one asked
+//here (the host's own, then those the server chooses for its clients) at x+n*dx,
+//z+n*dz, falling from 100
 Vector RandomSpawnPos()
 {
+	static const char *at=getenv("HK_SPAWNAT");
+	if(at)
+	{
+		static int n;
+		float x=0,z=0,dx=0,dz=0;
+		sscanf(at,"%f,%f,%f,%f",&x,&z,&dx,&dz);
+		Vector p(x+n*dx,100,z+n*dz);
+		n++;
+		return p;
+	}
 	Vector pos=Vector(LANDGRIDSIZE+RND*LANDGRIDSIZE,100,LANDGRIDSIZE+RND*LANDGRIDSIZE);
 	for(int tries=0;tries<20&&!PropsSpawnFree(pos.x,pos.z);tries++)
 		pos=Vector(LANDGRIDSIZE+RND*LANDGRIDSIZE,100,LANDGRIDSIZE+RND*LANDGRIDSIZE);
@@ -870,6 +974,36 @@ static void PlayLook(float framesf)
 	}
 }
 
+//Debug aid (tests/net_hitreg.py): HK_AIMBOT="<player>[,fire]" turns the local player
+//to where it draws that player each tick (its chest, a unit under its head) before
+//its shot; with fire it holds the trigger, reloads when empty, and so comes back to
+//life too. What a player that aims well does with what it sees.
+static void AimBot(Player *cur)
+{
+	static const char *spec=getenv("HK_AIMBOT");
+	if(!spec) return;
+	int target=atoi(spec);
+	int fire=strstr(spec,",fire")!=0;
+	if(fire)
+	{
+		cur->firing=1;
+		if(cur->playstate==10&&cur->ammoingun[cur->weapon]<=0) HandleKey(controls.reload,0);
+	}
+	if(target==GetLocalNum()||target<0||target>=GetNumPlayers()||!PlayerSlotUsed(target)) return;
+	Player *t=GetPlayer(target);
+	Vector at=t->pos;
+	if(NetSnapshotView()&&!NetSnapshotDrawPos(target,&at)) return;   //not drawn
+	if(t->playstate!=10) return;
+	MakeClose(&at);
+	Vector d=at-Vector(0,1,0)-cur->pos;
+	float h=sqrtf(d.x*d.x+d.z*d.z);
+	if(h<.01f) return;
+	cur->fwd=Vector(d.x/h,0,d.z/h);
+	float pitch=atan2f(d.y,h);
+	cur->tilt=Vector(cosf(pitch),sinf(pitch),0);
+	AimPlayer(cur);
+}
+
 //handles all physics, movement, etc.: one tick (sf)
 
 void Play()
@@ -882,6 +1016,7 @@ void Play()
 		{
 			cur->gundowntime=0;
 		}
+		AimBot(cur);
 		if(cur->firing&&cur->playstate==10) 
 				FireGun(cur);
 			
@@ -957,6 +1092,7 @@ void Play()
 	TickObjects(sf);
 	TickSmoke(sf);
 	NetSnapshotPlayers();   //the others where the snapshots have them (M16 phase 4)
+	NetTickEvents();        //what the server says happened at the tick we draw (phase 5)
 	
 	for(int i=0;i<numplayers;i++)
 	if(GetPlayer(i)->playstate>=10)

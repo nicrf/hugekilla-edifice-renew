@@ -670,6 +670,22 @@ static void WebFrame()
 // One pass of the main loop: events, game, network, drawing. Native: main() calls
 // it until the player quits; web: the browser calls it once per animation frame
 // (emscripten_set_main_loop), as a page can't block in a loop of its own.
+// Debug aid: HK_CONSOLE_RUN="savemap a;loadmap a" runs these console commands
+// (';'-separated), with HK_CONSOLE or HK_AUTOSTART
+static void ConsoleRunEnv()
+{
+	const char *run = getenv("HK_CONSOLE_RUN");
+	if (!run) return;
+	char cmd[256];
+	while (*run)
+	{
+		size_t n = strcspn(run, ";");
+		snprintf(cmd, sizeof(cmd), "%.*s", (int)n, run);
+		if (cmd[0]) ConsoleExecute(cmd);
+		run += n + (run[n] == ';');
+	}
+}
+
 static int autojoin;            // HK_JOIN: joins the first server that answers
 static int autoplay;            // HK_PLAY
 static DWORD nexttimertick;
@@ -859,6 +875,8 @@ int main(int argc, char **argv)
 			if (map) fprintf(stderr, "HK_MAPFILE: %s\n", err);
 			StartServer();
 		}
+		// HK_CONSOLE_RUN: console commands once it runs (tests/net_hitreg.py: server vars)
+		if (!getenv("HK_CONSOLE")) ConsoleRunEnv();
 	}
 	// Debug aid: HK_ZOOM_TEST=1 queues real SDL events: Q down, a little mouse
 	// jitter, Q up, through the same path as the keyboard (quick x3 zoom).
@@ -937,17 +955,7 @@ int main(int argc, char **argv)
 		const char *cmds[] = { "help", "maps", "gravity", "loadmap ../nope", "drawdistance 60" };
 		for (int i = 0; i < 5; i++) ConsoleExecute(cmds[i]);
 		// HK_CONSOLE_RUN="savemap a;loadmap a": more commands, ';'-separated (map tests)
-		if (const char *run = getenv("HK_CONSOLE_RUN"))
-		{
-			char cmd[256];
-			while (*run)
-			{
-				size_t n = strcspn(run, ";");
-				snprintf(cmd, sizeof(cmd), "%.*s", (int)n, run);
-				if (cmd[0]) ConsoleExecute(cmd);
-				run += n + (run[n] == ';');
-			}
-		}
+		ConsoleRunEnv();
 		if (!strcmp(c, "scroll")) ConsoleScroll(12);
 		else if (strcmp(c, "1") && strcmp(c, "notify")) ConsoleSetInput(c);
 		consolevisible = strcmp(c, "notify") != 0;

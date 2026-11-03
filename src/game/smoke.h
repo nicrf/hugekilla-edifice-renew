@@ -132,8 +132,12 @@ void SmokeSetAllowed(int allowed);
 int SmokeAllowed();
 //the local player throws one (FireGun, grenade in smoke mode): 1 if it went
 int ThrowSmokeGrenade(Player *cur);
-//server: player pnum threw one from pos along dir (already checked)
-void ServerThrowSmoke(int pnum,const Vector &pos,const Vector &dir);
+//server: player pnum threw one from pos along dir (already checked); its slot in
+//sobject, -1 if there is no room
+int ServerThrowSmoke(int pnum,const Vector &pos,const Vector &dir);
+//client (M16 phase 5): the server's smoke grenade in slot takes the place of ours
+//numbered objid (TE_SMOKE), where ours is now
+void SmokeTakeOver(int objid,int slot);
 //flights (the server lands them, clients follow), every game step
 void TickSmoke(float sf);
 //client: sobject[i] came from the server, sets the time it has left

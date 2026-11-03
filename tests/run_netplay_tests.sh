@@ -35,10 +35,13 @@ status=0
 # other tests join as older builds (without HELLOCAP_PROPS): props 0 for them
 # net_authmove: the server moves a client from its input commands, beside a 0.7 one
 # (docs/M16.md, sv_authmove 1); net_snapshot: two clients get the others in delta
-# snapshots, beside a 0.7 one (phase 4)
-for run in net_handshake net_identity net_join net_fuzz net_voice net_voice@1 net_voice@2 \
+# snapshots, beside a 0.7 one (phase 4); net_grenade: shots at a tick, grenades and
+# smoke grenades the server owns, timestamped events, beside a 0.7 one (phase 5)
+# NETPLAY_TESTS="net_slots net_grenade": only these
+for run in ${NETPLAY_TESTS:-net_handshake net_identity net_join net_fuzz net_voice net_voice@1 net_voice@2 \
 		net_voice@3 net_voice@10 net_voice@26 net_voice@40 net_map net_anticheat \
-		net_cookie net_cookie@require net_slots net_props@on net_props@off net_smoke net_authmove net_snapshot; do
+		net_cookie net_cookie@require net_slots net_props@on net_props@off net_smoke net_authmove net_snapshot \
+		net_grenade}; do
 	t="${run%@*}"
 	log="$LOGDIR/$run.log"
 	args=()
@@ -55,7 +58,7 @@ for run in net_handshake net_identity net_join net_fuzz net_voice net_voice@1 ne
 			HK_AC_VARS="$HK_AC_VARS ac_requirecookie=1"
 			args=(require)
 		fi
-	elif [ "$t" = net_authmove ] || [ "$t" = net_snapshot ]; then
+	elif [ "$t" = net_authmove ] || [ "$t" = net_snapshot ] || [ "$t" = net_grenade ]; then
 		export HK_AC_VARS="$HK_AC_VARS sv_authmove=1"
 	elif [ "$run" != "$t" ]; then
 		export HK_SEED="${run#*@}"
@@ -70,7 +73,8 @@ for run in net_handshake net_identity net_join net_fuzz net_voice net_voice@1 ne
 		HK_MAPFILE="$map" "$BIN" >"$log" 2>&1 &
 	else
 		# these check the server's log lines
-		{ [ "$t" = net_anticheat ] || [ "$t" = net_slots ] || [ "$t" = net_authmove ] || [ "$t" = net_snapshot ]; } &&
+		{ [ "$t" = net_anticheat ] || [ "$t" = net_slots ] || [ "$t" = net_authmove ] || [ "$t" = net_snapshot ] ||
+			[ "$t" = net_grenade ]; } &&
 			args=("$log")
 		"$BIN" >"$log" 2>&1 &
 	fi

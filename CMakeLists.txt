@@ -696,7 +696,7 @@ if(EDIFICE_FUZZ)
   foreach(msg Position:PlayerPosition FireGun:FireGunDirection KilledPosition:KilledPosition
       UpdateServerObject:UpdateServerObject Snapshot:ServerObjectSnapshot
       ServerVars:ServerVarsMessage RGD:RemoteGameDataMessage LandInfo:LandInfo
-      InputCmd:InputCmdMessage SnapshotSelf:SnapshotMessage)
+      InputCmd:InputCmdMessage SnapshotSelf:SnapshotMessage FireTick:FireTick TickEvent:TickEvent)
     string(REPLACE ":" ";" pair ${msg})
     list(GET pair 0 msgname)
     list(GET pair 1 msgtype)

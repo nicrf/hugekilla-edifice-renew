@@ -154,6 +154,34 @@ int main(int argc,char **argv)
 		ss.basetick=0;
 	}
 
+	//M16 phase 5: what follows a client's FIREGUN, and each kind of TICKEVENT
+	{
+		FireTick ft={70001,200,69990,0};
+		unsigned char buf[FIRETICKSIZE];
+		Seed("fuzz_firetick","bullet.bin",buf,WriteFireTick(buf,sizeof(buf),&ft));
+		ft.objid=0x7fff;
+		Seed("fuzz_firetick","grenade.bin",buf,WriteFireTick(buf,sizeof(buf),&ft));
+		const char *names[6]={0,"killed.bin","pain.bin","grenade.bin","explode.bin","smoke.bin"};
+		for(int kind=TE_KILLED;kind<=TE_SMOKE;kind++)
+		{
+			TickEvent e;
+			memset(&e,0,sizeof(e));
+			e.type=TICKEVENT;
+			e.tick=70000+kind;
+			e.kind=(unsigned char)kind;
+			e.player=2;e.other=kind==TE_SMOKE?7:1;e.haspos=1;e.num=kind==TE_PAIN?150:0x8003;e.ms=2400;
+			e.pos[0]=700.5f;e.pos[1]=31;e.pos[2]=-2;
+			e.vel[0]=1.5f;e.vel[1]=.25f;
+			unsigned char eb[TICKEVENTMAX];
+			Seed("fuzz_tickevent",names[kind],eb,WriteTickEvent(eb,sizeof(eb),&e));
+			if(kind==TE_KILLED)
+			{
+				e.haspos=0;
+				Seed("fuzz_tickevent","killednopos.bin",eb,WriteTickEvent(eb,sizeof(eb),&e));
+			}
+		}
+	}
+
 	FireGunDirection fg;
 	memset(&fg,0,sizeof(fg));
 	fg.type=FIREGUN; fg.pnum=2; fg.reload=1;
