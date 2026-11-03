@@ -510,6 +510,10 @@ if(EDIFICE_DEDICATED)
     COMMAND ${CMAKE_COMMAND} -DSRC=${DATA_DIR} -DDST=$<TARGET_FILE_DIR:edifice-server>/data
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/copy_data.cmake
     COMMENT "Copying game data next to edifice-server")
+  if(TARGET Edifice)
+    # after the game's: on Linux and Windows both copy into the same data/
+    add_dependencies(edifice-server Edifice)
+  endif()
   install(TARGETS edifice-server RUNTIME DESTINATION .)
 endif()
 set(HK_GAME_TARGETS)
