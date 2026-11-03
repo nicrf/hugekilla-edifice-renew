@@ -129,7 +129,17 @@ struct Object
 	DWORD timeout;
 	char wasfroze;
 	DWORD achit;   //server: remote players this bullet already hit (M11, multiplay.cpp)
+	//M16 phase 5 (docs/M16.md, multiplay.cpp)
+	unsigned short objid;   //a grenade's number: its thrower's (1..0x7fff) or the server's
+	char netobj;            //client: a copy of the server's grenade: goes off when it says
+	char lagtick;           //server: a bullet rewound to the tick its shooter saw,
+	float lagticks;         //this many ticks before the one it was fired at
+	DWORD born;             //simtick it was made at
+	Vector start;           //where it was made
 };
+//Object::type: 1, 3 bullets, 2 a shell, 4 a grenade; and a client's own smoke grenade,
+//drawn until the server's takes its place (M16 phase 5, smoke.cpp)
+#define SMOKEPREDICT 5
 
 struct ServerObject
 {

@@ -1,6 +1,6 @@
 // Unit test of src/net/wire.h (roadmap M6): exact little-endian bytes, round
 // trips, and readers/writers that stop at the end of their buffer. Also the M16
-// messages built on it (src/net/netsync.h: INPUTCMD, SNAPSHOT) and the second
+// messages built on it (src/net/netsync.h: INPUTCMD, SNAPSHOT, FireTick, TICKEVENT) and the second
 // capability byte of REQUESTENTER (src/net/version.cpp).
 #include "wire.h"
 #include "netsync.h"
@@ -195,6 +195,9 @@ int main()
 		c=WriteHelloCaps(hello+t,HELLOCAP_INPUTS|HELLOCAP_SNAPSHOTS,0);
 		ReadHelloCaps(hello,t+c,&caps);
 		CHECK(c==2&&caps.caps==(HELLOCAP_INPUTS|HELLOCAP_SNAPSHOTS));
+		c=WriteHelloCaps(hello+t,HELLOCAP_INPUTS|HELLOCAP_SNAPSHOTS|HELLOCAP_TICKEVENTS,0);   //phase 5
+		ReadHelloCaps(hello,t+c,&caps);
+		CHECK(c==2&&(unsigned char)hello[t+1]==7&&caps.caps==(HELLOCAP_INPUTS|HELLOCAP_SNAPSHOTS|HELLOCAP_TICKEVENTS));
 	}
 	// phase 4: a player's state through the wire (SnapPack, SnapUnpack)
 	{
@@ -436,6 +439,64 @@ int main()
 		for(uint32_t t=104;t<104+2*SNAPRING;t+=2) SnapStore(&r,t,s);
 		SnapStore(&r,50,s);
 		CHECK(!SnapFind(&r,50)&&!SnapFind(&r,100)&&SnapFind(&r,104+2*SNAPRING-2));
+	}
+
+	// phase 5: what follows FIREGUN from a client (FireTick), exact bytes
+	{
+		unsigned char m[FIRETICKAT+FIRETICKSIZE+4];
+		memset(m,0xEE,sizeof(m));
+		FireTick ft={0x01020304u,0x80,0x0A0B0C0Du,0x1234};
+		CHECK(WriteFireTick(m+FIRETICKAT,FIRETICKSIZE,&ft)==FIRETICKSIZE);
+		const unsigned char ex[FIRETICKSIZE]={4,3,2,1, 0x80, 0x0D,0x0C,0x0B,0x0A, 0x34,0x12};
+		CHECK(!memcmp(m+FIRETICKAT,ex,sizeof(ex))&&m[FIRETICKAT-1]==0xEE);
+		CHECK(!WriteFireTick(m,FIRETICKSIZE-1,&ft));
+		FireTick back;
+		CHECK(ReadFireTick(m+FIRETICKAT,FIRETICKSIZE,&back)&&back.viewtick==ft.viewtick&&back.viewfrac==0x80&&
+			back.cmd==ft.cmd&&back.objid==0x1234);
+		CHECK(!ReadFireTick(m+FIRETICKAT,FIRETICKSIZE-1,&back));   //cut short: an older client's 27 bytes
+		CHECK(!ReadFireTick(m+FIRETICKAT,0,&back));
+		// relayed by the server: the tick after the FIREGUN bytes; not there from an older one
+		uint32_t tick=0;
+		WirePutU32(m+FIRETICKAT,123456u);
+		CHECK(ReadFireRelayTick(m,FIRETICKAT+FIRERELAYSIZE,&tick)&&tick==123456u);
+		CHECK(!ReadFireRelayTick(m,FIRETICKAT,&tick)&&!ReadFireRelayTick(m,FIRETICKAT+3,&tick));
+	}
+	// phase 5: TICKEVENT, each kind through the wire, one byte short refused
+	{
+		unsigned char m[TICKEVENTMAX+8];
+		TickEvent e,back;
+		const int sizes[6]={0,1+4+1+3+12,1+4+1+3,1+4+1+3+24+2,1+4+1+3+12,1+4+1+4};
+		for(int kind=TE_KILLED;kind<=TE_SMOKE;kind++)
+		{
+			memset(&e,0,sizeof(e));
+			e.type=TICKEVENT;
+			e.tick=0xFFFFFFF0u+kind;
+			e.kind=(unsigned char)kind;
+			e.player=3;e.other=31;e.haspos=1;e.num=0x8001;e.ms=2999;
+			for(int k=0;k<3;k++) { e.pos[k]=100.5f+k; e.vel[k]=-1.25f*k; }
+			int n=WriteTickEvent(m,sizeof(m),&e);
+			CHECK(n==sizes[kind]&&n<=TICKEVENTMAX&&m[0]==TICKEVENT&&m[5]==kind);
+			CHECK(ReadTickEvent(m,n,&back)&&back.tick==e.tick&&back.kind==kind&&back.player==3);
+			if(kind==TE_KILLED) CHECK(back.other==31&&back.haspos==1&&back.pos[2]==102.5f);
+			if(kind==TE_PAIN) CHECK(back.num==0x8001&&back.pos[0]==0);
+			if(kind==TE_GRENADE) CHECK(back.num==0x8001&&back.vel[2]==-2.5f&&back.ms==2999&&back.pos[1]==101.5f);
+			if(kind==TE_EXPLODE) CHECK(back.num==0x8001&&back.pos[0]==100.5f&&back.vel[2]==0);
+			if(kind==TE_SMOKE) CHECK(back.num==0x8001&&back.other==31);
+			CHECK(!ReadTickEvent(m,n-1,&back));
+		}
+		// KILLED without a position: 3 bytes after the kind
+		e.kind=TE_KILLED;
+		e.haspos=0;
+		int n=WriteTickEvent(m,sizeof(m),&e);
+		CHECK(n==1+4+1+3&&ReadTickEvent(m,n,&back)&&!back.haspos&&back.pos[0]==0);
+		m[8]=2;   //haspos must be 0 or 1
+		CHECK(!ReadTickEvent(m,sizeof(m),&back));
+		e.kind=0;
+		CHECK(!WriteTickEvent(m,sizeof(m),&e));
+		m[5]=6;   //an unknown kind
+		CHECK(!ReadTickEvent(m,sizeof(m),&back));
+		m[5]=0;
+		CHECK(!ReadTickEvent(m,sizeof(m),&back));
 	}
 
 	if(failures) { printf("%d failure(s)\n",failures); return 1; }

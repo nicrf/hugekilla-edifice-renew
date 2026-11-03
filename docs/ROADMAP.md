@@ -279,6 +279,8 @@ Les joueurs distants sautent et reviennent en arrière : chaque client simule so
 
      *Fait :* SNAPSHOT avec les autres joueurs en delta sur l'instantané accusé (`netsync.h`, `tests/wire_test.cpp`, `fuzz_playersnapshot`, `tests/net_snapshot.py`), dessinés 100 ms dans le passé, interpolés ; plus d'à-coups une fois le retard voulu décalé (chiffres dans `docs/M16.md`), plus de chute dessinée qui monte, plus de joueur en (0,0,0) à l'arrivée.
   5. Compensation de latence au tick que le tireur voyait, grenades et fumigènes prédits, événements fiables datés (`HELLOCAP_TICKEVENTS` 1024).
+
+     *Fait :* FIREGUN suivi du tick vu et de la commande (`FireTick`), anneau de 64 ticks par joueur sur le serveur (`AcTickRing`), recul exact borné à `ac_lagcomp` plus l'interpolation ; grenades et fumigènes du serveur repris par la copie prédite du lanceur (`objid`), TICKEVENT (morts, douleurs, grenades) appliqués au tick dessiné (`netsync.h`, `tests/wire_test.cpp`, `fuzz_firetick`, `fuzz_tickevent`, `tests/net_grenade.py`) ; à 100,20,2, 94 % de coups sur une cible qui court contre 12 % sans le recul (`tests/net_hitreg.py`, chiffres dans `docs/M16.md`).
   6. Retrait du chemin du protocole 5 : protocole 6, version 0.8.0, les anciens refusés.
 - **Compatibilité :** protocole 5 jusqu'à la phase 6, chaque nouveauté seulement entre deux pairs qui l'annoncent ; un client 0.7 joue dans la même partie avec les positions d'avant.
 - **Fait quand :** à 100 ms de latence, 20 de gigue et 2 % de pertes (`HK_NETSIM=100,20,2`), `net_sync.py` ne voit plus d'à-coups (< 0,05 par seconde) sur les joueurs distants, et le joueur local n'est jamais corrigé de façon visible.

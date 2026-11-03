@@ -309,6 +309,63 @@ inline int AcSegmentHits(float ax,float ay,float az,float bx,float by,float bz,
 	return t0<t1;
 }
 
+//---- M16 phase 5 (docs/M16.md): where each player was at each server tick ----
+
+//the last ACTICKS ticks of a player, by tick number (~1 s at 60 Hz): where it was
+//after that tick, and whether it was alive then
+#define ACTICKS 64
+struct AcTickRing
+{
+	unsigned int tick[ACTICKS];
+	float x[ACTICKS],y[ACTICKS],z[ACTICKS];
+	unsigned char alive[ACTICKS];
+	unsigned char used[ACTICKS];
+};
+
+inline void AcTickAdd(AcTickRing *r,unsigned int tick,float x,float y,float z,int alive)
+{
+	int k=tick%ACTICKS;
+	r->tick[k]=tick;
+	r->x[k]=x;r->y[k]=y;r->z[k]=z;
+	r->alive[k]=alive!=0;
+	r->used[k]=1;
+}
+
+//the entry of tick, 0 if it isn't kept (too old, not recorded)
+inline int AcTickFind(const AcTickRing *r,unsigned int tick)
+{
+	int k=tick%ACTICKS;
+	return r->used[k]&&r->tick[k]==tick?k+1:0;
+}
+
+//the player at the moment tick + frac (frac 0..1), between the ticks around it as
+//a client interpolates the snapshots (netsync.h SnapSample): out of the world's
+//copies (x and z wrap on worldsize), the first one alone after a jump of more than
+//teleport units (a respawn). 0 if it wasn't alive then, or that tick isn't kept.
+inline int AcTickAt(const AcTickRing *r,unsigned int tick,float frac,float *out,float worldsize,float teleport)
+{
+	int a=AcTickFind(r,tick);
+	if(!a||!r->alive[a-1]) return 0;
+	a--;
+	out[0]=r->x[a];out[1]=r->y[a];out[2]=r->z[a];
+	int b=frac>0?AcTickFind(r,tick+1):0;
+	if(!b||!r->alive[b-1]) return 1;
+	b--;
+	float dx=AcWrap(r->x[b]-r->x[a],worldsize),dy=r->y[b]-r->y[a],dz=AcWrap(r->z[b]-r->z[a],worldsize);
+	if(sqrtf(dx*dx+dy*dy+dz*dz)>teleport) return 1;
+	out[0]+=dx*frac;out[1]+=dy*frac;out[2]+=dz*frac;
+	return 1;
+}
+
+//ticks to rewind a shot by: from lastdone (the server's last tick) back to what the
+//shooter drew (viewtick + viewfrac/256), at most maxticks, never ahead
+inline float AcShotLag(unsigned int lastdone,unsigned int viewtick,int viewfrac,float maxticks)
+{
+	float lag=(float)(int)(lastdone-viewtick)-viewfrac/256.f;
+	if(!(lag>0)) return 0;   //ahead of the server (or nonsense): not rewound
+	return lag<maxticks?lag:(maxticks>0?maxticks:0);
+}
+
 //how far back to look for a shooter with this ping (round trip, ms): what it saw
 //when it fired had come from the server about a round trip earlier
 inline int AcRewind(int ping,int lagcomp)

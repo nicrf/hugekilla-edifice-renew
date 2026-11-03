@@ -74,6 +74,9 @@ struct PeerVersion
 #define HELLOCAP_SNAPSHOTS 512   // REQUESTENTER: the client reads the other players from SNAPSHOT (deltas,
                                  // acked in INPUTCMD) and draws them in the past; INFO: the server sends
                                  // them (sv_snapshots) instead of PLAYERPOSITION (M16 phase 4)
+#define HELLOCAP_TICKEVENTS 1024 // REQUESTENTER: its shots say which tick it saw the others at (FIREGUN +
+                                 // FireTick, netsync.h), it predicts its grenades and reads TICKEVENT;
+                                 // INFO: the server rewinds to that tick and sends them (M16 phase 5)
 #define HELLOCOOKIE_SIZE 8
 #define HELLOCAPS_MAX (2+HELLOCOOKIE_SIZE)
 

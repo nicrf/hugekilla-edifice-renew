@@ -72,7 +72,7 @@ void ChangeTeam(int player,int team);
 void SendUpdateServerObject(int num);
 //smoke grenades (smoke.h): the client's throw to the server; server: every client
 //in the game understands them
-void SendThrowSmoke(const Vector &pos,const Vector &dir);
+void SendThrowSmoke(const Vector &pos,const Vector &dir,int objid);
 int ServerSmokeAllowed();
 void CreateInstallation(Vector pos,char team);
 void ClaimObject(int pnum);
@@ -113,6 +113,17 @@ int NetPlayerShown(int i);
 //them AUTHDRAWDELAY ticks back (the queue runs them by bursts with the jitter); 0: as
 //the ticks have it
 int NetServerDrawPos(int i,Vector *pos);
+//phase 5: client, the server said it rewinds our shots to the tick we drew and sends
+//TICKEVENT (NetTickEventsOn); NetNextObjId numbers a grenade we draw before the
+//server's comes; NetTickEvents, each tick, applies the events whose tick we now draw
+int NetTickEventsOn();
+int NetNextObjId();
+void NetTickEvents();
+//playing.cpp: the server's grenade of owner numbered objid, thrown from pos with vel,
+//going off in fusems (TE_GRENADE: ours takes its place, someone else's is made);
+//where it went off (TE_EXPLODE)
+void GrenadeFromServer(int owner,int objid,Vector pos,Vector vel,int fusems);
+void GrenadeExplodes(int owner,int objid,Vector pos);
 
 #define CMSG_BROADCAST 0
 #define CMSG_TEAM 1

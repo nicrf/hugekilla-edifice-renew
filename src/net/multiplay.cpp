@@ -33,6 +33,7 @@
 #include "predict.h"
 #include "netsync.h"
 #include <stdarg.h>
+static_assert(FIRETICKAT==FIREGUNSIZE,"netsync.h: FIRETICKAT must be FIREGUNSIZE");
 #define MAXLOCALLIST 128
 #define PEERTIMEOUT 70000     //ms without a message before a peer is dropped
 #define SERVERSILENCE 10000   //ms: the server is gone, once in the game (ClientLoop)
@@ -145,7 +146,8 @@ static void SendRequestEnter()
 	//HK_LEGACYMOVE=1 (tests): joins as a 0.7 build moving itself (no HELLOCAP_INPUTS)
 	static int legacymove=getenv("HK_LEGACYMOVE")&&atoi(getenv("HK_LEGACYMOVE"));
 	len+=WriteHelloCaps(&buf[len],HELLOCAP_COOKIE|HELLOCAP_SERVERHITS|HELLOCAP_STABLESLOTS|HELLOCAP_POSSEQ|
-		HELLOCAP_PROPS|HELLOCAP_SMOKE|(legacymove?0:HELLOCAP_INPUTS|HELLOCAP_SNAPSHOTS),cookie?entercookie:0);
+		HELLOCAP_PROPS|HELLOCAP_SMOKE|(legacymove?0:HELLOCAP_INPUTS|HELLOCAP_SNAPSHOTS|HELLOCAP_TICKEVENTS),
+		cookie?entercookie:0);
 	infosock.Send(buf,len);
 	infosock.Flush();
 }
@@ -171,7 +173,8 @@ int ac_requirecookie=0;     //1: refuse clients that can't answer a join cookie 
 int ac_cookietime=30000;    //ms of a join cookie time bucket (valid one to two buckets)
 int ac_serverhits=1;        //1: the server decides hits and deaths (phase 3a); 0: phase-1 bounds
 float ac_hittolerance=.5f;  //units added around a player's hitbox when the server tests a bullet
-int ac_lagcomp=300;         //ms of a shooter's ping the server rewinds, at most
+int ac_lagcomp=300;         //ms of a shooter's lag the server rewinds, at most; 0: no rewind (M16
+                            //phase 5: plus the SNAPINTERP ticks it draws the others in the past)
 //phase 3b. ac_stableslots isn't a check: it doesn't depend on ac_enable
 int ac_stableslots=1;       //1: a leaver frees its slot, the others keep their numbers (all clients able)
 float ac_posrate=2;         //positions per positionresendtime a client may send (more are dropped), 0: off
@@ -208,7 +211,8 @@ static void SendInfo(SOCKADDR_IN dest)
 	buf[len++]=(char)((ac_enable?HELLOCAP_COOKIE|(ac_requirecookie?HELLOCAP_REQUIRECOOKIE:0)|
 		(ac_serverhits?HELLOCAP_SERVERHITS:0):0)|(ac_stableslots?HELLOCAP_STABLESLOTS:0)|
 		(sv_props?HELLOCAP_PROPS:0)|HELLOCAP_SMOKE);
-	buf[len++]=(char)(((sv_authmove?HELLOCAP_INPUTS:0)|(sv_authmove&&sv_snapshots?HELLOCAP_SNAPSHOTS:0))>>8);   //caps2 (M16)
+	buf[len++]=(char)(((sv_authmove?HELLOCAP_INPUTS:0)|
+		(sv_authmove&&sv_snapshots?HELLOCAP_SNAPSHOTS|HELLOCAP_TICKEVENTS:0))>>8);   //caps2 (M16)
 	infosock.dest=dest;
 	infosock.Send(buf,len);
 	infosock.Flush();
@@ -295,6 +299,15 @@ static const char *ackind[ACKINDS]={"kill","death","fire","ammo","move","build",
 #define AUTHBUFFER 1    //commands left waiting for the next ticks, at most
 #define AUTHDRAW 64     //commands whose positions the host keeps to draw (~1 s)
 #define AUTHDRAWDELAY 2 //ticks the host draws them behind their clock (the queue's jitter)
+#define AUTHSHOTS 16    //phase 5: shots waiting for the command they were fired after
+#define AUTHSHOTWAIT 8  //ticks a shot waits for it at most (lost, dropped: from where it says)
+struct AuthShot
+{
+	FireGunDirection f;
+	FireTick t;
+	int smoke;            //THROWSMOKE
+	unsigned int queued;  //simtick
+};
 struct AcAuth
 {
 	int on;               //NETSYNCMODE said so: its PLAYERPOSITIONs are ignored
@@ -319,12 +332,16 @@ struct AcAuth
 	int drawclock;
 	double drawlast;        //the last moment drawn (commands after drawref): never back
 	int drawing;
+	//phase 5: its shots (FireTick), in order, each run once its command has
+	AuthShot shots[AUTHSHOTS];
+	int nshots;
 };
 
 //M16 phase 4: a client that gets the other players in SNAPSHOT
 struct AcSnap
 {
 	int on;               //NETSYNCMODE said so: no PLAYERPOSITION to it
+	int tickev;           //phase 5 too (HELLOCAP_TICKEVENTS): TICKEVENT, shots at their tick
 	uint32_t acked;       //the newest snapshot it said it has (anyack: there is one)
 	int anyack;
 	SnapRing sent;        //the last ones sent to it: the bases of its deltas
@@ -344,7 +361,8 @@ struct AcPlayer
 	float life;          //as the server counts it (remote players; the host has its own)
 	int lastattacker;    //who hit it last, and when: who a reported death is credited to
 	DWORD lasthit;
-	AcHistory hist;      //where it was, for the shooters' lag
+	AcHistory hist;      //where it was, for the lag of the shooters that don't say (0.7 builds)
+	AcTickRing ticks;    //M16 phase 5: where it was at each tick, for the others' shots
 	int caps;            //HELLOCAP_* of its REQUESTENTER (kept by AcJoin)
 	//phase 3b: numbered positions, movement bound
 	AcSeq seq;
@@ -354,6 +372,14 @@ struct AcPlayer
 	AcSnap snap;         //M16 phase 4: gets the others in SNAPSHOT
 };
 static AcPlayer acplayer[MAXPLAYERS];
+//M16 phase 5: events at a tick (TICKEVENT), further down
+static int TickEvents(int i);
+static void SendTickEvent(int i,TickEvent *e);
+static void EventPos(TickEvent *e,const Vector &p);
+static void SendKilledTo(int i,int killed,int killer,const Vector *pos);
+static void SendPainTo(int i,int player,int sound);
+static int HitLog();
+static void RelayShot(int shooter,FireGunDirection *f,int obj);
 #define ACIPTABLE 64
 static AcIpEntry aciptable[ACIPTABLE];
 
@@ -513,6 +539,10 @@ static int snaprendering;
 static char snapshown[MAXPLAYERS];   //had data at the render time: drawn
 #define SNAPCLOCKRESYNC 300     //ms off the estimate: a new start (a stall, a new server)
 static void ClientSnapReset();
+//phase 5: our shots say the tick we saw, our grenades are predicted, the server's
+//events wait for their tick (further down)
+static int clienttickevents;    //NETSYNCMODE said HELLOCAP_TICKEVENTS
+static void ClientEventsFlush(int apply);
 static void ClientAuthMove(int on)
 {
 	if(on!=clientauthmove)
@@ -602,6 +632,7 @@ static double LocalMs()
 
 static void ClientSnapReset()
 {
+	ClientEventsFlush(1);   //they name the players by the numbers of before
 	memset(&snaprecv,0,sizeof(snaprecv));
 	snapany=0;
 	snapclock=0;
@@ -717,6 +748,169 @@ int NetPlayerShown(int i)
 	return !GetPlayer(i)->nopos;
 }
 
+//---- M16 phase 5 (docs/M16.md): our shots at the tick we saw, our grenades
+//predicted, the server's events (TICKEVENT, the shots of the others) when we draw
+//their tick ----
+
+int NetTickEventsOn()
+{
+	return !server&&connected&&clienttickevents;
+}
+
+//a number for a grenade or smoke grenade we draw at once: 1..0x7fff (the server's
+//own have the top bit)
+static uint16_t nextobjid;
+int NetNextObjId()
+{
+	nextobjid=(uint16_t)(nextobjid%0x7fff+1);
+	return nextobjid;
+}
+
+//what follows FIREGUN/THROWSMOKE: the moment we draw the others at, our last command
+static int WriteShotTick(char *buf,int size,uint16_t objid)
+{
+	FireTick t;
+	memset(&t,0,sizeof(t));
+	uint32_t tick;
+	float frac;
+	if(clientsnapview&&SnapRenderTime(&tick,&frac)&&tick)
+	{
+		t.viewtick=tick;
+		int f=(int)(frac*256);
+		t.viewfrac=(unsigned char)(f<0?0:f>255?255:f);
+	}
+	t.cmd=prediction.any?prediction.latest:0;
+	t.objid=objid;
+	return WriteFireTick(buf,size,&t);
+}
+
+//events waiting for their tick, in the order they came
+#define EVENTQUEUE 128
+#define EVENTHOLD 1000   //ms one waits at most (a clock off: not forever)
+struct PendingEvent
+{
+	int fire;              //a shot of someone else (FIREGUN), else e
+	TickEvent e;
+	FireGunDirection f;
+	uint32_t tick;
+	double at;             //LocalMs() when it came
+};
+static PendingEvent pending[EVENTQUEUE];
+static int npending;
+
+static int FiniteVec(const float *v)
+{
+	for(int k=0;k<3;k++) if(!(fabsf(v[k])<1e30f)) return 0;
+	return 1;
+}
+
+static void ApplyTickEvent(const TickEvent *e)
+{
+	Vector pos(e->pos[0],e->pos[1],e->pos[2]);
+	switch(e->kind)
+	{
+	case TE_KILLED:
+		if(!ValidPlayer(e->player)||!ValidPlayer(e->other)) return;
+		if(e->haspos&&FiniteVec(e->pos)) GetPlayer(e->player)->pos=pos;   //KILLEDPOSITION
+		if(e->player==GetLocalNum())
+		{
+			//the server killed us (M11): die here too, unless our own death (already
+			//counted) crossed it
+			if(GetLocalPlayer()->life<=0||GetLocalPlayer()->playstate!=10) return;
+			GetLocalPlayer()->life=0;
+		}
+		ReceiveKillMessage(e->player,e->other);
+		return;
+	case TE_PAIN:
+		if(!ValidPlayer(e->player)) return;
+		SetSoundPosition(e->num+1,GetPlayer(e->player)->pos);
+		if(e->num<500) PlaySound(e->num+1,0);
+		else PlaySound(e->num,0);
+		return;
+	case TE_GRENADE:
+		if(!ValidPlayer(e->player)||!FiniteVec(e->pos)||!FiniteVec(e->vel)) return;
+		GrenadeFromServer(e->player,e->num,pos,Vector(e->vel[0],e->vel[1],e->vel[2]),e->ms);
+		return;
+	case TE_EXPLODE:
+		if(!ValidPlayer(e->player)||!FiniteVec(e->pos)) return;
+		GrenadeExplodes(e->player,e->num,pos);
+		return;
+	case TE_SMOKE:
+		if(e->player==GetLocalNum()&&ValidSObj(e->other)) SmokeTakeOver(e->num,e->other);
+		return;
+	}
+}
+
+static void ApplyPending(const PendingEvent *p)
+{
+	if(p->fire)
+	{
+		FireGunDirection f=p->f;
+		HandleFireGun(&f);
+	}
+	else
+		ApplyTickEvent(&p->e);
+}
+
+static void QueueEvent(const PendingEvent &p)
+{
+	if(npending==EVENTQUEUE)   //full: the oldest now
+	{
+		PendingEvent first=pending[0];
+		npending--;
+		memmove(pending,pending+1,sizeof(pending[0])*npending);
+		ApplyPending(&first);
+	}
+	pending[npending]=p;
+	pending[npending].at=LocalMs();
+	npending++;
+}
+
+//a TICKEVENT: about our own player (our death, our grenade), at once; else when we
+//draw its tick
+static void ClientTickEvent(const TickEvent *e)
+{
+	if(e->player==GetLocalNum()&&e->kind!=TE_PAIN)
+	{
+		ApplyTickEvent(e);
+		return;
+	}
+	PendingEvent p;
+	memset(&p,0,sizeof(p));
+	p.e=*e;
+	p.tick=e->tick;
+	QueueEvent(p);
+}
+
+static void ClientEventsFlush(int apply)
+{
+	int n=npending;
+	npending=0;
+	if(apply)
+		for(int k=0;k<n;k++) ApplyPending(&pending[k]);
+}
+
+void NetTickEvents()
+{
+	if(!npending) return;
+	uint32_t tick=0;
+	float frac;
+	int clock=NetSnapshotView()&&clienttickevents&&SnapRenderTime(&tick,&frac);
+	double now=LocalMs();
+	int kept=0,n=npending;
+	static PendingEvent due[EVENTQUEUE];
+	int ndue=0;
+	for(int k=0;k<n;k++)
+	{
+		if(clock&&CmdNewer(pending[k].tick,tick)&&now-pending[k].at<EVENTHOLD)
+			pending[kept++]=pending[k];
+		else
+			due[ndue++]=pending[k];
+	}
+	npending=kept;
+	for(int k=0;k<ndue;k++) ApplyPending(&due[k]);
+}
+
 //who a death reported by client i (KILLED, KILLEDPOSITION: "killed by claimed")
 //is credited to, now that the server decides hits: -1 to ignore it
 #define AC_KILLCREDIT 10000   //ms after a hit the server saw that it may still kill
@@ -781,9 +975,7 @@ static void AcServerKill(int v,int killer)
 	if(!AcServerHits())
 		AcLog(AC_KILL,"%.31s (%d) took %.0f damage without dying: killed by the server",GetPlayer(v)->name,v,a->damage);
 	ReceiveKillMessage(v,killer);
-	SimpleBuf killed=MakeSimple(KILLED,v,killer);
-	for(int i=1;i<numplayers;i++)
-		if(slotused[i]) clientsock[i].SendReliable(killed.b,sizeof(killed.b),0);   //the victim too: it dies
+	for(int i=1;i<numplayers;i++) SendKilledTo(i,v,killer,0);   //the victim too: it dies
 	GetPlayer(v)->playstate=11;
 	a->deaduntil=curtime+ac_deadtime;
 	if(!a->deaduntil) a->deaduntil=1;
@@ -810,7 +1002,7 @@ static int AcCanBeHit(int v)
 static void AcPainOthers(int v,int sound)
 {
 	for(int i=1;i<numplayers;i++)
-		if(i!=v&&slotused[i]) SendSimple(i,PAIN,v,sound);
+		if(i!=v) SendPainTo(i,v,sound);
 	if(v!=GetLocalNum())
 	{
 		SetSoundPosition(sound+1,GetPlayer(v)->pos);
@@ -860,16 +1052,30 @@ static int AcCountsDamage()
 }
 
 //phase 3a, a step of a bullet from prev to o->pos: the server's bullet is the one
-//that hits. Each player is where the shooter saw it, rewound by its ping (at most
-//ac_lagcomp), with ac_hittolerance around its hitbox; the bullet stopped at the
-//land and the blocks already, and o->pos was brought back to the rock or trunk it
-//meets (TickObjects: line of sight, props.h). One player per bullet.
+//that hits. Each player is where the shooter saw it, with ac_hittolerance around its
+//hitbox; the bullet stopped at the land and the blocks already, and o->pos was
+//brought back to the rock or trunk it meets (TickObjects: line of sight, props.h).
+//One player per bullet. Where the shooter saw it: M16 phase 5, the tick it drew the
+//others at (FireTick, lagticks before the tick the server fired it at: as long as
+//the bullet flies, that far back), where each one was then (AcTickRing), not
+//there if it wasn't alive; else (a 0.7 build) rewound by its ping (AcHistory). At
+//most ac_lagcomp (and the interpolation's SNAPINTERP ticks for the first).
 static void AcServerBullet(Object *o,Vector prev,int shooter)
 {
-	int rewind=shooter==GetLocalNum()?0:AcRewind(GetPlayer(shooter)->ping,ac_lagcomp);
-	//M16 phase 4: a client drawing the others from snapshots sees them SNAPINTERP
-	//ticks later still (phase 5 will rewind to the tick it saw)
-	if(shooter!=GetLocalNum()&&acplayer[shooter].snap.on) rewind+=(int)(SNAPINTERP*TICKMS);
+	int rewind=shooter==GetLocalNum()||o->lagtick?0:AcRewind(GetPlayer(shooter)->ping,ac_lagcomp);
+	unsigned int tick=0;
+	float frac=0;
+	if(o->lagtick)
+	{
+		//the players are where the last tick left them (TickObjects comes first)
+		float whole=floorf(o->lagticks),f=o->lagticks-whole;
+		tick=simtick-1-(unsigned int)whole;
+		if(f>0)
+		{
+			tick--;
+			frac=1-f;
+		}
+	}
 	for(int v=0;v<numplayers;v++)
 	{
 		if(v==shooter||(o->achit&(1u<<v))) continue;
@@ -877,10 +1083,16 @@ static void AcServerBullet(Object *o,Vector prev,int shooter)
 		if(GetPlayer(shooter)->team==pl->team&&pl->team!=0) continue;
 		if(!AcCanBeHit(v)) continue;
 		float at[3];
-		AcHistoryAt(&acplayer[v].hist,curtime-rewind,pl->pos.x,pl->pos.y,pl->pos.z,curtime,at,LANDGRIDSIZE);
+		if(o->lagtick)
+		{
+			if(!AcTickAt(&acplayer[v].ticks,tick,frac,at,LANDGRIDSIZE,SNAPTELEPORT)) continue;
+		}
+		else
+			AcHistoryAt(&acplayer[v].hist,curtime-rewind,pl->pos.x,pl->pos.y,pl->pos.z,curtime,at,LANDGRIDSIZE);
 		if(!AcSegmentHits(prev.x,prev.y,prev.z,o->pos.x,o->pos.y,o->pos.z,at[0],at[1],at[2],
 			ac_hittolerance>0?ac_hittolerance:0,LANDGRIDSIZE)) continue;
 		o->achit=~0u;   //spent: no one else (the copies on the clients only show it)
+		if(HitLog()) fprintf(stderr,"hitlog hit %d %d\n",shooter,v);
 		//the victim's roll of before, damage*(1+RND)
 		float base=o->type==1?sv.highbulletdamage:sv.lowbulletdamage;
 		AcHit(v,shooter,(base+RND*base)*Magnitude(o->vel));
@@ -921,6 +1133,19 @@ void AcBulletTick(Object *o,Vector prev)
 //seconds on the server's land: no rewind), everyone in reach, the thrower too.
 void AcGrenade(Object *o)
 {
+	if(server)
+	{
+		//M16 phase 5: where it went off, to the clients that follow the server's
+		TickEvent e;
+		memset(&e,0,sizeof(e));
+		e.tick=simtick;
+		e.kind=TE_EXPLODE;
+		e.player=(unsigned char)o->pnum;
+		e.num=o->objid;
+		EventPos(&e,o->pos);
+		for(int i=1;i<numplayers;i++)
+			if(TickEvents(i)) SendTickEvent(i,&e);
+	}
 	if(AcServerHits())
 	{
 		int thrower=SlotUsed(o->pnum)?o->pnum:-1;
@@ -1142,13 +1367,136 @@ static void SendNetSyncMode(int i)
 	int snaps=on&&sv_snapshots&&(acplayer[i].caps&HELLOCAP_SNAPSHOTS);
 	if(snaps&&!sn->on) memset(sn,0,sizeof(*sn));   //complete snapshots until it acks one
 	sn->on=snaps;
-	SimpleBuf mode=MakeSimple(NETSYNCMODE,(on?HELLOCAP_INPUTS:0)|(snaps?HELLOCAP_SNAPSHOTS:0),simtick);
+	//phase 5: it draws the others in the past, so its shots and events are at a tick
+	sn->tickev=snaps&&(acplayer[i].caps&HELLOCAP_TICKEVENTS);
+	SimpleBuf mode=MakeSimple(NETSYNCMODE,(on?HELLOCAP_INPUTS:0)|(snaps?HELLOCAP_SNAPSHOTS:0)|
+		(sn->tickev?HELLOCAP_TICKEVENTS:0),simtick);
 	clientsock[i].SendReliable(mode.b,sizeof(mode.b),0);
 }
 
 int NetServerMoves(int i)
 {
 	return server&&i>0&&i<MAXPLAYERS&&SlotUsed(i)&&acplayer[i].auth.on;
+}
+
+//---- M16 phase 5 (docs/M16.md): what happens at a tick, to the clients that apply it
+//when they draw that tick (TICKEVENT); the others get the messages of before ----
+
+static int TickEvents(int i)
+{
+	return i>0&&i<MAXPLAYERS&&SlotUsed(i)&&acplayer[i].snap.tickev;
+}
+
+static void SendTickEvent(int i,TickEvent *e)
+{
+	char buf[TICKEVENTMAX];
+	e->type=TICKEVENT;
+	int size=WriteTickEvent(buf,sizeof(buf),e);
+	if(size) clientsock[i].SendReliable(buf,size,0);
+}
+
+static void EventPos(TickEvent *e,const Vector &p)
+{
+	e->pos[0]=p.x;e->pos[1]=p.y;e->pos[2]=p.z;
+}
+
+//to client i: player killed was killed by killer, at pos (KILLEDPOSITION) or where
+//it is (KILLED)
+static void SendKilledTo(int i,int killed,int killer,const Vector *pos)
+{
+	if(!SlotUsed(i)||i==0) return;
+	if(TickEvents(i))
+	{
+		TickEvent e;
+		memset(&e,0,sizeof(e));
+		e.tick=simtick;
+		e.kind=TE_KILLED;
+		e.player=(unsigned char)killed;
+		e.other=(unsigned char)killer;
+		if(pos)
+		{
+			e.haspos=1;
+			EventPos(&e,*pos);
+		}
+		SendTickEvent(i,&e);
+		return;
+	}
+	if(pos)
+	{
+		KilledPosition kp;
+		kp.type=KILLEDPOSITION;
+		kp.killed=(char)killed;
+		kp.killer=(char)killer;
+		kp.pos=*pos;
+		char kpbuf[KILLEDPOSITIONSIZE];
+		int kpsize=WriteKilledPosition(kpbuf,sizeof(kpbuf),&kp);
+		clientsock[i].SendReliable(kpbuf,kpsize,0);
+		return;
+	}
+	SimpleBuf k=MakeSimple(KILLED,killed,killer);
+	clientsock[i].SendReliable(k.b,sizeof(k.b),0);
+}
+
+//to client i: the pain sound (or death cry) of player, as a PAIN from it would be
+static void SendPainTo(int i,int player,int sound)
+{
+	if(!SlotUsed(i)||i==0) return;
+	if(!TickEvents(i))
+	{
+		SendSimple(i,PAIN,player,sound);
+		return;
+	}
+	TickEvent e;
+	memset(&e,0,sizeof(e));
+	e.tick=simtick;
+	e.kind=TE_PAIN;
+	e.player=(unsigned char)player;
+	e.num=(uint16_t)sound;
+	SendTickEvent(i,&e);
+}
+
+//debug aid (tests/net_hitreg.py): HK_HITLOG=1 writes on stderr each shot the server
+//fires for a client and each hit it decides
+static int HitLog()
+{
+	static int on=getenv("HK_HITLOG")!=0;
+	return on;
+}
+
+//server: shooter's shot (or reload) f went here, as object obj (-1: none). To the
+//others: FIREGUN with the tick of the shot after it (older clients read the shot
+//only); a grenade, to the clients that read TICKEVENT, is the server's object
+//(TE_GRENADE), its thrower's too: its predicted copy has that number.
+static uint16_t servergrenadeid;
+static void RelayShot(int shooter,FireGunDirection *f,int obj)
+{
+	TickEvent g;
+	int grenade=obj>=0&&object[obj].type==4;
+	if(grenade)
+	{
+		Object *o=&object[obj];
+		if(!o->objid) o->objid=(uint16_t)(0x8000|(++servergrenadeid&0x7fff));   //one of the server's
+		memset(&g,0,sizeof(g));
+		g.tick=simtick;
+		g.kind=TE_GRENADE;
+		g.player=(unsigned char)shooter;
+		g.num=o->objid;
+		EventPos(&g,o->pos);
+		g.vel[0]=o->vel.x;g.vel[1]=o->vel.y;g.vel[2]=o->vel.z;
+		int left=(int)(o->timeout-curtime);
+		g.ms=(uint16_t)(left<0?0:left>60000?60000:left);
+	}
+	char buf[FIRETICKAT+FIRERELAYSIZE];
+	int size=WriteFireGun(buf,sizeof(buf),f);
+	if(!size) return;
+	WirePutU32(&buf[size],simtick);
+	size+=FIRERELAYSIZE;
+	for(int i=1;i<numplayers;i++)
+	{
+		if(!slotused[i]) continue;
+		if(grenade&&TickEvents(i)) SendTickEvent(i,&g);
+		else if(i!=shooter) clientsock[i].Send(buf,size);
+	}
 }
 
 //an INPUTCMD of client i: the commands newer than what it has, queued
@@ -1293,7 +1641,106 @@ static void AuthRun(int i,unsigned int num,const MoveCmd &c,float speedpenalty,M
 	AuthDrawKeep(i,num);
 }
 
+static int NetServerMoveCmds(int i,float speedpenalty,MoveEvents *ev);
+
+//---- M16 phase 5: a shot of a client that says the tick it saw (FireTick): from where
+//the server had it after the command it names, rewound to that tick ----
+
+//the shot of client i (or its reload) as the server fires it: its bullet rewound
+//to what it drew (AcServerBullet), its grenade numbered as its predicted copy
+static int ServerFire(int i,FireGunDirection *f,const FireTick *t)
+{
+	if(!f->reload) GetPlayer(i)->ammoingun[GetPlayer(i)->weapon]--;   //as TryFireGun
+	int obj=HandleFireGun(f);
+	if(obj>=0)
+	{
+		Object *o=&object[obj];
+		if(o->type==4) o->objid=(uint16_t)(t->objid&0x7fff);   //0: the server numbers it
+		if((o->type==1||o->type==3)&&t->viewtick)
+		{
+			o->lagtick=1;
+			float most=ac_lagcomp>0?(float)(ac_lagcomp/TICKMS)+SNAPINTERP:0;   //its lag, and the interpolation
+			o->lagticks=AcShotLag(simtick,t->viewtick,t->viewfrac,most);
+		}
+		if(HitLog()) fprintf(stderr,"hitlog shot %d type %d lag %.2f\n",i,o->type,o->lagtick?o->lagticks:-1.f);
+	}
+	RelayShot(i,f,obj);
+	return obj;
+}
+
+static void AuthShotRun(int i,AuthShot *s)
+{
+	FireGunDirection f=s->f;
+	f.pnum=(char)i;
+	//from where its command put it (else, lost or dropped, from where it says: ac_firedist)
+	const Vector *at=AuthDrawAt(&acplayer[i].auth,s->t.cmd);
+	if(at&&!s->f.reload) f.pos=*at;
+	if(s->smoke)
+	{
+		//a smoke grenade: a grenade of its magazine, at its rate (AcFire), as THROWSMOKE
+		if(!(acplayer[i].caps&HELLOCAP_SMOKE)||!ServerSmokeAllowed()) return;
+		if(GetPlayer(i)->weapon!=4||GetPlayer(i)->playstate!=10) return;
+		f.reload=0;
+		if(!AcFire(i,&f)) return;
+		int slot=ServerThrowSmoke(i,f.pos,f.dir);
+		if(slot<0||!s->t.objid||!TickEvents(i)) return;
+		//its predicted one makes way for this one (after its UPDATESERVEROBJECT)
+		TickEvent e;
+		memset(&e,0,sizeof(e));
+		e.tick=simtick;
+		e.kind=TE_SMOKE;
+		e.player=(unsigned char)i;
+		e.num=s->t.objid;
+		e.other=(unsigned char)slot;
+		SendTickEvent(i,&e);
+		return;
+	}
+	if(!AcFire(i,&f)) return;   //rate, ammo, dead (M11)
+	ServerFire(i,&f,&s->t);
+}
+
+//the waiting shots of client i whose command has run (all: every one, it no
+//longer sends commands), in order; one waiting too long goes anyway
+static void AuthShotsRun(int i,int all)
+{
+	AcAuth *a=&acplayer[i].auth;
+	while(a->nshots)
+	{
+		AuthShot shot=a->shots[0];
+		int ran=a->ran&&!CmdNewer(shot.t.cmd,a->lastcmd);
+		if(!ran&&!all&&(int)(simtick-shot.queued)<AUTHSHOTWAIT) break;
+		a->nshots--;
+		memmove(a->shots,a->shots+1,sizeof(a->shots[0])*a->nshots);
+		AuthShotRun(i,&shot);
+	}
+}
+
+static void AuthShotQueue(int i,const FireGunDirection *f,const FireTick *t,int smoke)
+{
+	AcAuth *a=&acplayer[i].auth;
+	if(a->nshots==AUTHSHOTS)   //nobody shoots that fast: the oldest goes now
+	{
+		AuthShot first=a->shots[0];
+		a->nshots--;
+		memmove(a->shots,a->shots+1,sizeof(a->shots[0])*a->nshots);
+		AuthShotRun(i,&first);
+	}
+	AuthShot &s=a->shots[a->nshots++];
+	s.f=*f;
+	s.t=*t;
+	s.smoke=smoke;
+	s.queued=simtick;
+	AuthShotsRun(i,!a->on);
+}
+
 int NetServerMove(int i,float speedpenalty,MoveEvents *ev)
+{
+	int ran=NetServerMoveCmds(i,speedpenalty,ev);
+	AuthShotsRun(i,0);   //phase 5: the shots fired after these commands
+	return ran;
+}
+
+static int NetServerMoveCmds(int i,float speedpenalty,MoveEvents *ev)
 {
 	AcAuth *a=&acplayer[i].auth;
 	int ran=0;
@@ -1441,7 +1888,15 @@ static void SendSnapshots()
 
 void NetTickEnd()
 {
-	if(server) SendSnapshots();
+	if(!server) return;
+	//phase 5: where everyone is after this tick, for the shots seen at it
+	for(int i=0;i<numplayers;i++)
+	{
+		if(!SlotUsed(i)) continue;
+		Player *p=GetPlayer(i);
+		AcTickAdd(&acplayer[i].ticks,simtick,p->pos.x,p->pos.y,p->pos.z,p->playstate==10&&!p->nopos);
+	}
+	SendSnapshots();
 }
 
 //every server frame: where each player is (the shooters' lag), and the hit mode
@@ -1688,6 +2143,8 @@ void Disconnect()
 	connected=0;
 	clientserverhits=0;
 	ClientAuthMove(0);
+	clienttickevents=0;
+	ClientEventsFlush(0);   //the game is over: nothing waits any more
 	PropsSetEnabled(1);   //no server to say otherwise: drawn (a land in the menus)
 	SmokeSetAllowed(0);
 	numplayers=0;
@@ -1839,7 +2296,7 @@ void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pn
 			{
 				for(int i=1;i<numplayers;i++)
 				{
-					if(i!=pnum) SendSimple(i,PAIN,pnum,msg2);
+					if(i!=pnum) SendPainTo(i,pnum,msg2);
 				}
 				SetSoundPosition(msg2+1,GetPlayer(pnum)->pos);
 				if(msg2<500) PlaySound(msg2+1,0);
@@ -1859,11 +2316,10 @@ void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pn
 					msg2=killer;
 				}
 				ReceiveKillMessage(pnum,msg2);
-				SimpleBuf killed=MakeSimple(KILLED,pnum,msg2);
 				if(server)
 				{
 					for(int i=1;i<numplayers;i++)
-						if(i!=pnum&&slotused[i])clientsock[i].SendReliable(killed.b,sizeof(killed.b),0);
+						if(i!=pnum) SendKilledTo(i,pnum,msg2,0);
 				}
 				break;
 			}
@@ -2125,6 +2581,15 @@ void ServerLoop()
 					FireGunDirection firegun;
 					if(!ReadFireGun(&msg,clen,&firegun)) break;
 					if(NetEvents()) fprintf(stderr,"net: shot from player %d\n",i);
+					//M16 phase 5: at the tick it saw, from where its command put it, once
+					//that command has run here
+					FireTick ft;
+					if(acplayer[i].snap.tickev&&acplayer[i].auth.on&&
+						ReadFireTick((char *)&msg+FIRETICKAT,clen-FIRETICKAT,&ft))
+					{
+						AuthShotQueue(i,&firegun,&ft,0);
+						break;
+					}
 					if(!AcFire(i,&firegun)) break;   //rate, ammo, dead (M11)
 					TryFireGun(i,firegun.pos,firegun.dir,firegun.reload);
 					break;
@@ -2135,6 +2600,13 @@ void ServerLoop()
 					FireGunDirection throwsmoke;
 					if(!ReadFireGun(&msg,clen,&throwsmoke)) break;
 					if(NetEvents()) fprintf(stderr,"net: smoke grenade from player %d\n",i);
+					FireTick ft;   //phase 5, as FIREGUN: its predicted one has a number
+					if(acplayer[i].snap.tickev&&acplayer[i].auth.on&&
+						ReadFireTick((char *)&msg+FIRETICKAT,clen-FIRETICKAT,&ft))
+					{
+						AuthShotQueue(i,&throwsmoke,&ft,1);
+						break;
+					}
 					if(!(acplayer[i].caps&HELLOCAP_SMOKE)||!ServerSmokeAllowed()) break;
 					if(GetPlayer(i)->weapon!=4||GetPlayer(i)->playstate!=10) break;
 					throwsmoke.reload=0;
@@ -2159,10 +2631,8 @@ void ServerLoop()
 					ReceiveKillMessage(i,kp.killer);
 					if(server)
 					{
-						char kpbuf[KILLEDPOSITIONSIZE];
-						int kpsize=WriteKilledPosition(kpbuf,sizeof(kpbuf),&kp);
 						for(int i3=1;i3<numplayers;i3++)
-							if(i3!=i&&slotused[i3])clientsock[i3].SendReliable(kpbuf,kpsize,0);
+							if(i3!=i) SendKilledTo(i3,i,kp.killer,&kp.pos);
 					}
 					break;
 				}
@@ -2284,6 +2754,7 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 					clientserverhits=0;   //until this server says otherwise (HITMODE)
 					ClientAuthMove(0);    //and NETSYNCMODE
 					clientsnapview=0;
+					clienttickevents=0;
 					ClientSnapReset();
 					PropsSetEnabled(0);   //and none until it says it has them (PROPSMODE)
 					SmokeSetAllowed(0);   //and SMOKEMODE
@@ -2384,6 +2855,9 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 				int snaps=on&&(msg&HELLOCAP_SNAPSHOTS);   //phase 4: the others in SNAPSHOT
 				if(snaps!=clientsnapview) ClientSnapReset();
 				clientsnapview=snaps;
+				int tickev=snaps&&(msg&HELLOCAP_TICKEVENTS);   //phase 5
+				if(!tickev) ClientEventsFlush(1);
+				clienttickevents=tickev;
 				if(getenv("HK_SYNCLOG")) fprintf(stderr,"netsyncmode %u %u\n",(unsigned)msg,(unsigned)msg2);
 				break;
 			}
@@ -2578,7 +3052,28 @@ void ClientLoop()
 			case FIREGUN:
 				{
 					FireGunDirection firegun;
-					if(ReadFireGun(&msg,msglen,&firegun)) HandleFireGun(&firegun);
+					if(!ReadFireGun(&msg,msglen,&firegun)) break;
+					//phase 5: someone else's shot, when we draw its tick (it comes from
+					//the shooter as we see it then)
+					uint32_t tick;
+					if(clienttickevents&&ReadFireRelayTick(&msg,msglen,&tick))
+					{
+						PendingEvent p;
+						memset(&p,0,sizeof(p));
+						p.fire=1;
+						p.f=firegun;
+						p.tick=tick;
+						QueueEvent(p);
+					}
+					else
+						HandleFireGun(&firegun);
+					break;
+				}
+			case TICKEVENT:
+				{
+					TickEvent e;
+					if(!connected||!clienttickevents||!ReadTickEvent(&msg,msglen,&e)) break;
+					ClientTickEvent(&e);
 					break;
 				}
 			case SERVEROBJECTSNAPSHOT:
@@ -3405,9 +3900,9 @@ void SendChatMessage(char *text,int dest,int player)
 	}
 }
 
-//called when a player shoots
+//called when a player shoots: the object's index, -1 if there is no room
 
-void CreateObject(int num,int obj,Vector pos,Vector dir,Vector vel)
+int CreateObject(int num,int obj,Vector pos,Vector dir,Vector vel)
 {
 	for(int i=0;i<MAXOBJS;i++)
 	{
@@ -3420,6 +3915,12 @@ void CreateObject(int num,int obj,Vector pos,Vector dir,Vector vel)
 			object[i].pnum=num;
 			object[i].timeout=curtime+1000;
 			object[i].achit=0;
+			object[i].objid=0;   //M16 phase 5
+			object[i].netobj=0;
+			object[i].lagtick=0;
+			object[i].lagticks=0;
+			object[i].born=simtick;
+			object[i].start=pos;
 
 			object[i].wasfroze=0;
 			switch(obj)
@@ -3435,16 +3936,17 @@ void CreateObject(int num,int obj,Vector pos,Vector dir,Vector vel)
 				object[i].timeout=curtime+sv.grenadeexplodetime;
 				break;
 			}
-			break;
+			return i;
 		}
 	}
+	return -1;
 }
 
-//called on all computers when someone fires
+//called on all computers when someone fires: the bullet or grenade's object, -1 if none
 
-void HandleFireGun(FireGunDirection *firegun)
+int HandleFireGun(FireGunDirection *firegun)
 {
-	if(!ValidPlayer(firegun->pnum)) return;
+	if(!ValidPlayer(firegun->pnum)) return -1;
 	float speed=0;
 	if(GetPlayer(firegun->pnum)->weapon==0)
 		speed=sv.gatspeed;
@@ -3465,8 +3967,9 @@ void HandleFireGun(FireGunDirection *firegun)
 	if(GetPlayer(firegun->pnum)->weapon==5) objecttype=3;
 	if(GetPlayer(firegun->pnum)->weapon==4) objecttype=4;
 	speed*=2;
-	if(speed==0) return;
-	if(!firegun->reload) CreateObject(firegun->pnum,objecttype,firegun->pos-Vector(0,.2,0),firegun->dir,firegun->dir*speed);
+	if(speed==0) return -1;
+	int obj=-1;
+	if(!firegun->reload) obj=CreateObject(firegun->pnum,objecttype,firegun->pos-Vector(0,.2,0),firegun->dir,firegun->dir*speed);
 	int soundnum=0;
 	if(!firegun->reload)
 	{
@@ -3483,6 +3986,7 @@ void HandleFireGun(FireGunDirection *firegun)
 		SetSoundPosition(soundnum,GetPlayer(firegun->pnum)->pos);
 		PlaySound(soundnum,0);
 	}
+	return obj;
 }
 
 //tries to fire the gun, and sends out the message that the gun was fired
@@ -3503,26 +4007,28 @@ int TryFireGun(int num,Vector pos,Vector dir,char reload)
 	firegun.dir=dir;
 	firegun.pos=pos;
 	firegun.reload=reload;
-	HandleFireGun(&firegun);
-	char buf[FIREGUNSIZE];
-	int size=WriteFireGun(buf,sizeof(buf),&firegun);
+	int obj=HandleFireGun(&firegun);
 	if(server)
 	{
-		for(int i=1;i<numplayers;i++)
-		{
-			if(i!=num) clientsock[i].Send(buf,size);
-		}
-
+		RelayShot(num,&firegun,obj);
+		return 1;
 	}
-	else
+	char buf[FIREGUNSIZE+FIRETICKSIZE];
+	int size=WriteFireGun(buf,sizeof(buf),&firegun);
+	//M16 phase 5: the tick we saw the others at, our grenade's number
+	if(size&&NetTickEventsOn())
 	{
-		datasock.Send(buf,size);
+		uint16_t objid=0;
+		if(obj>=0&&object[obj].type==4) object[obj].objid=objid=NetNextObjId();
+		size+=WriteShotTick(&buf[size],sizeof(buf)-size,objid);
 	}
+	datasock.Send(buf,size);
 	return 1;
 }
 
-//the local player threw a smoke grenade: to the server, which flies it (smoke.cpp)
-void SendThrowSmoke(const Vector &pos,const Vector &dir)
+//the local player threw a smoke grenade: to the server, which flies it (smoke.cpp);
+//objid: the number of the one drawn at once (phase 5), 0: none
+void SendThrowSmoke(const Vector &pos,const Vector &dir,int objid)
 {
 	if(server) return;
 	FireGunDirection t;
@@ -3531,8 +4037,9 @@ void SendThrowSmoke(const Vector &pos,const Vector &dir)
 	t.reload=0;
 	t.dir=dir;
 	t.pos=pos;
-	char buf[FIREGUNSIZE];
+	char buf[FIREGUNSIZE+FIRETICKSIZE];
 	int size=WriteFireGun(buf,sizeof(buf),&t);
+	if(size&&NetTickEventsOn()) size+=WriteShotTick(&buf[size],sizeof(buf)-size,(uint16_t)objid);
 	datasock.SendReliable(buf,size,0);
 }
 
@@ -3547,7 +4054,7 @@ void HavePain(int sound,int targ)
 		for(int i=1;i<numplayers;i++)
 		{
 			if(targ==-1||GetPlayer(i)->team==targ-TARGTEAM||targ==i) 
-				SendSimple(i,PAIN,GetLocalNum(),sound);
+				SendPainTo(i,GetLocalNum(),sound);
 		}
 	}
 	else
@@ -3590,8 +4097,7 @@ void Killed(int killer)
 	ReceiveKillMessage(GetLocalNum(),killer);
 	if(server)
 	{
-		for(int i=1;i<numplayers;i++)
-			if(slotused[i]) clientsock[i].SendReliable(killed.b,sizeof(killed.b),0);
+		for(int i=1;i<numplayers;i++) SendKilledTo(i,GetLocalNum(),killer,0);
 	}
 	else
 	{
