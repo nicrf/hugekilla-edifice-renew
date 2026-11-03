@@ -775,9 +775,13 @@ static void PlayerMoveEffects(Player *cur,const MoveEvents &ev)
 //where it is now, tickalpha of the way (positions only: the view, the legs, the roll
 //are the tick's). Around Redraw; PlayDrawEnd puts the simulation's positions back.
 //Not across a jump of 5 units in one tick: an arrival, a respawn, the edge of the
-//world, a position received from the network that far.
+//world, a position received from the network that far. The others from the server's
+//snapshots (M16 phase 4) are where the snapshots have them at this frame's moment;
+//a player with no position yet isn't drawn (out of the game for the frame).
 static Vector drawsaved[MAXPLAYERS];
+static char drawstate[MAXPLAYERS];
 static int drawing;
+#define HIDDENSTATE 9   //playstate while drawn: below 10, not in the game
 
 void PlayDrawBegin()
 {
@@ -787,8 +791,16 @@ void PlayDrawBegin()
 	{
 		Player *p=GetPlayer(i);
 		drawsaved[i]=p->pos;
+		drawstate[i]=p->playstate;
+		int snapview=i!=GetLocalNum()&&NetSnapshotView();
+		if(snapview?!NetSnapshotDrawPos(i,&p->pos):!NetPlayerShown(i))
+		{
+			if(p->playstate>=10) p->playstate=HIDDENSTATE;
+			continue;
+		}
 		Vector d=p->pos-tickprev[i];
-		if(Magnitude(d)<5)
+		if(snapview||NetServerDrawPos(i,&p->pos)) {}
+		else if(Magnitude(d)<5)
 			p->pos=tickprev[i]+d*tickalpha;
 		if(i==GetLocalNum()) p->pos+=correction;
 		//a player the server moves from its commands stays where it is in the world
@@ -805,7 +817,10 @@ void PlayDrawEnd()
 	if(!drawing) return;
 	drawing=0;
 	for(int i=0;i<GetNumPlayers()&&i<MAXPLAYERS;i++)
+	{
 		GetPlayer(i)->pos=drawsaved[i];
+		GetPlayer(i)->playstate=drawstate[i];
+	}
 	for(int i=0;i<MAXSERVEROBJS;i++)
 		if(sobject[i].attached!=(-1))
 			sobject[i].pos=GetPlayer(sobject[i].attached)->pos+Vector(0,.3,0);
@@ -941,6 +956,7 @@ void Play()
 	}
 	TickObjects(sf);
 	TickSmoke(sf);
+	NetSnapshotPlayers();   //the others where the snapshots have them (M16 phase 4)
 	
 	for(int i=0;i<numplayers;i++)
 	if(GetPlayer(i)->playstate>=10)
@@ -950,6 +966,23 @@ void Play()
 
 		Player *cur=GetPlayer(i);
 		int local=cur==GetLocalPlayer();
+		if(!local&&NetSnapshotView())
+		{
+			//phase 4: the server's, in the past (NetSnapshotPlayers); a step of a copy
+			//only for the legs, the footsteps and the jetpack's smoke
+			if(!NetPlayerShown(i)) continue;
+			AimPlayer(cur);
+			Player look=*cur;
+			look.thrustfuel=1;
+			MoveInput in;
+			in.speedpenalty=speedpenalty;
+			MoveEvents ev;
+			MovePlayer(&look,in,sf,sv,moveworld,&ev);
+			cur->runtime=look.runtime;
+			cur->legframe=look.legframe;
+			PlayerMoveEffects(cur,ev);
+			continue;
+		}
 		//the server moves this client's player from its commands (docs/M16.md, phase
 		//2): where they put it in the world, not moved near us (PlayDrawBegin is)
 		int bycmd=!local&&NetServerMoves(i);
@@ -996,6 +1029,7 @@ void Play()
 		}
 		PlayerMoveEffects(cur,ev);
 	}	
+	NetTickEnd();   //the server's snapshots of this tick (M16 phase 4)
 }
 
 //not in use right now, but was used to buy guns

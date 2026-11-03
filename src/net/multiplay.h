@@ -97,6 +97,22 @@ int NetServerMove(int i,float speedpenalty,MoveEvents *ev);
 int NetPredicting();
 void NetPredictTick(const MoveCmd &c,float speedpenalty,MoveEvents *ev);
 extern int sv_authmove;     //server: moves the clients that can from their commands
+//phase 4: the other players in SNAPSHOT. Server: NetTickEnd at the end of each tick
+//sends them (30 Hz). Client (NetSnapshotView: the server said so): NetSnapshotPlayers,
+//each tick, puts every other player where the snapshots have it SNAPINTERP ticks ago
+//(netsync.h); NetSnapshotDrawPos, each frame, where it is drawn (0: no data, hidden).
+//NetPlayerShown: player i has data to be drawn (on any side: not before its first
+//position, Player::nopos)
+extern int sv_snapshots;
+void NetTickEnd();
+int NetSnapshotView();
+void NetSnapshotPlayers();
+int NetSnapshotDrawPos(int i,Vector *pos);
+int NetPlayerShown(int i);
+//host: where it draws player i that it moves from its commands, on a steady clock of
+//them AUTHDRAWDELAY ticks back (the queue runs them by bursts with the jitter); 0: as
+//the ticks have it
+int NetServerDrawPos(int i,Vector *pos);
 
 #define CMSG_BROADCAST 0
 #define CMSG_TEAM 1

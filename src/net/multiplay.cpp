@@ -145,7 +145,7 @@ static void SendRequestEnter()
 	//HK_LEGACYMOVE=1 (tests): joins as a 0.7 build moving itself (no HELLOCAP_INPUTS)
 	static int legacymove=getenv("HK_LEGACYMOVE")&&atoi(getenv("HK_LEGACYMOVE"));
 	len+=WriteHelloCaps(&buf[len],HELLOCAP_COOKIE|HELLOCAP_SERVERHITS|HELLOCAP_STABLESLOTS|HELLOCAP_POSSEQ|
-		HELLOCAP_PROPS|HELLOCAP_SMOKE|(legacymove?0:HELLOCAP_INPUTS),cookie?entercookie:0);
+		HELLOCAP_PROPS|HELLOCAP_SMOKE|(legacymove?0:HELLOCAP_INPUTS|HELLOCAP_SNAPSHOTS),cookie?entercookie:0);
 	infosock.Send(buf,len);
 	infosock.Flush();
 }
@@ -183,6 +183,9 @@ int sv_props=1;             //sv.ini props, Server Setup "Rocks and trees"
 //send input commands (HELLOCAP_INPUTS), and bounds their rate
 int sv_authmove=1;          //1: it does (the others move themselves, as before)
 int ac_cmdslack=8;          //ticks of commands a client may be ahead of real time, -1: off
+//M16 phase 4: the other players in SNAPSHOT (deltas, 30 Hz) to the clients it moves
+//that read them (HELLOCAP_SNAPSHOTS), drawn in the past; no PLAYERPOSITION to them
+int sv_snapshots=1;
 
 //server answers an info request, with its version
 static void SendInfo(SOCKADDR_IN dest)
@@ -205,7 +208,7 @@ static void SendInfo(SOCKADDR_IN dest)
 	buf[len++]=(char)((ac_enable?HELLOCAP_COOKIE|(ac_requirecookie?HELLOCAP_REQUIRECOOKIE:0)|
 		(ac_serverhits?HELLOCAP_SERVERHITS:0):0)|(ac_stableslots?HELLOCAP_STABLESLOTS:0)|
 		(sv_props?HELLOCAP_PROPS:0)|HELLOCAP_SMOKE);
-	buf[len++]=(char)((sv_authmove?HELLOCAP_INPUTS:0)>>8);   //caps2 (M16)
+	buf[len++]=(char)(((sv_authmove?HELLOCAP_INPUTS:0)|(sv_authmove&&sv_snapshots?HELLOCAP_SNAPSHOTS:0))>>8);   //caps2 (M16)
 	infosock.dest=dest;
 	infosock.Send(buf,len);
 	infosock.Flush();
@@ -290,6 +293,8 @@ static const char *ackind[ACKINDS]={"kill","death","fire","ammo","move","build",
 #define AUTHSILENCE 6   //ticks without a command before its last one is played again,
 #define AUTHREPEAT 6    //at most this many times; then the player waits
 #define AUTHBUFFER 1    //commands left waiting for the next ticks, at most
+#define AUTHDRAW 64     //commands whose positions the host keeps to draw (~1 s)
+#define AUTHDRAWDELAY 2 //ticks the host draws them behind their clock (the queue's jitter)
 struct AcAuth
 {
 	int on;               //NETSYNCMODE said so: its PLAYERPOSITIONs are ignored
@@ -305,6 +310,24 @@ struct AcAuth
 	AcBucket budget;      //ticks of commands (ac_cmdslack)
 	int dropped;          //commands over the budget
 	DWORD lastsnap;       //simtick of the last SNAPSHOT sent
+	//phase 4: where each command put it, for the host to draw it on a steady clock
+	//of its commands (AuthDrawPos) rather than as the queue runs them
+	unsigned int drawnum[AUTHDRAW];
+	Vector drawpos[AUTHDRAW],drawvel[AUTHDRAW];
+	unsigned int drawref;   //the command clock: (now + drawoffset) / TICKMS after drawref
+	double drawoffset;
+	int drawclock;
+	double drawlast;        //the last moment drawn (commands after drawref): never back
+	int drawing;
+};
+
+//M16 phase 4: a client that gets the other players in SNAPSHOT
+struct AcSnap
+{
+	int on;               //NETSYNCMODE said so: no PLAYERPOSITION to it
+	uint32_t acked;       //the newest snapshot it said it has (anyack: there is one)
+	int anyack;
+	SnapRing sent;        //the last ones sent to it: the bases of its deltas
 };
 
 struct AcPlayer
@@ -328,6 +351,7 @@ struct AcPlayer
 	AcBucket posrate;
 	AcClamp clamp;
 	AcAuth auth;         //M16 phase 2: moved by the server from its commands
+	AcSnap snap;         //M16 phase 4: gets the others in SNAPSHOT
 };
 static AcPlayer acplayer[MAXPLAYERS];
 #define ACIPTABLE 64
@@ -389,6 +413,7 @@ static void AcInitVars()
 		{&ac_serverhits,0,"ac_serverhits"},{0,&ac_hittolerance,"ac_hittolerance"},{&ac_lagcomp,0,"ac_lagcomp"},
 		{&ac_stableslots,0,"ac_stableslots"},{0,&ac_posrate,"ac_posrate"},{&ac_moveclamp,0,"ac_moveclamp"},
 		{&sv_props,0,"props"},{&sv_authmove,0,"sv_authmove"},{&ac_cmdslack,0,"ac_cmdslack"},
+		{&sv_snapshots,0,"sv_snapshots"},
 	};
 	//debug (tests): HK_AC_VARS="ac_requirecookie=1 ac_cookietime=1000" wins over sv.ini
 	const char *env=getenv("HK_AC_VARS");
@@ -474,6 +499,20 @@ static Prediction prediction;
 static unsigned int lastsentcmd;   //newest command sent (sentany: there is one)
 static int sentany;
 
+//M16 phase 4: the others from the server's snapshots (further down)
+static int clientsnapview;      //NETSYNCMODE said HELLOCAP_SNAPSHOTS: no PLAYERPOSITION
+static SnapRing snaprecv;       //the last ones received, complete (the bases of the deltas)
+static uint32_t snapnewest;     //the newest of them (snapany: there is one): what we ack
+static int snapany;
+//the server's tick, estimated: (now + snapoffset) / TICKMS ticks after snapref
+static uint32_t snapref;
+static double snapoffset;
+static int snapclock;
+static double snaprender;       //the last render time (ticks after snapref): never back
+static int snaprendering;
+static char snapshown[MAXPLAYERS];   //had data at the render time: drawn
+#define SNAPCLOCKRESYNC 300     //ms off the estimate: a new start (a stall, a new server)
+static void ClientSnapReset();
 static void ClientAuthMove(int on)
 {
 	if(on!=clientauthmove)
@@ -518,7 +557,7 @@ static void SendInputCmds()
 		m.type=INPUTCMD;
 		m.n=(unsigned char)n;
 		m.firstcmd=first;
-		m.acksnap=0;   //phase 4
+		m.acksnap=clientsnapview&&snapany?snapnewest:0;   //phase 4: the base of the next delta
 		for(int k=0;k<n;k++) m.cmd[k]=PredictFind(&prediction,first+k)->cmd;
 		char buf[INPUTCMDHEADER+INPUTCMDMAX*MOVECMDSIZE];
 		int size=WriteInputCmd(buf,sizeof(buf),&m);
@@ -550,6 +589,132 @@ static void ClientReconcile(const SnapshotMessage *s)
 	if(r.kind==PREDICT_STALE) return;
 	if(r.kind==PREDICT_CORRECTED) PlayCorrection(r.shift);
 	SyncLogPredict(s->lastcmd,r.poserr,r.velerr,r.kind==PREDICT_CORRECTED,r.replayed,Magnitude(r.shift));
+}
+
+//---- M16 phase 4 (docs/M16.md): the other players from the server's snapshots,
+//drawn SNAPINTERP ticks in the past, between the two around that moment (the
+//state: above ClientAuthMove) ----
+
+static double LocalMs()
+{
+	return (double)HKPerfCounter()*1000/HKPerfFrequency();
+}
+
+static void ClientSnapReset()
+{
+	memset(&snaprecv,0,sizeof(snaprecv));
+	snapany=0;
+	snapclock=0;
+	snaprendering=0;
+	memset(snapshown,0,sizeof(snapshown));
+}
+
+//a SNAPSHOT (head: its header, already read): the others in it kept, and the clock
+static void ClientSnapshot(const void *msg,int len,const SnapshotMessage *head)
+{
+	const SnapPlayers *base=0;
+	if(head->basetick)
+	{
+		base=SnapFind(&snaprecv,head->basetick);
+		if(!base) return;   //a base we no longer have: the next ones are on what we ack
+	}
+	static SnapshotMessage m;
+	static SnapPlayers players;
+	if(!ReadPlayerSnapshot(msg,len,&m,&players,base)) return;
+	SnapStore(&snaprecv,m.tick,players);
+	if(snapany&&!CmdNewer(m.tick,snapnewest)) return;   //overtaken on the way: not for the clock
+	snapnewest=m.tick;
+	snapany=1;
+	//when it came against when it was made: the mean of that is the server's clock
+	//as it reaches us (a moving average: the jitter averages out)
+	double now=LocalMs();
+	if(!snapclock)
+	{
+		snapref=m.tick;
+		snapoffset=-now;
+		snapclock=1;
+	}
+	double sample=(double)(int32_t)(m.tick-snapref)*TICKMS-now;
+	if(fabs(sample-snapoffset)>SNAPCLOCKRESYNC)
+	{
+		snapoffset=sample;
+		snaprendering=0;
+	}
+	else
+		snapoffset+=(sample-snapoffset)*.05;
+}
+
+//the moment the others are drawn at: the server's tick now, SNAPINTERP before
+static int SnapRenderTime(uint32_t *tick,float *frac)
+{
+	if(!snapclock) return 0;
+	double t=(LocalMs()+snapoffset)/TICKMS-SNAPINTERP;
+	if(snaprendering&&t<snaprender) t=snaprender;
+	snaprender=t;
+	snaprendering=1;
+	double whole=floor(t);
+	*tick=snapref+(uint32_t)(int64_t)whole;
+	*frac=(float)(t-whole);
+	return 1;
+}
+
+int NetSnapshotView()
+{
+	return !server&&connected&&clientsnapview;
+}
+
+//player i at the render time; 0 if there is nothing for it then
+static int SnapAt(int i,SnapState *st)
+{
+	uint32_t tick;
+	float frac;
+	snapshown[i]=0;
+	if(i==GetLocalNum()||i>=SNAPMAXPLAYERS||!slotused[i]||!SnapRenderTime(&tick,&frac)) return 0;
+	snapshown[i]=SnapSample(&snaprecv,i,tick,frac,st)!=SNAPSAMPLE_NONE;
+	return snapshown[i];
+}
+
+void NetSnapshotPlayers()
+{
+	if(!NetSnapshotView()) return;
+	for(int i=0;i<numplayers;i++)
+	{
+		SnapState st;
+		if(!SnapAt(i,&st)) continue;
+		Player *p=GetPlayer(i);
+		p->pos=Vector(st.pos[0],st.pos[1],st.pos[2]);
+		MakeClose(&p->pos);
+		p->vel=Vector(st.vel[0],st.vel[1],st.vel[2]);
+		p->fwd=Vector(sinf(st.yaw),0,cosf(st.yaw));
+		p->tilt=Vector(cosf(st.pitch),sinf(st.pitch),0);
+		p->up=(st.keys&MOVEKEY_UP)!=0;
+		p->down=(st.keys&MOVEKEY_DOWN)!=0;
+		p->lstrafe=(st.keys&MOVEKEY_LEFT)!=0;
+		p->rstrafe=(st.keys&MOVEKEY_RIGHT)!=0;
+		p->jetpack=(st.keys&MOVEKEY_JETPACK)&&(st.flags&SNAPFLAG_THRUST);   //the flame: when it pushes
+		p->hangglide=(st.keys&MOVEKEY_GLIDE)!=0;
+		p->jump=(st.keys&MOVEKEY_JUMP)!=0;
+		p->hanggliding=(st.flags&SNAPFLAG_GLIDING)!=0;
+		p->roll=st.roll;
+		p->weapon=ValidWeapon(st.weapon)?st.weapon:0;
+		if(st.playstate==10||st.playstate==11) p->playstate=st.playstate;
+	}
+}
+
+int NetSnapshotDrawPos(int i,Vector *pos)
+{
+	SnapState st;
+	if(!SnapAt(i,&st)) return 0;
+	*pos=Vector(st.pos[0],st.pos[1],st.pos[2]);
+	MakeClose(pos);
+	return 1;
+}
+
+int NetPlayerShown(int i)
+{
+	if(i==GetLocalNum()) return 1;
+	if(NetSnapshotView()) return i<MAXPLAYERS&&snapshown[i];
+	return !GetPlayer(i)->nopos;
 }
 
 //who a death reported by client i (KILLED, KILLEDPOSITION: "killed by claimed")
@@ -702,6 +867,9 @@ static int AcCountsDamage()
 static void AcServerBullet(Object *o,Vector prev,int shooter)
 {
 	int rewind=shooter==GetLocalNum()?0:AcRewind(GetPlayer(shooter)->ping,ac_lagcomp);
+	//M16 phase 4: a client drawing the others from snapshots sees them SNAPINTERP
+	//ticks later still (phase 5 will rewind to the tick it saw)
+	if(shooter!=GetLocalNum()&&acplayer[shooter].snap.on) rewind+=(int)(SNAPINTERP*TICKMS);
 	for(int v=0;v<numplayers;v++)
 	{
 		if(v==shooter||(o->achit&(1u<<v))) continue;
@@ -969,7 +1137,12 @@ static void SendNetSyncMode(int i)
 	int on=sv_authmove!=0;
 	if(on&&!a->on) memset(a,0,sizeof(*a));   //its commands from now on
 	a->on=on;
-	SimpleBuf mode=MakeSimple(NETSYNCMODE,on?HELLOCAP_INPUTS:0,simtick);
+	//phase 4: the others in SNAPSHOT, acked in its INPUTCMDs (so only if it sends them)
+	AcSnap *sn=&acplayer[i].snap;
+	int snaps=on&&sv_snapshots&&(acplayer[i].caps&HELLOCAP_SNAPSHOTS);
+	if(snaps&&!sn->on) memset(sn,0,sizeof(*sn));   //complete snapshots until it acks one
+	sn->on=snaps;
+	SimpleBuf mode=MakeSimple(NETSYNCMODE,(on?HELLOCAP_INPUTS:0)|(snaps?HELLOCAP_SNAPSHOTS:0),simtick);
 	clientsock[i].SendReliable(mode.b,sizeof(mode.b),0);
 }
 
@@ -1013,6 +1186,90 @@ static int AuthBudget(AcAuth *a)
 
 //client i's command num, one tick: its life or death as AcState allows (a respawn
 //at a place the server chooses), its weapon and view, its move
+static double LocalMs();
+
+//phase 4: command num of client i has just run: its position for the host's drawing,
+//and the clock of its commands (the mean of when each runs, ~1 s average)
+static void AuthDrawKeep(int i,unsigned int num)
+{
+	AcAuth *a=&acplayer[i].auth;
+	Player *p=GetPlayer(i);
+	int k=num%AUTHDRAW;
+	a->drawnum[k]=num;
+	a->drawpos[k]=p->pos;
+	a->drawvel[k]=p->vel;
+	double now=LocalMs();
+	if(!a->drawclock)
+	{
+		a->drawref=num;
+		a->drawoffset=-now;
+		a->drawclock=1;
+	}
+	double sample=(double)(int)(num-a->drawref)*TICKMS-now;
+	if(fabs(sample-a->drawoffset)>SNAPCLOCKRESYNC)
+	{
+		a->drawoffset=sample;
+		a->drawing=0;
+	}
+	else
+		a->drawoffset+=(sample-a->drawoffset)*.05;
+}
+
+//the position kept for command num of client i, if it is
+static const Vector *AuthDrawAt(const AcAuth *a,unsigned int num)
+{
+	int k=num%AUTHDRAW;
+	return a->drawnum[k]==num&&a->drawclock?&a->drawpos[k]:0;
+}
+
+int NetServerDrawPos(int i,Vector *pos)
+{
+	if(!NetServerMoves(i)) return 0;
+	AcAuth *a=&acplayer[i].auth;
+	if(!a->drawclock||!a->ran) return 0;
+	double t=(LocalMs()+a->drawoffset)/TICKMS-AUTHDRAWDELAY;
+	if(a->drawing&&t<a->drawlast) t=a->drawlast;
+	a->drawlast=t;
+	a->drawing=1;
+	double whole=floor(t);
+	unsigned int num=a->drawref+(unsigned int)(long long)whole;
+	float f=(float)(t-whole);
+	//the commands around that moment (one may be missing: dropped, or lost)
+	const Vector *pa=0,*pb=0;
+	int na=0,nb=0;
+	for(int k=0;k<4&&!pa;k++)
+		if((pa=AuthDrawAt(a,num-k))) na=-k;
+	if(!pa) return 0;   //before them all, or a long hole: as the ticks have it
+	if(CmdNewer(num+1,a->lastcmd))
+	{
+		//past the last one run: on with its velocity, 6 ticks at most (then it waits)
+		unsigned int last=a->lastcmd;
+		pa=AuthDrawAt(a,last);
+		if(!pa) return 0;
+		float dt=(float)((double)(int)(num-last)+f);
+		if(dt>SNAPEXTRAP) dt=SNAPEXTRAP;
+		*pos=*pa+a->drawvel[last%AUTHDRAW]*(dt*SNAPSTEPSPERTICK);
+		return 1;
+	}
+	for(int k=1;k<=4&&!pb;k++)
+		if((pb=AuthDrawAt(a,num+k))) nb=k;
+	if(!pb)
+	{
+		*pos=*pa;
+		return 1;
+	}
+	Vector d=*pb-*pa;
+	d.x=AcWrap(d.x,LANDGRIDSIZE);
+	d.z=AcWrap(d.z,LANDGRIDSIZE);
+	if(Magnitude(d)>5)   //a respawn: not across it
+	{
+		*pos=*pa;
+		return 1;
+	}
+	*pos=*pa+d*((f-na)/(float)(nb-na));
+	return 1;
+}
+
 static void AuthRun(int i,unsigned int num,const MoveCmd &c,float speedpenalty,MoveEvents *ev)
 {
 	AcAuth *a=&acplayer[i].auth;
@@ -1029,9 +1286,11 @@ static void AuthRun(int i,unsigned int num,const MoveCmd &c,float speedpenalty,M
 	p->playstate=state;
 	p->weapon=weapon;
 	ApplyMoveCmd(p,c,speedpenalty,(float)(TICKMS/40),sv,GetMoveWorld(),ev,0);
+	p->nopos=0;
 	a->lastcmd=num;
 	a->ran=1;
 	a->last=c;
+	AuthDrawKeep(i,num);
 }
 
 int NetServerMove(int i,float speedpenalty,MoveEvents *ev)
@@ -1071,14 +1330,77 @@ int NetServerMove(int i,float speedpenalty,MoveEvents *ev)
 	return 1;
 }
 
-//30 Hz: the exact state of its player after its last command run, to each client
-//the server moves (a SNAPSHOT with only itself, phase 2)
-static void SendSelfStates()
+//on the ground: about as MovePlayer sees it (the highest point under its feet)
+static int OnGround(const Player *p)
 {
+	float ground=GetHeight(p->pos-Vector(0,.4f,0));
+	const Vector around[4]={Vector(.4f,-.4f,0),Vector(-.4f,-.4f,0),Vector(0,-.4f,.4f),Vector(0,-.4f,-.4f)};
+	for(int k=0;k<4;k++)
+	{
+		float h=GetHeight(p->pos+around[k]);
+		if(h<p->pos.y+1.1f&&h>ground) ground=h;
+	}
+	return p->pos.y<ground+1.5f;
+}
+
+//phase 4: every player in the game as the server has it now, the host's, the ones
+//it moves and the 0.7 ones (theirs: what they sent, carried on with their keys);
+//not one whose position hasn't come yet
+static void SnapCapture(SnapPlayers *s)
+{
+	memset(s,0,sizeof(*s));
+	for(int j=0;j<numplayers&&j<SNAPMAXPLAYERS;j++)
+	{
+		Player *p=GetPlayer(j);
+		if((j>0&&!slotused[j])||p->playstate<10||p->nopos) continue;
+		SnapState st;
+		st.pos[0]=p->pos.x;st.pos[1]=p->pos.y;st.pos[2]=p->pos.z;
+		st.vel[0]=p->vel.x;st.vel[1]=p->vel.y;st.vel[2]=p->vel.z;
+		st.yaw=atan2f(p->fwd.x,p->fwd.z);   //as MakeMoveCmd
+		st.pitch=atan2f(p->tilt.y,p->tilt.x);
+		st.roll=p->roll;
+		st.keys=(p->up?MOVEKEY_UP:0)|(p->down?MOVEKEY_DOWN:0)|(p->lstrafe?MOVEKEY_LEFT:0)|
+			(p->rstrafe?MOVEKEY_RIGHT:0)|(p->jetpack?MOVEKEY_JETPACK:0)|(p->hangglide?MOVEKEY_GLIDE:0)|
+			(p->jump?MOVEKEY_JUMP:0);
+		st.weapon=(unsigned char)(ValidWeapon(p->weapon)?p->weapon:0);
+		st.playstate=(unsigned char)p->playstate;
+		st.flags=(p->hanggliding?SNAPFLAG_GLIDING:0)|(OnGround(p)?SNAPFLAG_GROUND:0)|
+			(p->jetpack&&p->playstate==10&&p->thrustfuel>0&&!p->hanggliding?SNAPFLAG_THRUST:0);
+		SnapPack(st,&s->p[j]);
+	}
+}
+
+//phase 4: client i has the snapshot of tick ack (INPUTCMD acksnap), the base of the
+//next delta; 0: it has none (complete ones until it has)
+static void SnapAck(int i,uint32_t ack)
+{
+	AcSnap *sn=&acplayer[i].snap;
+	if(!sn->on) return;
+	if(!ack)
+	{
+		sn->anyack=0;
+		return;
+	}
+	if((sn->anyack&&!CmdNewer(ack,sn->acked))||CmdNewer(ack,simtick)) return;   //older, or not sent yet
+	sn->acked=ack;
+	sn->anyack=1;
+}
+
+//at the end of every SNAPRATE-th tick (30 Hz): a SNAPSHOT to each client the server
+//moves (the exact state of its player after its last command run, phase 2) or that
+//gets the others (phase 4: as a delta on the newest it acked, if still kept, else
+//complete)
+static void SendSnapshots()
+{
+	if(!simtick||simtick%SNAPRATE) return;   //(tick 0 would read as "no base")
+	static SnapPlayers all,cur;
+	int captured=0;
 	for(int i=1;i<numplayers;i++)
 	{
 		AcAuth *a=&acplayer[i].auth;
-		if(!slotused[i]||!a->on||!a->ran||simtick-a->lastsnap<2) continue;
+		AcSnap *sn=&acplayer[i].snap;
+		int self=a->on&&a->ran;
+		if(!slotused[i]||!(self||sn->on)||a->lastsnap==simtick) continue;
 		a->lastsnap=simtick;
 		Player *p=GetPlayer(i);
 		SnapshotMessage m;
@@ -1086,7 +1408,7 @@ static void SendSelfStates()
 		m.type=SNAPSHOT;
 		m.tick=simtick;
 		m.lastcmd=a->lastcmd;
-		m.self=1;
+		m.self=(unsigned char)self;
 		SyncState &s=m.state;
 		s.pos[0]=p->pos.x;s.pos[1]=p->pos.y;s.pos[2]=p->pos.z;
 		s.vel[0]=p->vel.x;s.vel[1]=p->vel.y;s.vel[2]=p->vel.z;
@@ -1094,33 +1416,44 @@ static void SendSelfStates()
 		s.roll=p->roll;
 		s.runtime=p->runtime;
 		s.speedpenalty=GetSOSpeedPenalty(i);
-		//on the ground: about as MovePlayer sees it (the highest point under its feet)
-		float ground=GetHeight(p->pos-Vector(0,.4f,0));
-		const Vector around[4]={Vector(.4f,-.4f,0),Vector(-.4f,-.4f,0),Vector(0,-.4f,.4f),Vector(0,-.4f,-.4f)};
-		for(int k=0;k<4;k++)
-		{
-			float h=GetHeight(p->pos+around[k]);
-			if(h<p->pos.y+1.1f&&h>ground) ground=h;
-		}
 		s.flags=(p->hanggliding?SYNCSTATE_GLIDING:0)|(p->jump?SYNCSTATE_JUMP:0)|
-			(p->pos.y-2<WATERHEIGHT?SYNCSTATE_UNDERWATER:0)|(p->pos.y<ground+1.5f?SYNCSTATE_GROUND:0);
+			(p->pos.y-2<WATERHEIGHT?SYNCSTATE_UNDERWATER:0)|(OnGround(p)?SYNCSTATE_GROUND:0);
 		s.playstate=(unsigned char)p->playstate;
 		s.life=(short)(acplayer[i].life>0?acplayer[i].life+.5f:0);
-		char buf[SNAPSHOTSELFSIZE];
-		int size=WriteSnapshotSelf(buf,sizeof(buf),&m);
+		char buf[SNAPSHOTSELFSIZE+SNAPMAXPLAYERS*SNAPENTRYMAX];
+		int size;
+		if(sn->on)
+		{
+			if(!captured) SnapCapture(&all);
+			captured=1;
+			cur=all;
+			memset(&cur.p[i],0,sizeof(cur.p[i]));   //its own player: predicted (phase 3)
+			const SnapPlayers *base=sn->anyack?SnapFind(&sn->sent,sn->acked):0;
+			m.basetick=base?sn->acked:0;
+			size=WritePlayerSnapshot(buf,sizeof(buf),&m,cur,base);
+			if(size) SnapStore(&sn->sent,simtick,cur);
+		}
+		else
+			size=WriteSnapshotSelf(buf,sizeof(buf),&m);
 		if(size) clientsock[i].Send(buf,size);
 	}
+}
+
+void NetTickEnd()
+{
+	if(server) SendSnapshots();
 }
 
 //every server frame: where each player is (the shooters' lag), and the hit mode
 //again to the clients when ac_serverhits or ac_enable change on the console
 static void AcServerFrame()
 {
-	static int lastauth=-1;   //M16: sv_authmove changed on the console
-	if(lastauth>=0&&(sv_authmove!=0)!=lastauth)
+	static int lastauth=-1;   //M16: sv_authmove or sv_snapshots changed on the console
+	int auth=(sv_authmove!=0)|(sv_snapshots!=0)<<1;
+	if(lastauth>=0&&auth!=lastauth)
 		for(int i=1;i<numplayers;i++)
 			if(slotused[i]&&GetPlayer(i)->playstate>=10) SendNetSyncMode(i);
-	lastauth=sv_authmove!=0;
+	lastauth=auth;
 	static int lastmode=-1;
 	int mode=AcServerHits();
 	if(mode!=lastmode&&lastmode>=0)
@@ -1744,7 +2077,9 @@ void ServerLoop()
 				case INPUTCMD:
 					{
 						InputCmdMessage in;
-						if(ReadInputCmd(&msg,clen,&in)) AuthReceive(i,&in);
+						if(!ReadInputCmd(&msg,clen,&in)) break;
+						AuthReceive(i,&in);
+						SnapAck(i,in.acksnap);   //phase 4
 						break;
 					}
 				case VOICE:
@@ -1858,12 +2193,13 @@ void ServerLoop()
 		for(i=0;i<numplayers;i++)
 		for(int i2=1;i2<numplayers;i2++)
 		{
-			if(localnum!=i2&&i!=i2&&GetPlayer(i2)->playstate>=10&&GetPlayer(i)->playstate>=10)
+			//not to a client that has the others in SNAPSHOT (M16 phase 4)
+			if(localnum!=i2&&i!=i2&&GetPlayer(i2)->playstate>=10&&GetPlayer(i)->playstate>=10&&
+					!acplayer[i2].snap.on)
 				SendPosition(i,i2);
 		}
 		nextresend=curtime+sv.positionresendtime;
 	}
-	SendSelfStates();   //M16: to the clients it moves
 	for(i=1;i<numplayers;i++)
 		{
 			if(slotused[i]) clientsock[i].Flush();
@@ -1947,6 +2283,8 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 					SetLocalNum(msg2);
 					clientserverhits=0;   //until this server says otherwise (HITMODE)
 					ClientAuthMove(0);    //and NETSYNCMODE
+					clientsnapview=0;
+					ClientSnapReset();
 					PropsSetEnabled(0);   //and none until it says it has them (PROPSMODE)
 					SmokeSetAllowed(0);   //and SMOKEMODE
 					GetLocalPlayer()->playstate=1;
@@ -2043,6 +2381,9 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 				if(on!=clientauthmove)
 					ConsoleDisplayText((char *)(on?"the server moves us from our commands":"we move ourselves"));
 				ClientAuthMove(on);
+				int snaps=on&&(msg&HELLOCAP_SNAPSHOTS);   //phase 4: the others in SNAPSHOT
+				if(snaps!=clientsnapview) ClientSnapReset();
+				clientsnapview=snaps;
 				if(getenv("HK_SYNCLOG")) fprintf(stderr,"netsyncmode %u %u\n",(unsigned)msg,(unsigned)msg2);
 				break;
 			}
@@ -2159,7 +2500,7 @@ void ClientLoop()
 				}
 			case PLAYERPOSITION:
 				{
-					if(connected)
+					if(connected&&!clientsnapview)   //(phase 4: the snapshots have them)
 					{
 						ReceivePosition((char *)&msg,msglen,-1);
 					}
@@ -2167,10 +2508,11 @@ void ClientLoop()
 				}
 			case SNAPSHOT:
 				{
-					//our player as the server moved it (M16 phase 2)
+					//our player as the server moved it (M16 phase 2), the others (phase 4)
 					static SnapshotMessage snap;
-					if(connected&&clientauthmove&&ReadSnapshotSelf(&msg,msglen,&snap)&&snap.self)
-						ClientReconcile(&snap);
+					if(!connected||!ReadSnapshotSelf(&msg,msglen,&snap)) break;
+					if(clientauthmove&&snap.self) ClientReconcile(&snap);
+					if(clientsnapview) ClientSnapshot(&msg,msglen,&snap);
 					break;
 				}
 			case VOICE:
@@ -2627,6 +2969,7 @@ void DeletePlayer(int num,int reason)
 		SetLocalNum(localnum-1);
 	}
 	VoiceReset();   //players are renumbered
+	if(!server) ClientSnapReset();   //and the snapshots name them by the old numbers (M16)
 	if(server) AcPlayerLeft(num,1);
 	numplayers--;
 	for(int i=num;i<numplayers;i++)
@@ -2768,6 +3111,7 @@ void ReceivePosition(const char *msg,int msglen,int sender)
 	}
 	else if(pos->state!=1) 
 		src->playstate=pos->state;
+	src->nopos=0;
 	MakeClose(&src->pos);
 }
 
@@ -3262,6 +3606,8 @@ void ResetPlayer(int num)
 	GetPlayer(num)->gunmainup=Vector(0,1,0);
 	GetPlayer(num)->pos=Vector(0,0,0);
 	GetPlayer(num)->gunup=Vector(0,1,0);
+	//not drawn (nor in the snapshots) until its first position: not at (0,0,0)
+	if(num!=GetLocalNum()) GetPlayer(num)->nopos=1;
 }
 
 

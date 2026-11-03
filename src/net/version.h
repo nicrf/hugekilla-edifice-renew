@@ -71,6 +71,9 @@ struct PeerVersion
 #define HELLOCAP_INPUTS 256      // REQUESTENTER: the client sends numbered input commands (INPUTCMD) and
                                  // predicts its own player from the server's state; INFO: the server
                                  // moves such players itself (sv_authmove, M16 phases 2 and 3)
+#define HELLOCAP_SNAPSHOTS 512   // REQUESTENTER: the client reads the other players from SNAPSHOT (deltas,
+                                 // acked in INPUTCMD) and draws them in the past; INFO: the server sends
+                                 // them (sv_snapshots) instead of PLAYERPOSITION (M16 phase 4)
 #define HELLOCOOKIE_SIZE 8
 #define HELLOCAPS_MAX (2+HELLOCOOKIE_SIZE)
 

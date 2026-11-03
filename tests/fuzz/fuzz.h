@@ -18,4 +18,26 @@
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data,size_t size);
 
+//M16 phase 4: the base the deltas of fuzz_playersnapshot are read on (its seeds,
+//make_seeds.cpp, are written on it): players 0, 1, 5 and 31
+inline void FuzzSnapBase(SnapPlayers *base)
+{
+	memset(base,0,sizeof(*base));
+	SnapState st;
+	memset(&st,0,sizeof(st));
+	st.playstate=10;
+	const int players[4]={0,1,5,31};
+	for(int k=0;k<4;k++)
+	{
+		st.pos[0]=100.f*k+.5f;
+		st.pos[1]=30;
+		st.pos[2]=511.9f;
+		st.vel[1]=-1.5f;
+		st.yaw=(float)k;
+		st.keys=MOVEKEY_UP;
+		st.weapon=(unsigned char)k;
+		SnapPack(st,&base->p[players[k]]);
+	}
+}
+
 #endif

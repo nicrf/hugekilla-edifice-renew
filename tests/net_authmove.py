@@ -25,7 +25,7 @@ REQUESTINFO, ENTER, PORTACK, JOINGAME, PING, PINGREPLY = 1, 2, 4, 8, 12, 13
 NETSYNCMODE = 41
 HELLOCAP_INPUTS = 256
 MOVEKEY_UP, MOVECMD_ALIVE = 1, 1
-SYNCSTATE_GROUND = 2
+SYNCSTATE_GROUND, SYNCSTATE_UNDERWATER = 2, 4
 RELIABLE, LASTRELIABLE, ACK = 0xFF, 0xFE, 0xFD
 LANDGRIDSIZE = 512
 CMDSLACK = 8      # ac_cmdslack
@@ -255,7 +255,7 @@ t = info[2 + info[1] + 1:]
 _, proto, layout, vlen = struct.unpack_from("<IHIB", t, 0)
 trailer = t[:11 + vlen]
 caps = t[11 + vlen + 4:]
-check(len(caps) >= 2 and caps[1] == HELLOCAP_INPUTS >> 8, "INFO announces HELLOCAP_INPUTS in its second byte")
+check(len(caps) >= 2 and caps[1] & HELLOCAP_INPUTS >> 8, "INFO announces HELLOCAP_INPUTS in its second byte")
 
 mover, old = Client(b"Mover"), Client(b"Oldie")
 # caps 0, no cookie, caps2: HELLOCAP_INPUTS
@@ -278,13 +278,14 @@ check(first is not None and first[4] == 11, "dead at first (SNAPSHOT playstate %
 play(mover, 0.5, old=old, oldpos=oldpos)
 spawn = mover.snap
 check(spawn and spawn[4] == 10 and spawn[1][1] > 50, "respawned by the server, at %s" % (spawn and [round(v, 1) for v in spawn[1]]))
-# falls to the ground
+# falls to the ground (or into a lake: the world is random, it may float there)
+settled = lambda s: s[3] & (SYNCSTATE_GROUND | SYNCSTATE_UNDERWATER) and abs(s[2][1]) < .05
 for k in range(80):
     play(mover, 0.1, old=old, oldpos=oldpos)
-    if mover.snap[3] & SYNCSTATE_GROUND and abs(mover.snap[2][1]) < .05:
+    if settled(mover.snap):
         break
-check(mover.snap[3] & SYNCSTATE_GROUND and abs(mover.snap[2][1]) < .05,
-      "landed at %s" % [round(v, 1) for v in mover.snap[1]])
+check(settled(mover.snap), "landed at %s%s" % ([round(v, 1) for v in mover.snap[1]],
+                                               " (in the water)" if mover.snap[3] & SYNCSTATE_UNDERWATER else ""))
 
 # walking: every command run, it goes forward
 a = mover.snap   # (just after the last command: the server isn't repeating it yet)
