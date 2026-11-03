@@ -1,7 +1,7 @@
-// Unit test of src/net/anticheat.h (roadmap M11 phases 1 and 3a): rate limits,
-// wrapped distances, position speed, build distance, the server's magazine count
-// and fire rate, the damage rules the server copies from TickObjects, and (3a) a
-// bullet's step against a player's hitbox and the lag-compensated positions.
+// Unit test of src/net/anticheat.h (roadmap M11 phases 1 and 3a, M16 phase 5): rate
+// limits, wrapped distances, build distance, the server's magazine count and fire
+// rate, the damage rules the server copies from TickObjects, a bullet's step
+// against a player's hitbox, the players at a tick (lag compensation) and the slots.
 #include "anticheat.h"
 #include <stdio.h>
 #include <string.h>
@@ -45,18 +45,6 @@ int main()
 	CHECK(fabsf(AcWrap(510,512)-(-2))<1e-4f);
 	CHECK(fabsf(AcWrap(-510,512)-2)<1e-4f);
 	CHECK(fabsf(AcDistance(1,0,1,511,0,511,512)-sqrtf(8))<1e-3f);
-
-	// position speed: needs a window, follows the wrap
-	AcMove m;
-	memset(&m,0,sizeof(m));
-	CHECK(AcMoveSpeed(&m,10,50,10,1000,250,512)<0);       // reference
-	CHECK(AcMoveSpeed(&m,20,50,10,1100,250,512)<0);       // window not over
-	float sp=AcMoveSpeed(&m,20,50,10,1500,250,512);       // 10 units in .5 s
-	CHECK(fabsf(sp-20)<.01f);
-	sp=AcMoveSpeed(&m,500,50,10,2000,250,512);            // 32 units across the edge
-	CHECK(fabsf(sp-64)<.01f);
-	sp=AcMoveSpeed(&m,244,50,10,2300,250,512);            // a teleport
-	CHECK(sp>500);
 
 	// building: per axis on x and z (wrapping), any depth below
 	CHECK(AcBuildNear(50,30,50,100,60,100,10,2,256));
@@ -149,33 +137,9 @@ int main()
 	CHECK(!AcSegmentHits(90,49,100,110,49,110,100,50,100,0,512));    // diagonal, passes 5 off
 	CHECK(AcSegmentHits(90,49,95,110,49,105,100,50,100,0,512));      // diagonal, through
 
-	// lag compensation: where the server had a player some time ago
-	AcHistory h;
-	memset(&h,0,sizeof(h));
-	float at[3];
-	AcHistoryAt(&h,1000,10,50,10,2000,at,512);                       // no history: the current one
-	CHECK(at[0]==10&&at[1]==50&&at[2]==10);
-	for(int t=0;t<=1000;t+=10) AcHistoryAdd(&h,100+t/100.f,50,100,1000+t,20);   // 10 units/s on x
-	CHECK(h.count==ACHISTORY);                                       // 1 every 20 ms, 32 kept
-	AcHistoryAt(&h,2050,111,50,100,2100,at,512);                    // after the last entry: towards the current one
-	CHECK(fabsf(at[0]-110.5f)<.01f);
-	AcHistoryAt(&h,1850,111,50,100,2100,at,512);
-	CHECK(fabsf(at[0]-108.5f)<.01f);                                 // between two entries
-	AcHistoryAt(&h,1810,111,50,100,2100,at,512);
-	CHECK(fabsf(at[0]-108.1f)<.01f);
-	AcHistoryAt(&h,2100,111,50,100,2100,at,512);
-	CHECK(fabsf(at[0]-111)<.01f);                                    // now: the current one
-	AcHistoryAt(&h,100,111,50,100,2100,at,512);
-	CHECK(fabsf(at[0]-103.8f)<.01f);                                 // older than kept: the oldest (1380 ms)
-	memset(&h,0,sizeof(h));
-	AcHistoryAdd(&h,510,50,100,1000,20);
-	AcHistoryAdd(&h,2+512,50,100,1100,20);                           // the same 4 units, re-wrapped
-	AcHistoryAt(&h,1050,2+512,50,100,1100,at,512);
-	CHECK(fabsf(AcWrap(at[0]-512,512))<.01f);                        // half way: on the edge, not 256 off
-	CHECK(AcRewind(80,300)==80&&AcRewind(900,300)==300&&AcRewind(-5,300)==0);
-
 	// M16 phase 5: where a player was at a tick, as a client draws it
 	static AcTickRing tr;
+	float at[3];
 	memset(&tr,0,sizeof(tr));
 	CHECK(!AcTickAt(&tr,100,0,at,512,8));                            // nothing kept
 	for(unsigned int t=100;t<200;t++) AcTickAdd(&tr,t,510+(t-100)*.5f,50,100,t!=150);   // .5 a tick on x, dead at 150
@@ -197,51 +161,6 @@ int main()
 	CHECK(AcShotLag(1000,1003,0,30)==0&&AcShotLag(1000,1000,0,30)==0);  // ahead: not rewound
 	CHECK(AcShotLag(1000,980,0,0)==0);                              // ac_lagcomp 0: no rewind
 	CHECK(fabsf(AcShotLag(5,0xFFFFFFFEu,0,30)-7)<1e-4f);            // across the wrap of tick numbers
-
-	// M11 phase 3b: numbered positions, newest only
-	AcSeq q;
-	memset(&q,0,sizeof(q));
-	CHECK(AcSeqNewer(&q,500));                                       // the first one, whatever it is
-	CHECK(!AcSeqNewer(&q,500));                                      // duplicate
-	CHECK(AcSeqNewer(&q,501));
-	CHECK(AcSeqNewer(&q,505));                                       // a few lost
-	CHECK(!AcSeqNewer(&q,503));                                      // overtaken on the way
-	CHECK(q.last==505);
-	memset(&q,0,sizeof(q));
-	CHECK(AcSeqNewer(&q,65534));
-	CHECK(AcSeqNewer(&q,65535));
-	CHECK(AcSeqNewer(&q,0));                                         // wraps
-	CHECK(AcSeqNewer(&q,3));
-	CHECK(!AcSeqNewer(&q,65535));                                    // from before the wrap
-	CHECK(AcSeqNewer(&q,3+32767));                                   // up to half the range ahead
-	CHECK(!AcSeqNewer(&q,3));                                        // half the range behind
-
-	// movement bound (ac_moveclamp): at most maxspeed from the last position kept
-	AcClamp c;
-	memset(&c,0,sizeof(c));
-	float px=100,py=50,pz=100;
-	CHECK(!AcMoveClamp(&c,&px,&py,&pz,1000,150,100,512));            // first: kept as it is
-	px=110;
-	CHECK(!AcMoveClamp(&c,&px,&py,&pz,1100,150,100,512)&&px==110);    // 100 units/s: fine
-	px=200;
-	CHECK(AcMoveClamp(&c,&px,&py,&pz,1200,150,100,512));              // 900 units/s: held back
-	CHECK(fabsf(px-125)<.01f&&py==50&&pz==100);                       // 15 units in 100 ms
-	px=200;
-	CHECK(AcMoveClamp(&c,&px,&py,&pz,1200,150,100,512));              // bunched up: at least 100 ms
-	CHECK(fabsf(px-140)<.01f);
-	px=145;
-	CHECK(!AcMoveClamp(&c,&px,&py,&pz,1300,150,100,512)&&px==145);    // slower: caught up
-	memset(&c,0,sizeof(c));
-	px=510;pz=100;
-	AcMoveClamp(&c,&px,&py,&pz,1000,150,100,512);
-	px=4;                                                            // 6 units across the edge
-	CHECK(!AcMoveClamp(&c,&px,&py,&pz,1100,150,100,512)&&px==4);
-	px=200;
-	CHECK(AcMoveClamp(&c,&px,&py,&pz,1200,150,100,512));
-	CHECK(fabsf(px-19)<.01f);                                        // 15 on from 4 (not 256 off)
-	px=490;
-	CHECK(AcMoveClamp(&c,&px,&py,&pz,1300,150,100,512));
-	CHECK(fabsf(px-4)<.01f);                                         // back across the edge, wrapped into [0,512)
 
 	// stable slots: the first free one, numplayers after a leave, renumbering
 	char used[8]={1,1,0,1,0,0,0,0};

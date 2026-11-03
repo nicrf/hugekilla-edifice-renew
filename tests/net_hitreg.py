@@ -53,7 +53,7 @@ def run(exe, netsim, rewind, timeout):
         dirs.append(d)
         env = dict(os.environ)
         for k in ("HK_AUTOSTART", "HK_JOIN", "HK_NETSIM", "HK_FIXEDCLOCK", "HK_AC_VARS", "HK_TEST_PORT",
-                  "HK_PADTEST", "HK_AIMBOT", "HK_SPAWNAT", "HK_CONSOLE", "HK_CONSOLE_RUN", "HK_LEGACYMOVE"):
+                  "HK_PADTEST", "HK_AIMBOT", "HK_SPAWNAT", "HK_CONSOLE", "HK_CONSOLE_RUN"):
             env.pop(k, None)
         env.update(SDL_AUDIODRIVER="dummy", HK_PLAY="1", HK_SHOT_FRAME="99999999", HK_USERDIR=d,
                    HK_SHOT=os.path.join(d, "unused.ppm"), HK_MAXFPS="60")

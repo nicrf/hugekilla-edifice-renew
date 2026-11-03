@@ -94,6 +94,18 @@ refused = any(len(g) >= 2 and g[0] == SIMPLE and g[1] == VERSIONMISMATCH for g i
 print("other protocol REQUESTENTER ->", "VERSIONMISMATCH" if refused else "accepted?!")
 ok &= refused
 
+# 3b. the build before (0.7.x, protocol 5 before 6: docs/M16.md), with all its
+# capabilities: refused, told the server's protocol (msg) and why, in text
+s.sendto(packet(bytes([REQUESTENTER, 3]) + b"Old\x00" + trailer(layout, proto=proto - 1, ver=b"0.7.2") +
+                bytes([HELLOCAP_PROPS | 0xBB, 0x07])), SERVER)
+got = recv_all(s)
+mm = [g for g in got if len(g) >= 12 and g[0] == SIMPLE and g[1] == VERSIONMISMATCH]
+chats = [g for g in got if g and g[0] == CHATMESSAGE]
+told = mm and struct.unpack_from("<I", mm[0], 4)[0] == proto
+print("protocol %d REQUESTENTER (0.7.2) ->" % (proto - 1), "VERSIONMISMATCH %s" % (struct.unpack_from("<I", mm[0], 4)[0] if mm else "none"),
+      "| text:", chats[0][5:].decode(errors="replace") if chats else None)
+ok &= bool(told) and any(b"update your game" in c for c in chats) and not any(len(g) >= 2 and g[0] == SIMPLE and g[1] == ENTER for g in got)
+
 # 4. same version is accepted (ENTER), with the capabilities of this build that a
 # server may require: the rocks and trees (HELLOCAP_PROPS, docs/PROPS.md)
 caps = t[11 + vlen + 4] if len(t) > 11 + vlen + 4 else 0

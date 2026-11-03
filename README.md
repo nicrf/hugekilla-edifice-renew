@@ -21,6 +21,7 @@ Merci, Nelson et John.
 - **Corrections** : plantages et erreurs 64 bits (textures des armes, portée des boucles VC6, casse des fichiers sous Linux…).
 - **Nouveaux écrans** : configuration du serveur (ciel, relief, décor, captures, temps, avec choix aléatoire), multijoueur en jeu (IP ou LAN), options (touches, vidéo, audio, nom du joueur, manette), crédits.
 - **Manettes et écrans tactiles** : toute manette que SDL connaît (Xbox, PlayStation, Switch Pro, la plupart des manettes USB/Bluetooth), branchée à chaud, en jeu comme dans les menus ; sur téléphone, tablette ou écran tactile, une manette à l'écran.
+- **Jeu en ligne refait (0.8.0)** : le serveur fait autorité sur les déplacements (chaque client envoie ses commandes, prédit son joueur et se corrige sans à-coups), les autres joueurs sont dessinés 100 ms dans le passé, interpolés, d'après des instantanés datés ; les tirs touchent ce que le tireur voyait au moment du tir (recul au tick exact) ; grenades, fumigènes, morts et douleurs arrivent au moment où on les voit. Protocole 6 : une version 0.8 ne joue pas avec une 0.7 (refus propre, « Update the game », dans les deux sens).
 - **Builds** : un seul `build.py` pour les trois OS. Les releases sont générées automatiquement par GitHub Actions à chaque tag `v*`.
 
 La suite est décrite dans la [feuille de route](docs/ROADMAP.md) : netplay sécurisé et versionné, restructuration du code, « Rejoindre via Steam ».

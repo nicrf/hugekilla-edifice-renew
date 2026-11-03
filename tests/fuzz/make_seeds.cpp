@@ -98,13 +98,6 @@ int main(int argc,char **argv)
 	root=argv[1];
 	mkdir(root.c_str(),0755);
 
-	PlayerPosition pos;
-	memset(&pos,0,sizeof(pos));
-	pos.type=PLAYERPOSITION; pos.pnum=1; pos.weapon=2; pos.state=1; pos.fwd=200; pos.tilt=30;
-	pos.posx=12000; pos.posy=3000; pos.posz=40000; pos.velx=-3; pos.vely=1; pos.velz=5;
-	Bytes position=Msg<PlayerPosition,WritePosition>(pos);
-	Seed("fuzz_position","position.bin",position.data(),position.size());
-
 	//M16 (netsync.h): input commands, our player's state from the server
 	InputCmdMessage ic;
 	memset(&ic,0,sizeof(ic));
@@ -213,7 +206,7 @@ int main(int argc,char **argv)
 	memset(&svm,0,sizeof(svm));
 	svm.type=SERVERVARS;
 	svm.v.gravity=.01f; svm.v.walkaccelerate=.02f; svm.v.capturelimit=5; svm.v.timelimit=10;
-	svm.v.positionresendtime=100; svm.v.scale=1;
+	svm.v.scale=1;
 	Bytes servervars=Msg<ServerVarsMessage,WriteServerVars>(svm);
 	Seed("fuzz_servervars","servervars.bin",servervars.data(),servervars.size());
 
@@ -321,7 +314,7 @@ int main(int argc,char **argv)
 
 	//Sock: grouped messages; a reliable transfer in two parts; an ACK
 	std::vector<Bytes> grouped;
-	grouped.push_back(position);
+	grouped.push_back(inputcmd);
 	grouped.push_back(simple);
 	grouped.push_back(Bytes(vbuf,vbuf+vn));
 	std::vector<Bytes> d1(1,Grouped(grouped));

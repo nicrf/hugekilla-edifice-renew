@@ -1,250 +1,71 @@
 """Proximity voice chat relay (VOICE message, src/net/voicemsg.h):
-    HK_AUTOSTART=1 <Edifice binary> &  then  python3 tests/net_voice.py
-Three clients join a local server like net_join.py and report positions:
-A and B on the very same spot, C far away. The host sets every player on the
-ground or the blocks under it, and the world is random: the positions are sent
-first (at y=60), the voice frames after, alone, once the host has set A and B
-on the same ground. The world-edge wrap is covered by voice_test.
-A sends VOICE frames with a spoofed player field: B must get them as
-coming from A's slot, C must get nothing. Then B moves away and gets nothing
-either; malformed VOICE messages are never relayed. Last, A stands next to the
-host and sends garbage frames, which the host decodes (opus must reject them)."""
-import os, socket, struct, sys, time
-
-# HK_TEST_PORT: a server on another info port than the default 27020
-SERVER = ("127.0.0.1", int(os.environ.get("HK_TEST_PORT", "27020")))
-REQUESTENTER, INFO, PLAYERPOSITION, SIMPLE, VOICE = 1, 2, 3, 5, 16
-REQUESTINFO, ENTER, PORTACK, JOINGAME, PING, PINGREPLY = 1, 2, 4, 8, 12, 13
-RELIABLE, LASTRELIABLE, ACK = 0xFF, 0xFE, 0xFD
-LANDGRIDSIZE = 512
-
-
-def packet(*msgs):
-    out = b"\x00"
-    for m in msgs:
-        out += struct.pack("<H", len(m)) + m
-    return out
-
-
-def simple(type2, msg=0, msg2=0):
-    return struct.pack("<bbxxII", SIMPLE, type2, msg, msg2)
-
-
-def messages(data):
-    pos, out = 1, []
-    while pos + 2 <= len(data):
-        (n,) = struct.unpack_from("<H", data, pos)
-        out.append(data[pos + 2:pos + 2 + n])
-        pos += 2 + n
-    return out
-
-
-def checksum(data):
-    c = [0, 0, 0, 0]
-    for i, b in enumerate(data):
-        c[i & 3] ^= b
-    return bytes(c)
+    HK_TESTPLACE=1 HK_AUTOSTART=1 <Edifice binary> &  then  python3 tests/net_voice.py
+Three clients of protocol 6 join a local server (tests/netclient.py: input commands,
+the server moves them; HK_TESTPLACE puts them where the test wants): A and B on the
+very same spot, C far away; the host sets every player on the ground or the blocks
+under it, and the world is random: they are put there at y=120, the voice frames
+come once they stand. The world-edge wrap is covered by voice_test.
+A sends VOICE frames with a spoofed player field: B must get them as coming from
+A's slot, C must get nothing. Then B moves away and gets nothing either; malformed
+VOICE messages are never relayed. Last, A stands next to the host and sends garbage
+frames, which the host decodes (opus must reject them)."""
+import os, struct, sys, time
+from netclient import *
 
 
 def voice(player, seq, frame):
     return struct.pack("<BBHH", VOICE, player, seq, len(frame)) + frame
 
 
-def position(x, y, z, state=10):
-    q = lambda v: int(v / LANDGRIDSIZE * 65536) & 0xFFFF
-    return struct.pack("<bbbbbBBHHHbbb", PLAYERPOSITION, 0, 0, 0, state, 128, 128, q(x), q(y), q(z), 0, 0, 0)
+def voices(cl, mark):
+    """(player, seq, frame) of the VOICE messages since mark"""
+    out = []
+    for m in cl.since(mark):
+        if m[0] == VOICE and len(m) >= 6:
+            p, seq, n = struct.unpack_from("<BHH", m, 1)
+            out.append((p, seq, m[6:6 + n]))
+    return out
 
 
-class Client:
-    def __init__(self, name):
-        self.s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.s.bind(("127.0.0.1", 0))
-        self.name = name
-        self.lastid = 0
-        self.voices = []   # (player, seq, frame)
-        self.hostpos = None
-
-    def handle(self, data):
-        """acks reliable parts, answers pings, collects VOICE; returns plain messages"""
-        out = []
-        kind = data[0]
-        if kind in (RELIABLE, LASTRELIABLE) and len(data) >= 9:
-            body = data[5:]
-            rid, num = struct.unpack_from("<HH", body, 0)
-            self.s.sendto(bytes([ACK]) + body[:4], self.client)
-            if rid != (self.lastid + 1) & 0xFFFF:
-                return out
-            self.parts[num] = body[4:]
-            if kind == LASTRELIABLE:
-                self.lastid = rid
-                buf = b"".join(self.parts[i] for i in sorted(self.parts))
-                self.parts = {}
-                pos = 0
-                while pos + 4 <= len(buf):
-                    (n,) = struct.unpack_from("<I", buf, pos)
-                    out.append(buf[pos + 4:pos + 4 + n])
-                    pos += 4 + n
-        elif kind == 0:
-            for m in messages(data):
-                if not m:
-                    continue
-                if m[0] == SIMPLE and len(m) >= 12 and m[1] == PING:
-                    (pid,) = struct.unpack_from("<I", m, 4)
-                    self.s.sendto(packet(simple(PINGREPLY, pid, 0)), self.client)
-                if m[0] == PLAYERPOSITION and len(m) >= 16 and m[1] == 0:
-                    self.hostpos = [v * LANDGRIDSIZE / 65536 for v in struct.unpack_from("<HHH", m, 7)]
-                if m[0] == VOICE and len(m) >= 6:
-                    player, seq, n = struct.unpack_from("<BHH", m, 1)
-                    self.voices.append((player, seq, m[6:]))
-                out.append(m)
-        return out
-
-    def drain(self):
-        """handles whatever is already queued, without waiting"""
-        if not hasattr(self, "client"):
-            return
-        self.s.setblocking(False)
-        try:
-            while True:
-                data, addr = self.s.recvfrom(65536)
-                if data:
-                    self.handle(data)
-        except (BlockingIOError, socket.error):
-            pass
-
-    def pump(self, wait):
-        end = time.time() + wait
-        got = []
-        while True:
-            left = end - time.time()
-            if left <= 0:
-                break
-            self.s.settimeout(left)
-            try:
-                data, addr = self.s.recvfrom(65536)
-            except socket.timeout:
-                break
-            if data:
-                got += self.handle(data)
-        return got
-
-    def join(self, trailer, others=()):
-        self.s.sendto(packet(bytes([REQUESTENTER, len(self.name)]) + self.name + b"\x00" + trailer), SERVER)
-        port = None
-        end = time.time() + 3
-        while time.time() < end and port is None:
-            for o in others:
-                o.drain()
-            self.s.settimeout(0.5)
-            try:
-                data, addr = self.s.recvfrom(65536)
-            except socket.timeout:
-                continue
-            if data and data[0] == 0:
-                for m in messages(data):
-                    if len(m) >= 12 and m[0] == SIMPLE and m[1] == ENTER:
-                        p, self.slot = struct.unpack_from("<II", m, 4)
-                        port = socket.ntohs(p & 0xFFFF)
-        if port is None:
-            return False
-        self.client = (SERVER[0], port)
-        self.parts = {}
-        payload = simple(PORTACK, socket.htons(port))
-        body = struct.pack("<HHI", 1, 0, len(payload)) + payload
-        self.s.sendto(bytes([LASTRELIABLE]) + checksum(body) + body, self.client)
-        end = time.time() + 15
-        while time.time() < end:
-            for o in others:
-                o.drain()
-            for m in self.pump(0.3):
-                if m[0] == SIMPLE and len(m) >= 12 and m[1] == JOINGAME and \
-                        struct.unpack_from("<I", m, 4)[0] == self.slot:
-                    return True
-        return False
-
-    def send(self, *msgs):
-        self.s.sendto(packet(*msgs), self.client)
-
-
-# version trailer from INFO
-probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-probe.bind(("127.0.0.1", 0))
-info = None
-for _ in range(40):
-    probe.sendto(packet(simple(REQUESTINFO)), SERVER)
-    probe.settimeout(1.0)
-    try:
-        data, addr = probe.recvfrom(65536)
-        info = next((m for m in messages(data) if m and m[0] == INFO), None)
-    except socket.timeout:
-        pass
-    if info:
-        break
-if not info:
-    print("FAIL: no INFO reply"); sys.exit(1)
-t = info[2 + info[1] + 1:]
-_, proto, layout, vlen = struct.unpack_from("<IHIB", t, 0)
-trailer = t[:11 + vlen]
-
-clients = [Client(n) for n in (b"Alice", b"Bob", b"Carol")]
+trailer, caps, info = server_info()
+game = Game()
+check = game.check
+clients = [Client(n) for n in ("Alice", "Bob", "Carol")]
 for n, c in enumerate(clients):
     if not c.join(trailer, clients[:n]):
         print("FAIL: %s could not join" % c.name.decode()); sys.exit(1)
+    game.add(c)
     print("%s joined as slot %d" % (c.name.decode(), c.slot))
 a, b, c = clients
 
-ok = True
-
-
-def check(cond, what):
-    global ok
-    print(("ok   " if cond else "FAIL ") + what)
-    ok &= bool(cond)
-
 
 def place(bx):
-    """reports the positions, then lets the host set everyone on the ground"""
-    for _ in range(5):
-        b.send(position(bx, 60, 100))
-        c.send(position(5, 60, 350))
-        a.send(position(1, 60, 100))
-        time.sleep(0.03)
-        for cl in clients:
-            cl.drain()
-    for _ in range(10):
-        time.sleep(0.03)
-        for cl in clients:
-            cl.drain()
+    """puts them there, then lets the host set everyone on the ground"""
+    b.place(bx, 120, 100)
+    c.place(5, 120, 350)
+    a.place(1, 120, 100)
+    game.settle(clients, 6)
 
 
-def talk(first, count, extra=()):
-    # voice only: a position sent along would put A back at y=60 for this
-    # frame, while B already stands on the ground (maybe 100 units higher)
-    for k in range(count):
-        a.send(voice(c.slot, first + k, bytes([0x40 + k]) * 40), *extra)
-        time.sleep(0.02)
-        for cl in clients:
-            cl.drain()
+def talk(first, count, frames=None):
+    """A's VOICE frames, one a tick, while everyone plays"""
+    mark = [cl.mark() for cl in clients]
+    frames = frames or (lambda k: voice(c.slot, first + k, bytes([0x40 + k]) * 40))
+    game.pump(count / 60 + 0.5, each=lambda k: a.send(frames(k)) if k < count else None)
+    return [voices(cl, m) for cl, m in zip(clients, mark)]
 
 
-for cl in clients:
-    cl.pump(0.3)
-    cl.voices = []
-
-# near (across the world edge) and far
+game.pump(0.5)
+# near (A and B at the same spot) and far
 place(1)
-talk(100, 10)
-for cl in clients:
-    cl.pump(0.5)
-check(len(b.voices) >= 8, "near player got %d/10 frames" % len(b.voices))
-check(all(p == a.slot for p, s, f in b.voices), "relayed as the sender's slot %d (not the spoofed %d)" % (a.slot, c.slot))
-check(all(f == bytes([0x40 + s - 100]) * 40 for p, s, f in b.voices), "frames intact, sequence kept")
-check(not c.voices, "far player got nothing (%d)" % len(c.voices))
-check(not a.voices, "sender doesn't get its own voice back (%d)" % len(a.voices))
+va, vb, vc = talk(100, 10)
+check(len(vb) >= 8, "near player got %d/10 frames" % len(vb))
+check(all(p == a.slot for p, s, f in vb), "relayed as the sender's slot %d (not the spoofed %d)" % (a.slot, c.slot))
+check(all(f == bytes([0x40 + s - 100]) * 40 for p, s, f in vb), "frames intact, sequence kept")
+check(not vc, "far player got nothing (%d)" % len(vc))
+check(not va, "sender doesn't get its own voice back (%d)" % len(va))
 
 # malformed VOICE: truncated, oversized, empty, length past the end
-for cl in clients:
-    cl.voices = []
 bad = [
     bytes([VOICE, 0, 1]),
     struct.pack("<BBHH", VOICE, 0, 2, 401) + b"X" * 401,
@@ -252,51 +73,29 @@ bad = [
     struct.pack("<BBHH", VOICE, 0, 4, 300) + b"Y" * 20,
     struct.pack("<BBHH", VOICE, 0, 5, 20) + b"Z" * 30,
 ]
-for m in bad:
-    a.send(position(1, 60, 100), m)
-    time.sleep(0.02)
-for cl in clients:
-    cl.pump(0.4)
-check(not b.voices and not c.voices, "malformed VOICE never relayed (%d, %d)" % (len(b.voices), len(c.voices)))
+va, vb, vc = talk(0, len(bad), lambda k: bad[k])
+check(not vb and not vc, "malformed VOICE never relayed (%d, %d)" % (len(vb), len(vc)))
 
 # B walks away: out of range
 place(200)
-talk(200, 10)
-for cl in clients:
-    cl.pump(0.5)
-check(not b.voices, "player out of range got nothing (%d)" % len(b.voices))
+va, vb, vc = talk(200, 10)
+check(not vb, "player out of range got nothing (%d)" % len(vb))
 
 # back in range
 place(1)
-b.voices = []
-talk(300, 5)
-for cl in clients:
-    cl.pump(0.5)
-check(len(b.voices) >= 4, "back in range: %d/5 frames" % len(b.voices))
+va, vb, vc = talk(300, 5)
+check(len(vb) >= 4, "back in range: %d/5 frames" % len(vb))
 
 # garbage opus frames next to the host, who plays them
-a.pump(0.5)
-if a.hostpos:
-    hx, hy, hz = a.hostpos
-    # the position every other frame: 25 a second, within what the server takes
-    # (ac_posrate, 2 per positionresendtime: ~28 a second after a burst of 10)
-    for k in range(30):
-        frame = voice(0, 400 + k, os.urandom(1 + k * 13))
-        a.send(*((position(hx + 2, hy, hz), frame) if k % 2 == 0 else (frame,)))
-        time.sleep(0.02)
-    print("sent garbage frames next to the host at (%.0f, %.0f, %.0f)" % (hx, hy, hz))
+host = a.others().get(0)
+if host:
+    a.place(host[0] + 2, host[1], host[2])
+    game.pump(0.5)
+    talk(400, 30, lambda k: voice(0, 400 + k, os.urandom(1 + k * 13)))
+    print("sent garbage frames next to the host at (%.0f, %.0f, %.0f)" % host[0:3])
 else:
     print("host position unknown, garbage frames skipped")
-time.sleep(0.5)
-
-probe.sendto(packet(simple(REQUESTINFO)), SERVER)
-probe.settimeout(2.0)
-try:
-    data, addr = probe.recvfrom(65536)
-    alive = any(m and m[0] == INFO for m in messages(data))
-except socket.timeout:
-    alive = False
-check(alive, "server still answering")
-
-print("ALL OK" if ok else "SOME CHECKS FAILED")
-sys.exit(0 if ok else 1)
+game.pump(0.5)
+_, _, info = server_info(3)
+check(info, "server still answering")
+game.finish()

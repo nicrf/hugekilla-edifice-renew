@@ -5,7 +5,7 @@
 //	uint8 type (VOICE) | uint8 player | uint16 sequence | uint16 n | opus frame[n]
 //with 1 <= n <= VOICEMAXFRAME and nothing after the frame.
 //A client's player field is never trusted: the server replaces it by the
-//client's slot, as for PLAYERPOSITION.
+//client's slot, as for its commands and shots.
 
 #ifndef VOICEMSGH
 #define VOICEMSGH

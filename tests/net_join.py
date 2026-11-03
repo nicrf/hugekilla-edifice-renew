@@ -11,7 +11,8 @@ import math, os, socket, struct, sys, time
 
 # HK_TEST_PORT: a server on another info port than the default 27020
 SERVER = ("127.0.0.1", int(os.environ.get("HK_TEST_PORT", "27020")))
-REQUESTENTER, INFO, PLAYERPOSITION, LANDINFO, BLOCKS, CHATMESSAGE = 1, 2, 3, 4, 7, 8
+REQUESTENTER, INFO, LANDINFO, BLOCKS, CHATMESSAGE = 1, 2, 4, 7, 8
+INPUTCMD, OLDPOSITION = 21, 3   # 3: PLAYERPOSITION until protocol 5
 FIREGUN, SERVERVARS, UPDATESERVEROBJECT, SNAPSHOT, KILLEDPOSITION, RGD = 10, 11, 12, 13, 14, 15
 PLAYERNAMES, SIMPLE = 6, 5
 REQUESTINFO, ENTER, PORTACK, JOINGAME, PING = 1, 2, 4, 8, 12
@@ -19,7 +20,7 @@ RELIABLE, LASTRELIABLE, ACK = 0xFF, 0xFE, 0xFD
 MAGIC = 0x31564445
 NUMDEF, MAXSERVEROBJS = 160, 100
 LANDINFOSIZE = 1 + 4 + NUMDEF * 29 + 9 * 60 + 16 + 17 * 4 + 3 * 60 + 4
-SERVERVARSSIZE = 1 + 46 * 4
+SERVERVARSSIZE = 1 + 45 * 4
 SNAPSHOTSIZE = 1 + MAXSERVEROBJS * 43
 
 
@@ -191,17 +192,17 @@ check(snap and len(snap[0]) == SNAPSHOTSIZE, "SERVEROBJECTSNAPSHOT size %s (expe
 sv = got.get(SERVERVARS, [])
 check(sv and len(sv[0]) == SERVERVARSSIZE, "SERVERVARS size %s (expected %d)" % (len(sv[0]) if sv else None, SERVERVARSSIZE))
 if sv:
-    v = struct.unpack_from("<5f2i7i1i7i7i7f6f4i", sv[0], 1)
-    gravity, gamemode, resend = v[4], v[-2], v[-1]
-    check(math.isfinite(gravity) and gravity != 0 and 0 < resend < 100000,
-          "SERVERVARS gravity=%.4f gamemode=%d positionresendtime=%d" % (gravity, gamemode, resend))
+    v = struct.unpack_from("<5f2i7i1i7i7i7f6f3i", sv[0], 1)
+    gravity, gamemode = v[4], v[-1]
+    check(math.isfinite(gravity) and gravity != 0 and 0 <= gamemode < 10,
+          "SERVERVARS gravity=%.4f gamemode=%d" % (gravity, gamemode))
 rgd = got.get(RGD, [])
 check(rgd and len(rgd[0]) == 5, "REMOTEGAMEDATA %s" % (rgd[0].hex() if rgd else None))
 joined = [m for m in got.get(SIMPLE, []) if len(m) >= 12 and m[1] == JOINGAME]
 check(any(struct.unpack_from("<I", m, 4)[0] == slot for m in joined), "JOINGAME for slot %d" % slot)
 
 # truncated versions of every parsed message, on the per-client port
-for t in (SIMPLE, PLAYERPOSITION, FIREGUN, KILLEDPOSITION, CHATMESSAGE, BLOCKS):
+for t in (SIMPLE, OLDPOSITION, INPUTCMD, FIREGUN, KILLEDPOSITION, CHATMESSAGE, BLOCKS):
     for n in range(0, 8):
         s.sendto(packet(bytes([t]) + b"\x01" * n), client)
 s.sendto(packet(bytes([REQUESTENTER, 255]) + b"X" * 10), SERVER)   # name length past the end

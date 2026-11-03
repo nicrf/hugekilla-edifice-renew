@@ -264,7 +264,7 @@ Jouer sans clavier ni souris : manette sur les trois systèmes et le web, écran
 
      *Fait :* `src/platform/touch.cpp` (disposition dans `inputlogic.h`, testée), réglages dans Options → Pad / Touch, page web (`shell.html`) ; `tests/input_smoke.py` (doigts par `HK_PADTEST`) et `tests/web_smoke.py` (téléphone simulé par Playwright, événements tactiles CDP) ; détails dans BUILD.md, « Écrans tactiles ». Non vérifié : de vrais téléphones et tablettes (iOS Safari, Android Chrome), un écran tactile natif. Reste : le clavier du téléphone pour les champs de texte (code de partie, nom).
 
-### M16 - Synchronisation en ligne refaite, « protocole 6 » (XL, par petites PR)
+### M16 - Synchronisation en ligne refaite, « protocole 6 » (XL, par petites PR) : fait (0.8.0)
 Les joueurs distants sautent et reviennent en arrière : chaque client simule son joueur à son propre pas (`sf = dt/40`) et envoie sa position toutes les 70 ms, les autres la reçoivent sans date, s'y téléportent et extrapolent. Conception de toutes les phases dans `docs/M16.md` (tick, formats INPUTCMD et SNAPSHOT, accusés et deltas, interpolation, réconciliation, capacités).
 - **Tâches :**
   0. Mesurer et préparer : simulateur de réseau (`HK_NETSIM`), mesure automatique de la synchronisation (`tests/net_sync.py`), physique d'un joueur sortie dans une fonction pure (`MovePlayer`).
@@ -282,7 +282,9 @@ Les joueurs distants sautent et reviennent en arrière : chaque client simule so
 
      *Fait :* FIREGUN suivi du tick vu et de la commande (`FireTick`), anneau de 64 ticks par joueur sur le serveur (`AcTickRing`), recul exact borné à `ac_lagcomp` plus l'interpolation ; grenades et fumigènes du serveur repris par la copie prédite du lanceur (`objid`), TICKEVENT (morts, douleurs, grenades) appliqués au tick dessiné (`netsync.h`, `tests/wire_test.cpp`, `fuzz_firetick`, `fuzz_tickevent`, `tests/net_grenade.py`) ; à 100,20,2, 94 % de coups sur une cible qui court contre 12 % sans le recul (`tests/net_hitreg.py`, chiffres dans `docs/M16.md`).
   6. Retrait du chemin du protocole 5 : protocole 6, version 0.8.0, les anciens refusés.
-- **Compatibilité :** protocole 5 jusqu'à la phase 6, chaque nouveauté seulement entre deux pairs qui l'annoncent ; un client 0.7 joue dans la même partie avec les positions d'avant.
+
+     *Fait :* protocole 6, 0.8.0 ; plus de PLAYERPOSITION, de `HK_LEGACYMOVE` ni de bits de capacités de M16 ; un 0.7 et un 0.8 se refusent proprement dans les deux sens (vérifié avec un vrai v0.7.2), le lobby les liste tous et le jeu marque les autres incompatibles ; tests réseau en protocole 6 (`tests/netclient.py`, `HK_TESTPLACE`). Bilan mesuré dans `docs/M16.md` : à 100,20,2, 0,00 à-coup décalé par seconde dans les deux sens (contre 0,27 à 0,39 avant), joueur local prédit au bit près, 99 % de coups sur une cible qui court.
+- **Compatibilité :** protocole 5 jusqu'à la phase 6, chaque nouveauté seulement entre deux pairs qui l'annoncent ; un client 0.7 joue dans la même partie avec les positions d'avant. Depuis la phase 6 (0.8.0), protocole 6 : 0.7 et 0.8 ne jouent plus ensemble.
 - **Fait quand :** à 100 ms de latence, 20 de gigue et 2 % de pertes (`HK_NETSIM=100,20,2`), `net_sync.py` ne voit plus d'à-coups (< 0,05 par seconde) sur les joueurs distants, et le joueur local n'est jamais corrigé de façon visible.
 
 ## 4. Sécurité : vulnérabilités classées

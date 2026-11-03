@@ -48,7 +48,7 @@ stop() {
 
 echo "== gns_netplay_test"
 server="$LOGDIR/server.log"
-HK_AUTOSTART=1 HK_VOICE_TEST_TONE=1 HK_VOICE_AUTOTALK=1 HK_VOICE_LOG=1 "$BIN" >"$server" 2>&1 &
+HK_AUTOSTART=1 HK_TESTPLACE=1 HK_VOICE_TEST_TONE=1 HK_VOICE_AUTOTALK=1 HK_VOICE_LOG=1 "$BIN" >"$server" 2>&1 &
 pid=$!
 if waitfor "$server" "gns: listening" 60; then
 	"$TEST" || status=1

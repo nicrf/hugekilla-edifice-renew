@@ -1119,8 +1119,11 @@ void Play()
 			PlayerMoveEffects(cur,ev);
 			continue;
 		}
-		//the server moves this client's player from its commands (docs/M16.md, phase
-		//2): where they put it in the world, not moved near us (PlayDrawBegin is)
+		//a client moves no one else (it isn't in the game yet: no snapshot)
+		if(!local&&!IsServer()) continue;
+		//the server moves each client's player from its commands (docs/M16.md, phase
+		//2): where they put it in the world, not moved near us (PlayDrawBegin is);
+		//the others here are its dummy players (console createplayer)
 		int bycmd=!local&&NetServerMoves(i);
 		if(!local&&!bycmd)
 			MakeClose(&cur->pos);

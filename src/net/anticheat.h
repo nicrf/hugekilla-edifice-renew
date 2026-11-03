@@ -8,7 +8,7 @@
 #include <math.h>
 #include <string.h>
 
-#define ACWEAPONS 10   //weapon numbers a position can carry (ValidWeapon)
+#define ACWEAPONS 10   //weapon numbers a command can carry (ValidWeapon)
 
 //---- token bucket: rate tokens per ms, at most burst ----
 
@@ -88,35 +88,6 @@ inline float AcDistance(float ax,float ay,float az,float bx,float by,float bz,fl
 	return sqrtf(dx*dx+dy*dy+dz*dz);
 }
 
-//---- position jumps (log only): speed between two reported positions ----
-
-struct AcMove
-{
-	float x,y,z;
-	unsigned int time;
-	int valid;   //0: no reference (joined, respawned)
-};
-
-//speed in units/s from the reference to this position once at least window ms
-//went by (the reference then moves here); -1 while the window isn't over, or
-//without a reference (this position becomes it)
-inline float AcMoveSpeed(AcMove *m,float x,float y,float z,unsigned int now,int window,float worldsize)
-{
-	if(!m->valid||(int)(now-m->time)<0)
-	{
-		m->x=x;m->y=y;m->z=z;
-		m->time=now;
-		m->valid=1;
-		return -1;
-	}
-	int dt=(int)(now-m->time);
-	if(dt<window||dt<=0) return -1;
-	float speed=AcDistance(x,y,z,m->x,m->y,m->z,worldsize)*1000/dt;
-	m->x=x;m->y=y;m->z=z;
-	m->time=now;
-	return speed;
-}
-
 //---- building: a block near the player who sends it ----
 
 //block bx,by,bz (block units, x and z wrap every gridsize) within maxblocks of
@@ -132,15 +103,15 @@ inline int AcBuildNear(int bx,int by,int bz,float px,float py,float pz,int maxbl
 
 //---- ammunition: the magazine of each weapon, as the server counts it ----
 
-//The weapon of a shot is the one of the last position (FIREGUN doesn't carry
-//it), which may be late after a switch: the shots since that position are
-//moved to the next position's weapon if it changed.
+//The weapon of a shot is the one of the last command (FIREGUN doesn't carry
+//it), which may be late after a switch: the shots since that command are
+//moved to the next command's weapon if it changed.
 struct AcAmmo
 {
 	int mag[ACWEAPONS];
-	int shots;      //shots counted since the last position
-	int reloaded;   //a reload since the last position
-	int weapon;     //of the last position
+	int shots;      //shots counted since the last command
+	int reloaded;   //a reload since the last command
+	int weapon;     //of the last command
 };
 
 inline void AcAmmoFill(AcAmmo *a,const int *hold)
@@ -168,7 +139,7 @@ inline void AcAmmoReload(AcAmmo *a,int weapon,const int *hold)
 	a->reloaded=1;
 }
 
-//a position with weapon
+//a command with weapon
 inline void AcAmmoPosition(AcAmmo *a,int weapon,const int *hold)
 {
 	if(weapon<0||weapon>=ACWEAPONS) return;
@@ -216,61 +187,7 @@ inline int AcBulletHits(float bx,float by,float bz,float px,float py,float pz,fl
 	return sqrtf(hx*hx+hz*hz)<.5f&&vdiff<2&&vdiff>0;
 }
 
-//---- server-decided hits (M11 phase 3a): lag compensation, swept bullets ----
-
-//where a player was: what the server had of it, one entry every few tens of ms
-#define ACHISTORY 32
-struct AcHistory
-{
-	float x[ACHISTORY],y[ACHISTORY],z[ACHISTORY];
-	unsigned int time[ACHISTORY];
-	int count;   //entries, newest at next-1; 0: none (joined, dead, respawned)
-	int next;
-};
-
-//adds a position, at most one every spacing ms (32 entries then cover the
-//longest rewind with a few to spare)
-inline void AcHistoryAdd(AcHistory *h,float x,float y,float z,unsigned int now,int spacing)
-{
-	if(h->count)
-	{
-		int last=(h->next+ACHISTORY-1)%ACHISTORY;
-		if((int)(now-h->time[last])<spacing) return;
-	}
-	h->x[h->next]=x;h->y[h->next]=y;h->z[h->next]=z;
-	h->time[h->next]=now;
-	h->next=(h->next+1)%ACHISTORY;
-	if(h->count<ACHISTORY) h->count++;
-}
-
-//the position at time t, between the two entries around it; the current one
-//(cx,cy,cz at now) is the newest, the oldest entry is as far back as it goes.
-//Interpolated on the wrapped world (the server re-wraps positions near its own
-//player).
-inline void AcHistoryAt(const AcHistory *h,unsigned int t,float cx,float cy,float cz,unsigned int now,
-	float *out,float worldsize)
-{
-	float nx=cx,ny=cy,nz=cz;
-	unsigned int nt=now;
-	for(int k=0;k<h->count;k++)
-	{
-		if((int)(t-nt)>=0) break;
-		int e=(h->next+ACHISTORY-1-k)%ACHISTORY;
-		float ex=h->x[e],ey=h->y[e],ez=h->z[e];
-		unsigned int et=h->time[e];
-		if((int)(t-et)>=0&&(int)(nt-et)>0)
-		{
-			float f=(float)(int)(t-et)/(float)(int)(nt-et);
-			out[0]=ex+AcWrap(nx-ex,worldsize)*f;
-			out[1]=ey+(ny-ey)*f;
-			out[2]=ez+AcWrap(nz-ez,worldsize)*f;
-			return;
-		}
-		nx=ex;ny=ey;nz=ez;
-		nt=et;
-	}
-	out[0]=nx;out[1]=ny;out[2]=nz;
-}
+//---- server-decided hits (M11 phase 3a): swept bullets ----
 
 //does the segment a -> b (one step of a bullet) cross the hitbox of a player at p:
 //the client's rule (AcBulletHits: within .5 on x and z, between 2 below its
@@ -366,77 +283,7 @@ inline float AcShotLag(unsigned int lastdone,unsigned int viewtick,int viewfrac,
 	return lag<maxticks?lag:(maxticks>0?maxticks:0);
 }
 
-//how far back to look for a shooter with this ping (round trip, ms): what it saw
-//when it fired had come from the server about a round trip earlier
-inline int AcRewind(int ping,int lagcomp)
-{
-	if(ping<0) ping=0;
-	return ping<lagcomp?ping:lagcomp;
-}
-
-//---- M11 phase 3b: numbered positions, movement bound, stable slots ----
-
-//the sequence numbers (uint16, wrapping) of a client's positions
-struct AcSeq
-{
-	unsigned short last;   //of the newest accepted
-	int valid;             //0: none yet (joined): the next one is accepted
-};
-
-//1 if seq is newer than the last accepted (it becomes the last), 0 if it is that
-//one again or an older one (a duplicate, or overtaken on the way). Serial number
-//arithmetic: up to 32767 ahead is newer, so a few lost positions don't matter.
-inline int AcSeqNewer(AcSeq *s,unsigned int seq)
-{
-	seq&=0xFFFF;
-	if(!s->valid)
-	{
-		s->valid=1;
-		s->last=(unsigned short)seq;
-		return 1;
-	}
-	short d=(short)(unsigned short)(seq-s->last);
-	if(d<=0) return 0;
-	s->last=(unsigned short)seq;
-	return 1;
-}
-
-//where the server lets a player be (ac_moveclamp): the last position it kept
-struct AcClamp
-{
-	float x,y,z;
-	unsigned int time;
-	int valid;   //0: none (joined, respawned): the next position is kept as it is
-};
-
-//moves the claimed position x,y,z (world wrapping every size on x and z) at most
-//maxspeed units/s away from the last one kept, over the time since it (at least
-//mindt ms, positions arrive bunched up). Returns 1 if it had to be pulled back.
-//Pulled back, the player catches up as soon as it moves slower than maxspeed.
-inline int AcMoveClamp(AcClamp *c,float *x,float *y,float *z,unsigned int now,float maxspeed,int mindt,float size)
-{
-	int clamped=0;
-	if(c->valid&&(int)(now-c->time)>=0)
-	{
-		int dt=(int)(now-c->time);
-		if(dt<mindt) dt=mindt;
-		float dx=AcWrap(*x-c->x,size),dy=*y-c->y,dz=AcWrap(*z-c->z,size);
-		float d=sqrtf(dx*dx+dy*dy+dz*dz);
-		float allowed=maxspeed*dt/1000;
-		if(d>allowed&&d>0)
-		{
-			float f=allowed/d;
-			*x=fmodf(c->x+dx*f+size,size);
-			*y=c->y+dy*f;
-			*z=fmodf(c->z+dz*f+size,size);
-			clamped=1;
-		}
-	}
-	c->x=*x;c->y=*y;c->z=*z;
-	c->time=now;
-	c->valid=1;
-	return clamped;
-}
+//---- M11 phase 3b: stable slots ----
 
 //player slots: a joiner takes the first free one (from first, the host is 0),
 //-1 if none is

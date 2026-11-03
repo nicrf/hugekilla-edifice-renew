@@ -19,6 +19,32 @@ func announcement(name string) Announcement {
 	return Announcement{Name: name, Port: 27020, Version: "0.3.0", Protocol: 3, Players: 2, MaxPlayers: 32}
 }
 
+// 0.7 (protocol 5) and 0.8 (protocol 6, docs/M16.md) hosts on the same lobby: a
+// client asking for its protocol gets its own games only; one asking for all of them
+// (protocol 0, what the game does) gets each with its protocol and version, to show
+// the others as incompatible (VersionCompatible, src/net/version.cpp)
+func TestMixedProtocols(t *testing.T) {
+	r := NewRegistry(time.Minute, 4, 100)
+	old := Announcement{Name: "Old fort", Port: 27020, Version: "0.7.2", Protocol: 5, Players: 1, MaxPlayers: 32}
+	cur := Announcement{Name: "New fort", Port: 27020, Version: "0.8.0", Protocol: 6, Players: 3, MaxPlayers: 32}
+	if _, _, err := r.Register("1.2.3.4", old); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := r.Register("5.6.7.8", cur); err != nil {
+		t.Fatal(err)
+	}
+	if list := r.List(6, ""); len(list) != 1 || list[0].Version != "0.8.0" {
+		t.Fatalf("protocol 6: %+v", list)
+	}
+	if list := r.List(5, ""); len(list) != 1 || list[0].Version != "0.7.2" {
+		t.Fatalf("protocol 5: %+v", list)
+	}
+	list := r.List(0, "")
+	if len(list) != 2 || list[0].Protocol != 6 || list[1].Protocol != 5 || list[1].Version != "0.7.2" {
+		t.Fatalf("all protocols, most players first: %+v", list)
+	}
+}
+
 func TestRegistryLifecycle(t *testing.T) {
 	r := NewRegistry(time.Minute, 2, 100)
 	clock := time.Unix(1000, 0)

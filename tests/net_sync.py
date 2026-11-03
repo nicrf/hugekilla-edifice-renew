@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """How far off the other players are drawn (docs/M16.md, phase 0):
     python3 tests/net_sync.py <Edifice binary or Edifice.app> [--netsim 100,20,2 ...] [--fps 60[,144]]
-        [--vars "sv_authmove=0"] [--legacy]
+        [--vars "ac_cmdslack=-1"]
 
 Two instances of the game on this machine: a host (HK_AUTOSTART) and a client that
 joins it (HK_JOIN=127.0.0.1), each in a fresh user folder (CRLF copies of
@@ -23,12 +23,11 @@ Each --netsim value (HK_NETSIM, both instances: <latency ms>,<jitter ms>,<loss %
 per direction) is one run; "0" is a run without it. Default: 0 and 100,20,2.
 --fps: HK_MAXFPS of both, or of the host then the client (no VSync: the frames keep
 coming without the focus); the script's frames follow it (written for 60).
-The client's own player, when the server moves it from its commands (docs/M16.md,
-phases 2 and 3, HELLOCAP_INPUTS): each state from the server against what the client
+The client's own player, which the server moves from its commands (docs/M16.md,
+phases 2 and 3): each state from the server against what the client
 predicted for that command (HK_SYNCLOG "syncpredict"): the gap, the corrections (a
 gap of .01 unit or more: replayed and smoothed) per second, the snaps (> 3 units).
---vars: the host's server settings (HK_AC_VARS, e.g. sv_authmove=0); --legacy: the
-client joins as a 0.7 build (HK_LEGACYMOVE=1), moving itself.
+--vars: the host's server settings (HK_AC_VARS, e.g. ac_cmdslack=-1).
 Local only (two windows), not in the CI. Linux needs a display (xvfb-run)."""
 import argparse
 import bisect
@@ -95,10 +94,9 @@ def script(fps=60):
     return ";".join("%d:%s" % (round((START + f) * fps / 60), s) for f, s in PATH)
 
 
-def run(exe, netsim, fps, timeout, hostvars=None, legacy=False):
+def run(exe, netsim, fps, timeout, hostvars=None):
     """both logs (text); fps: of the host and the client; hostvars: its HK_AC_VARS
-    (server settings, e.g. sv_authmove=1); legacy: the client joins as a 0.7 build
-    (HK_LEGACYMOVE, no input commands)"""
+    (server settings, e.g. ac_cmdslack=-1)"""
     common = dict(SDL_AUDIODRIVER="dummy", HK_SYNCLOG="1", HK_PLAY="1", HK_SHOT_FRAME="99999999", HK_CONSOLE_LOG="1")
     if netsim != "0":
         common["HK_NETSIM"] = netsim
@@ -107,7 +105,7 @@ def run(exe, netsim, fps, timeout, hostvars=None, legacy=False):
         d = user_folder()
         dirs.append(d)
         env = dict(os.environ)
-        for k in ("HK_AUTOSTART", "HK_JOIN", "HK_NETSIM", "HK_FIXEDCLOCK", "HK_AC_VARS", "HK_TEST_PORT"):
+        for k in ("HK_AUTOSTART", "HK_JOIN", "HK_NETSIM", "HK_FIXEDCLOCK", "HK_AC_VARS", "HK_TEST_PORT", "HK_LEGACYMOVE"):
             env.pop(k, None)
         env.update(common, HK_USERDIR=d, HK_SHOT=os.path.join(d, "unused.ppm"), HK_MAXFPS=str(rfps),
                    HK_PADTEST=script(rfps))
@@ -117,8 +115,6 @@ def run(exe, netsim, fps, timeout, hostvars=None, legacy=False):
                 env["HK_AC_VARS"] = hostvars
         else:
             env.update(HK_JOIN="127.0.0.1", HK_SEED="43")
-            if legacy:
-                env["HK_LEGACYMOVE"] = "1"
         log = os.path.join(d, "log.txt")
         logs.append(log)
         with open(log, "wb") as f:
@@ -301,8 +297,7 @@ def main():
     ap.add_argument("--fps", default="60")
     ap.add_argument("--timeout", type=float, default=120)
     ap.add_argument("--keep", help="folder to keep both logs in")
-    ap.add_argument("--vars", help="the host's server settings (HK_AC_VARS), e.g. sv_authmove=1")
-    ap.add_argument("--legacy", action="store_true", help="the client joins as a 0.7 build (HK_LEGACYMOVE)")
+    ap.add_argument("--vars", help="the host's server settings (HK_AC_VARS), e.g. ac_cmdslack=-1")
     a = ap.parse_args()
     exe = os.path.abspath(executable(a.binary))
     fps = [int(f) for f in a.fps.split(",")]
@@ -310,7 +305,7 @@ def main():
     rows, preds, ok = [], [], True
     for ns in a.netsim:
         print("== HK_NETSIM=%s, host %d fps, client %d fps" % (ns, fps[0], fps[1]), flush=True)
-        host, client = run(exe, ns, fps, a.timeout, a.vars, a.legacy)
+        host, client = run(exe, ns, fps, a.timeout, a.vars)
         if a.keep:
             os.makedirs(a.keep, exist_ok=True)
             tag = ns.replace(",", "_")
@@ -331,12 +326,8 @@ def main():
                 continue
             rows.append((ns, what, r))
             if what == "client seen by host":
-                m = re.search(r"^netsyncmode (\d+) ", client, re.M)
-                mode = "legacy"
-                if m and int(m.group(1)) & 256:
-                    mode = "snapshots" if int(m.group(1)) & 512 else "inputs"
                 p = prediction(client, r["t0"], r["t1"])
-                preds.append((ns, mode, p))
+                preds.append((ns, "predicted", p))
     print()
     print("%-10s %-20s %6s %6s %6s %6s %6s %7s %6s %7s %6s %6s" % ("netsim", "", "mean", "p95", "max", "lag", "@lag",
                                                                  "snaps/s", "jmp95", "@lag/s", "u/s", "secs"))
@@ -352,7 +343,7 @@ def main():
                                                            "err max", "corr", "corr/s", "snaps", "shft95", "shftmax"))
     for ns, mode, p in preds:
         if not p:
-            print("%-10s %-14s (moves itself: nothing to predict)" % (ns, mode))
+            print("%-10s %-14s (no state from the server: HK_SYNCLOG?)" % (ns, mode))
             continue
         print("%-10s %-14s %6d %8.4f %8.4f %8.4f %7d %8.2f %6d %7.3f %7.3f" % (
             ns, mode, p["n"], p["mean"], p["p95"], p["max"], p["corr"], p["corrrate"], p["snaps"], p["shift95"],

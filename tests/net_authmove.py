@@ -1,15 +1,11 @@
-"""Movement decided by the server (docs/M16.md, phases 2 and 3):
-    HK_ANTICHEAT_LOG=1 HK_AC_VARS="props=0 sv_authmove=1" HK_AUTOSTART=1 <Edifice binary> 2>server.log &
+"""Movement decided by the server (docs/M16.md, phases 2 and 3; protocol 6):
+    HK_ANTICHEAT_LOG=1 HK_AC_VARS="props=0" HK_AUTOSTART=1 <Edifice binary> 2>server.log &
     python3 tests/net_authmove.py server.log
-Two clients join a local server: one announces HELLOCAP_INPUTS (the second
-capability byte of REQUESTENTER) and sends numbered input commands (INPUTCMD), one
-is a 0.7 build that sends its positions (PLAYERPOSITION), in the same game.
- - The new client is told the server moves it (NETSYNCMODE 256), the old one isn't.
+A client joins a local server and sends numbered input commands (INPUTCMD).
+ - INFO says protocol 6; the client is told the server moves it (NETSYNCMODE).
  - Dead, then asking to live: the server respawns it where it chooses; walking
    forward moves it, every command run (SNAPSHOT: lastcmd, its exact state).
- - The old client sees it move where the server has it (PLAYERPOSITION relayed),
-   and the new one sees the old one where it says it is.
- - A position from the new client (a teleport) is ignored.
+ - A protocol 5 position from it (PLAYERPOSITION, a teleport) is ignored.
  - A speed hack: commands three times as fast as time: the server runs no more than
    time allows (and ac_cmdslack ticks), logs "anticheat: cmd", and the player goes
    no faster than walking.
@@ -19,11 +15,10 @@ The server log (its stderr) must show the dropped commands."""
 import math, os, re, socket, struct, sys, time
 
 SERVER = ("127.0.0.1", int(os.environ.get("HK_TEST_PORT", "27020")))
-REQUESTENTER, INFO, PLAYERPOSITION, SIMPLE = 1, 2, 3, 5
+REQUESTENTER, INFO, PLAYERPOSITION, SIMPLE = 1, 2, 3, 5   # 3: protocol 5's, no longer read
 INPUTCMD, SNAPSHOT = 21, 22
 REQUESTINFO, ENTER, PORTACK, JOINGAME, PING, PINGREPLY = 1, 2, 4, 8, 12, 13
 NETSYNCMODE = 41
-HELLOCAP_INPUTS = 256
 MOVEKEY_UP, MOVECMD_ALIVE = 1, 1
 SYNCSTATE_GROUND, SYNCSTATE_UNDERWATER = 2, 4
 RELIABLE, LASTRELIABLE, ACK = 0xFF, 0xFE, 0xFD
@@ -211,18 +206,14 @@ def pump(wait):
         time.sleep(0.005)
 
 
-def play(cl, secs, rate=1, old=None, oldpos=None, **kw):
-    """cl sends rate commands per tick of real time for secs (the old client its
-    position every 70 ms meanwhile); returns the ticks of real time that went by"""
+def play(cl, secs, rate=1, **kw):
+    """cl sends rate commands per tick of real time for secs; returns the ticks of
+    real time that went by"""
     start = time.time()
     ticks = 0
-    nextold = 0
     while time.time() - start < secs:
         cl.commands(rate, **kw)
         ticks += 1
-        if old and time.time() >= nextold:
-            old.send(position(*oldpos))
-            nextold = time.time() + 0.07
         pump(max(0, start + ticks * TICK - time.time()))
     return (time.time() - start) / TICK
 
@@ -255,33 +246,27 @@ t = info[2 + info[1] + 1:]
 _, proto, layout, vlen = struct.unpack_from("<IHIB", t, 0)
 trailer = t[:11 + vlen]
 caps = t[11 + vlen + 4:]
-check(len(caps) >= 2 and caps[1] & HELLOCAP_INPUTS >> 8, "INFO announces HELLOCAP_INPUTS in its second byte")
+check(proto == 6, "INFO says protocol 6 (%d)" % proto)
 
-mover, old = Client(b"Mover"), Client(b"Oldie")
-# caps 0, no cookie, caps2: HELLOCAP_INPUTS
-if not mover.join(trailer + bytes([0, HELLOCAP_INPUTS >> 8])):
-    print("FAIL: the new client could not join"); sys.exit(1)
+mover = Client(b"Mover")
+if not mover.join(trailer + bytes([0])):
+    print("FAIL: the client could not join"); sys.exit(1)
 clients.append(mover)
-if not old.join(trailer, clients):
-    print("FAIL: the old client could not join"); sys.exit(1)
-clients.append(old)
-print("new client in slot %d, old one in slot %d" % (mover.slot, old.slot))
+print("client in slot %d" % mover.slot)
 pump(1.0)
-check(mover.syncmode == HELLOCAP_INPUTS, "the new client is moved by the server (NETSYNCMODE %s)" % mover.syncmode)
-check(old.syncmode is None, "the old client isn't told anything")
+check(mover.syncmode is not None, "the client is moved by the server (NETSYNCMODE)")
 
 # dead a moment (it arrives so), then alive: the server puts it somewhere
-oldpos = (700.0, 60.0, 700.0)
-play(mover, 0.5, alive=False, old=old, oldpos=oldpos)
+play(mover, 0.5, alive=False)
 first = mover.snap
 check(first is not None and first[4] == 11, "dead at first (SNAPSHOT playstate %s)" % (first and first[4]))
-play(mover, 0.5, old=old, oldpos=oldpos)
+play(mover, 0.5)
 spawn = mover.snap
 check(spawn and spawn[4] == 10 and spawn[1][1] > 50, "respawned by the server, at %s" % (spawn and [round(v, 1) for v in spawn[1]]))
 # falls to the ground (or into a lake: the world is random, it may float there)
 settled = lambda s: s[3] & (SYNCSTATE_GROUND | SYNCSTATE_UNDERWATER) and abs(s[2][1]) < .05
 for k in range(80):
-    play(mover, 0.1, old=old, oldpos=oldpos)
+    play(mover, 0.1)
     if settled(mover.snap):
         break
 check(settled(mover.snap), "landed at %s%s" % ([round(v, 1) for v in mover.snap[1]],
@@ -291,7 +276,7 @@ check(settled(mover.snap), "landed at %s%s" % ([round(v, 1) for v in mover.snap[
 a = mover.snap   # (just after the last command: the server isn't repeating it yet)
 sent0 = mover.cmd
 snaps0 = mover.snaps
-ticks = play(mover, 3, keys=MOVEKEY_UP, old=old, oldpos=oldpos)
+ticks = play(mover, 3, keys=MOVEKEY_UP)
 pump(0.3)   # quiet: the server plays the last command 6 ticks more
 b = mover.snap
 ran = (b[0] - a[0]) & 0xFFFFFFFF
@@ -304,27 +289,19 @@ check(b[0] == mover.cmd - 1 + 6 and ran >= mover.cmd - sent0,
 check(walked > 3, "it walked forward (%.1f units)" % walked)
 check(mover.snaps - snaps0 > 3 * 25, "states come at 30 Hz (%d in 3 s)" % (mover.snaps - snaps0))
 
-# the old client sees it where the server has it, and the new one sees the old one
-seen = old.pos.get(mover.slot)
-check(seen and wrapdist(seen, b[1]) < 1.5, "the old client sees it there (%s)" % (seen and [round(v, 1) for v in seen[:3]]))
-seenold = mover.pos.get(old.slot)
-check(seenold and wrapdist(seenold, oldpos) < 1 and seenold[3] == 10,
-      "it sees the old client where it says it is (%s)" % (seenold and [round(v, 1) for v in seenold[:3]]))
-
-# a position of its own: ignored
+# a protocol 5 position of its own: ignored (no longer a message)
 here = mover.snap[1]
 for k in range(5):
     mover.send(position(here[0] + 100, here[1], here[2] + 100))
-    play(mover, 0.07, old=old, oldpos=oldpos)
+    play(mover, 0.07)
 pump(0.3)
-check(wrapdist(mover.snap[1], here) < 2, "its PLAYERPOSITION teleport is ignored")
-check(wrapdist(old.pos[mover.slot], here) < 3, "the old client doesn't see it either")
+check(wrapdist(mover.snap[1], here) < 2, "a protocol 5 PLAYERPOSITION teleport is ignored")
 
 # ---- a speed hack: three commands per tick of time ----
 logmark = os.path.getsize(LOG) if LOG else 0
 a = mover.snap
 sent0 = mover.cmd
-ticks = play(mover, 3, rate=3, keys=MOVEKEY_UP, old=old, oldpos=oldpos)
+ticks = play(mover, 3, rate=3, keys=MOVEKEY_UP)
 pump(0.3)
 b = mover.snap
 fast = wrapdist(a[1], b[1]) / (ticks * TICK)
@@ -338,7 +315,7 @@ if LOG:
     check("anticheat: cmd:" in text, "the server logs the commands it dropped")
 
 # ---- time banked: quiet 2 s, then 2 s of commands at once ----
-play(mover, 1, keys=MOVEKEY_UP, old=old, oldpos=oldpos)   # at the pace of time again
+play(mover, 1, keys=MOVEKEY_UP)   # at the pace of time again
 last = mover.cmd - 1
 pump(2.0)   # nothing sent (pings still answered)
 quiet = mover.snap
