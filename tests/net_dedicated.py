@@ -14,8 +14,9 @@ only). Then:
  - a real game client (--game, HK_JOIN) joins and plays: the others see it;
  - SIGTERM (docker stop): the players are told (the chat line, EXIT), the game leaves
    the lobby at once, the server exits with 0.
-Its idle CPU is printed. The game as the server is run with --dedicated. Needs a
-display for --game (Linux: xvfb-run). The server's log: netplay-logs/net_dedicated.log
+Its idle CPU is printed. The game as the server is run with --dedicated. --game
+needs a display, and not Linux: there the game's UDP data socket would share the
+server's port on the same machine (SO_REUSEADDR) and get its own datagrams back. The server's log: netplay-logs/net_dedicated.log
 (NET_DEDICATED_LOGS)."""
 import json, os, re, shutil, signal, subprocess, sys, tempfile, time, urllib.request
 
