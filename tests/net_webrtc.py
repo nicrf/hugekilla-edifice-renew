@@ -2,7 +2,7 @@
 """A browser joins a native host over WebRTC (roadmap M14 task 3), end to end on
 one machine:
     python3 tests/net_webrtc.py <Edifice binary or .app> <edifice-lobby binary> [build/web]
-                                [--relay] [--headed] [--logs DIR]
+                                [--relay] [--headed] [--logs DIR] [--host <dedicated server>]
 Needs a native build with GameNetworkingSockets and the WebRTC bridge (python3
 build.py, i.e. --gns, EDIFICE_WEBRTC), the web build (python3 build.py --web) and
 Playwright (pip install playwright; playwright install chromium-headless-shell).
@@ -21,6 +21,8 @@ Playwright (pip install playwright; playwright install chromium-headless-shell).
   4. a shot (mouse button) and a block edit (Module._HKWebSendBlock) must reach the
      host (HK_NET_EVENTS logs them as they come in), and the lobby must list 2
      players.
+--host: the host is that dedicated server instead (edifice-server, or the game, run
+with --dedicated): the lobby then lists 1 player, the browser.
 --relay: p2p=relay on both sides (TURN relay candidates only: the DataChannel goes
 through the lobby's TURN server). Nothing is contacted but this machine (the
 public lobby never: every net.ini here names the local one).
@@ -125,6 +127,7 @@ def main():
     ap.add_argument("--relay", action="store_true", help="TURN relay candidates only, both sides")
     ap.add_argument("--headed", action="store_true")
     ap.add_argument("--logs", default=os.path.join(ROOT, "build", "webrtc-logs"))
+    ap.add_argument("--host", help="a dedicated server as the host (edifice-server, or the game with --dedicated)")
     args = ap.parse_args()
     game = os.path.abspath(args.game)
     if game.endswith(".app"):
@@ -171,7 +174,11 @@ def main():
                    SDL_AUDIODRIVER="dummy", ASAN_OPTIONS="detect_leaks=0")
         if args.relay:
             env["HK_P2P"] = "relay"
-        procs.append(subprocess.Popen([game], stdout=open(hostlog, "w"), stderr=subprocess.STDOUT, env=env))
+        hostcmd = [game]
+        if args.host:
+            host = os.path.abspath(args.host)
+            hostcmd = [host] + ([] if os.path.basename(host).startswith("edifice-server") else ["--dedicated"])
+        procs.append(subprocess.Popen(hostcmd, stdout=open(hostlog, "w"), stderr=subprocess.STDOUT, env=env))
 
         def listed():
             try:
@@ -252,10 +259,13 @@ def main():
                   "the host saw the browser come from a made-up 0.1.x.y address")
             check("join cookie" not in hlog, "no join cookie asked (DTLS proved the address)")
 
+            players = 1 if args.host else 2   # a dedicated server isn't a player
+
             def two():
                 s = listed()
-                return s and s.get("players") == 2
-            check(wait_for("the lobby lists 2 players", two, 30) is not None, "the host's renewal says 2 players")
+                return s and s.get("players") == players
+            check(wait_for("the lobby lists %d players" % players, two, 30) is not None,
+                  "the host's renewal says %d players" % players)
             errors[:] = [e for e in errors if "pointer lock" not in e]
             check(not errors, "no page error")
             with open(pagelog, "w") as f:

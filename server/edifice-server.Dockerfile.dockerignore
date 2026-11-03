@@ -1,0 +1,16 @@
+# the build context of edifice-server.Dockerfile is the repository root: only what
+# the dedicated server is built from
+**
+!vcpkg.json
+!CMakeLists.txt
+!cmake/**
+!src/**
+!tests/**
+!data/**
+!licenses/**
+!lgpl-3.0.txt
+!license.txt
+data/hd
+data/sound
+tests/__pycache__
+**/.DS_Store

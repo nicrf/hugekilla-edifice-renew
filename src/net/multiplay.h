@@ -45,6 +45,9 @@ void DrawJoinScreen();
 #define MAXPLAYERS 32
 #define WEBHOSTMAXPLAYERS 8   //a server in a browser (host included), see ServerMaxPlayers
 int ServerMaxPlayers();       //players this server takes, itself included
+//what the join screen and the lobby list: without a dedicated server's own slot
+int ServerListedPlayers();
+int ServerListedMaxPlayers();
 void SockLoop();
 void CloseSocks();
 void InitSocks();

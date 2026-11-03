@@ -35,9 +35,26 @@ if(EMSCRIPTEN AND EDIFICE_GNS)
   message(FATAL_ERROR "EDIFICE_GNS: GameNetworkingSockets has no web build (M14 uses WebRTC instead)")
 endif()
 
+# ---- What to build ----------------------------------------------------------------
+# The game (Edifice), and the dedicated server edifice-server (src/platform/dedicated.h):
+# the same game code with no window, renderer, audio nor SDL (renderer_null.cpp,
+# sound_null.cpp, platform_server.cpp), for a machine without a display, Docker
+# (server/edifice-server.Dockerfile). EDIFICE_CLIENT=OFF builds the server alone,
+# without fetching SDL2 nor the shader compiler.
+option(EDIFICE_CLIENT "Build the game (Edifice)" ON)
+option(EDIFICE_DEDICATED "Build the dedicated server edifice-server (no window, renderer, audio nor SDL)" OFF)
+if(NOT EDIFICE_CLIENT AND NOT EDIFICE_DEDICATED)
+  message(FATAL_ERROR "EDIFICE_CLIENT=OFF needs EDIFICE_DEDICATED=ON: nothing to build")
+endif()
+if(EMSCRIPTEN AND (EDIFICE_DEDICATED OR NOT EDIFICE_CLIENT))
+  message(FATAL_ERROR "the web build is the game only (EDIFICE_DEDICATED=OFF)")
+endif()
+
 # ---- SDL2 --------------------------------------------------------------------
 option(EDIFICE_SYSTEM_SDL2 "Use an installed SDL2 instead of building it" OFF)
-if(EMSCRIPTEN)
+if(NOT EDIFICE_CLIENT)
+  # the server alone: no SDL
+elseif(EMSCRIPTEN)
   # Emscripten's own SDL2 port (WebGL, Web Audio, browser input), not the release
   # tarball: SDL's Emscripten backend is built and kept up to date there
   add_library(hk_sdl2_web INTERFACE)
@@ -139,6 +156,8 @@ if(EDIFICE_LOBBY AND NOT EMSCRIPTEN)   # the web build fetches through the brows
 endif()
 
 # ---- Renderer backend (roadmap M13) -------------------------------------------
+# (the game only: edifice-server has renderer_null.cpp)
+if(EDIFICE_CLIENT)
 # sokol_gfx (renderer_sokol.cpp, src/third_party/sokol, zlib license) on the
 # platform's API: Metal on macOS, D3D11 on Windows, GL 4.1 core on Linux: the
 # default since M13.4. HK_RENDER_SOKOL=OFF: the fixed-function OpenGL 2.1 backend
@@ -244,19 +263,20 @@ else()
   find_package(OpenGL REQUIRED)
   set(HK_RENDER_SOURCES src/render/renderer_gl.cpp src/render/texture_gl.cpp src/render/rcontext_gl.cpp)
 endif()
+endif()   # EDIFICE_CLIENT
 
 # ---- Sources -----------------------------------------------------------------
 set(SRC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 set(DATA_DIR ${CMAKE_CURRENT_SOURCE_DIR}/data)
 
-set(SOURCES
+# the game code, the same in Edifice and edifice-server
+set(HK_GAME_SOURCES
   src/render/ase.cpp
   src/render/redrawing.cpp
   src/render/effects.cpp
   src/render/propsdraw.cpp
   src/render/textures.cpp
   src/render/renderer.cpp
-  ${HK_RENDER_SOURCES}
   src/render/image.cpp
   src/game/cfgfile.cpp
   src/game/GamePlay.cpp
@@ -289,12 +309,19 @@ set(SOURCES
   src/ui/chat.cpp
   src/ui/joinscreen.cpp
   src/ui/spawnscreen.cpp
+  src/platform/fileio.cpp
+  src/platform/userdir.cpp
+  src/platform/dedicated.cpp
+)
+# + the window, renderer, audio and input (SDL2)
+set(SOURCES
+  ${HK_GAME_SOURCES}
+  ${HK_RENDER_SOURCES}
   src/audio/sound_sdl.cpp
   src/audio/voice.cpp
   src/platform/platform_sdl.cpp
   src/platform/gamepad.cpp
   src/platform/touch.cpp
-  src/platform/fileio.cpp
   src/platform/system_sdl.cpp
 )
 if(EMSCRIPTEN)
@@ -309,8 +336,51 @@ set(INCLUDE_DIRS
   ${SRC}/game ${SRC}/render ${SRC}/net ${SRC}/ui ${SRC}/audio ${SRC}/platform
   ${SRC}/third_party)   # "stb/stb_image.h" (public domain / MIT, see its LICENSE)
 
+# 2000-era code: keep the noise down, and its signed char assumption. No -fwrapv,
+# -fno-strict-aliasing nor -Wno-return-type any more: the code they covered is fixed
+# (roadmap M12.6), and the sanitizers check it (BUILD.md). Edifice and edifice-server.
+function(hk_game_options t)
+  target_include_directories(${t} PRIVATE ${INCLUDE_DIRS})
+  # Last-resort data lookup in the source tree: Debug builds only, so a moved
+  # Release binary never writes into the git-tracked data/control.ini.
+  target_compile_definitions(${t} PRIVATE EDIFICE_VERSION_STRING="${PROJECT_VERSION}"
+    "$<$<CONFIG:Debug>:HK_SOURCE_DATA_DIR=\"${DATA_DIR}\">")
+  if(MSVC)
+    # MSVC's default permissive mode is what the VC6-era code needs: never add /permissive-.
+    target_compile_definitions(${t} PRIVATE WIN32 _WINDOWS _MBCS _USE_MATH_DEFINES NOMINMAX
+      _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS _WINSOCK_DEPRECATED_NO_WARNINGS)
+    target_compile_options(${t} PRIVATE /W1)
+  else()
+    target_compile_options(${t} PRIVATE -fsigned-char
+      -Wno-write-strings -Wno-deprecated-declarations -Wno-parentheses
+      -Wno-format-security)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+      target_compile_options(${t} PRIVATE -Wno-dangling-else -Wno-nonportable-include-path
+        -Wno-c++11-narrowing -Wno-pragma-once-outside-header
+        -Wno-implicit-const-int-float-conversion)
+    elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+      # GCC turns some VC6-isms into errors that clang only warns about.
+      # snprintf cutting a long name or line is what the code wants (-Wformat-truncation).
+      target_compile_options(${t} PRIVATE -fpermissive -Wno-narrowing -Wno-format-truncation)
+    endif()
+    if(WIN32)   # MinGW
+      target_compile_definitions(${t} PRIVATE _USE_MATH_DEFINES)
+      target_link_options(${t} PRIVATE -static)
+    endif()
+  endif()
+  if(HK_CURL_LIB)
+    target_link_libraries(${t} PRIVATE ${HK_CURL_LIB})
+    target_compile_definitions(${t} PRIVATE EDIFICE_LOBBY_CURL)
+  endif()
+  if(WIN32)
+    target_link_libraries(${t} PRIVATE ws2_32 winmm)
+  endif()
+endfunction()
+
 # ---- Target ------------------------------------------------------------------
-if(EMSCRIPTEN)
+if(NOT EDIFICE_CLIENT)
+  # the server alone (below)
+elseif(EMSCRIPTEN)
   # The site: index.html (src/platform/web/shell.html), index.js, index.wasm and
   # index.data, data/ preloaded as /data (read-only, in memory). The user folder
   # is /user, in IndexedDB (src/platform/web/pre.js).
@@ -383,48 +453,10 @@ else()
   install(DIRECTORY ${DATA_DIR}/ DESTINATION data PATTERN .DS_Store EXCLUDE)
 endif()
 
-target_include_directories(Edifice PRIVATE ${INCLUDE_DIRS})
-# Last-resort data lookup in the source tree: Debug builds only, so a moved
-# Release binary never writes into the git-tracked data/control.ini.
-target_compile_definitions(Edifice PRIVATE GL_SILENCE_DEPRECATION
-  EDIFICE_VERSION_STRING="${PROJECT_VERSION}"
-  "$<$<CONFIG:Debug>:HK_SOURCE_DATA_DIR=\"${DATA_DIR}\">")
-
-# 2000-era code: keep the noise down, and its signed char assumption. No -fwrapv,
-# -fno-strict-aliasing nor -Wno-return-type any more: the code they covered is fixed
-# (roadmap M12.6), and the sanitizers check it (BUILD.md).
-if(MSVC)
-  # MSVC's default permissive mode is what the VC6-era code needs: never add /permissive-.
-  target_compile_definitions(Edifice PRIVATE WIN32 _WINDOWS _MBCS _USE_MATH_DEFINES NOMINMAX
-    _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS _WINSOCK_DEPRECATED_NO_WARNINGS)
-  target_compile_options(Edifice PRIVATE /W1)
-else()
-  target_compile_options(Edifice PRIVATE -fsigned-char
-    -Wno-write-strings -Wno-deprecated-declarations -Wno-parentheses
-    -Wno-format-security)
-  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    target_compile_options(Edifice PRIVATE -Wno-dangling-else -Wno-nonportable-include-path
-      -Wno-c++11-narrowing -Wno-pragma-once-outside-header
-      -Wno-implicit-const-int-float-conversion)
-  elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    # GCC turns some VC6-isms into errors that clang only warns about.
-    # snprintf cutting a long name or line is what the code wants (-Wformat-truncation).
-    target_compile_options(Edifice PRIVATE -fpermissive -Wno-narrowing -Wno-format-truncation)
-  endif()
-  if(WIN32)   # MinGW
-    target_compile_definitions(Edifice PRIVATE _USE_MATH_DEFINES)
-    target_link_options(Edifice PRIVATE -static)
-  endif()
-endif()
-
+if(EDIFICE_CLIENT)
+hk_game_options(Edifice)
+target_compile_definitions(Edifice PRIVATE GL_SILENCE_DEPRECATION)
 target_link_libraries(Edifice PRIVATE ${HK_SDL_LIBS} Opus::opus)
-if(HK_CURL_LIB)
-  target_link_libraries(Edifice PRIVATE ${HK_CURL_LIB})
-  target_compile_definitions(Edifice PRIVATE EDIFICE_LOBBY_CURL)
-endif()
-if(WIN32)
-  target_link_libraries(Edifice PRIVATE ws2_32 winmm)
-endif()
 if(HK_RENDER_SOKOL)
   target_include_directories(Edifice PRIVATE ${SRC}/third_party/sokol ${HK_SHADER_DIR})
   target_compile_definitions(Edifice PRIVATE SOKOL_${HK_SOKOL_BACKEND} HK_RENDER_SOKOL)
@@ -462,6 +494,34 @@ else()
     endif()
   endif()
 endif()
+endif()   # EDIFICE_CLIENT
+
+# ---- Dedicated server ------------------------------------------------------------
+# edifice-server: the game code with the null renderer and audio, and a platform layer
+# without SDL; data/ next to it, as the Linux and Windows game (BUILD.md, server/README.md)
+if(EDIFICE_DEDICATED)
+  find_package(Threads REQUIRED)   # the console's stdin reader (dedicated.cpp)
+  add_executable(edifice-server ${HK_GAME_SOURCES}
+    src/render/renderer_null.cpp src/audio/sound_null.cpp src/platform/platform_server.cpp)
+  hk_game_options(edifice-server)
+  target_compile_definitions(edifice-server PRIVATE EDIFICE_HEADLESS)
+  target_link_libraries(edifice-server PRIVATE Threads::Threads)
+  add_custom_command(TARGET edifice-server POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -DSRC=${DATA_DIR} -DDST=$<TARGET_FILE_DIR:edifice-server>/data
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/copy_data.cmake
+    COMMENT "Copying game data next to edifice-server")
+  if(TARGET Edifice)
+    # after the game's: on Linux and Windows both copy into the same data/
+    add_dependencies(edifice-server Edifice)
+  endif()
+  install(TARGETS edifice-server RUNTIME DESTINATION .)
+endif()
+set(HK_GAME_TARGETS)
+foreach(t Edifice edifice-server)
+  if(TARGET ${t})
+    list(APPEND HK_GAME_TARGETS ${t})
+  endif()
+endforeach()
 
 # ---- Tests -------------------------------------------------------------------
 # Unit tests that need neither a window nor the game data (run with ctest).
@@ -557,10 +617,12 @@ if(EDIFICE_GNS)
   add_test(NAME gns_loopback COMMAND gns_loopback_test)
 
   # The game: GnsLink (docs/M7.md), used with transport=gns in net.ini
-  target_sources(Edifice PRIVATE src/net/gnslink.cpp src/net/gnssignal.cpp)
-  target_compile_definitions(Edifice PRIVATE EDIFICE_GNS)
-  target_link_libraries(Edifice PRIVATE ${HK_GNS_LIB})
-  if(MSVC)
+  foreach(t ${HK_GAME_TARGETS})
+    target_sources(${t} PRIVATE src/net/gnslink.cpp src/net/gnssignal.cpp)
+    target_compile_definitions(${t} PRIVATE EDIFICE_GNS)
+    target_link_libraries(${t} PRIVATE ${HK_GNS_LIB})
+  endforeach()
+  if(MSVC AND EDIFICE_CLIENT)
     # Release archives run on a clean Windows: the C++ runtime DLLs go next to
     # Edifice.exe (app-local deployment, allowed by the Visual Studio redist
     # terms), as do GameNetworkingSockets.dll and its DLLs (copied by vcpkg).
@@ -592,7 +654,7 @@ if(EDIFICE_GNS)
     # vcpkg links its own OpenSSL statically for GameNetworkingSockets; exported,
     # its symbols would take the place of the system libcrypto that libcurl and
     # libssl use (HTTPS to the lobby then fails in the TLS handshake)
-    foreach(t Edifice gns_netplay_test gns_p2p_test)
+    foreach(t ${HK_GAME_TARGETS} gns_netplay_test gns_p2p_test)
       target_link_options(${t} PRIVATE -Wl,--exclude-libs,ALL)
     endforeach()
   endif()
@@ -625,9 +687,11 @@ if(EDIFICE_WEBRTC AND NOT EDIFICE_GNS)
 endif()
 if(EDIFICE_WEBRTC)
   find_package(LibDataChannel CONFIG REQUIRED)
-  target_sources(Edifice PRIVATE src/net/rtchost.cpp)
-  target_compile_definitions(Edifice PRIVATE EDIFICE_WEBRTC)
-  target_link_libraries(Edifice PRIVATE LibDataChannel::LibDataChannel)
+  foreach(t ${HK_GAME_TARGETS})
+    target_sources(${t} PRIVATE src/net/rtchost.cpp)
+    target_compile_definitions(${t} PRIVATE EDIFICE_WEBRTC)
+    target_link_libraries(${t} PRIVATE LibDataChannel::LibDataChannel)
+  endforeach()
 endif()
 
 # ---- Warnings as errors --------------------------------------------------------
@@ -637,7 +701,7 @@ endif()
 # warn about more, which shouldn't stop a build.
 option(EDIFICE_WERROR "Treat warnings in the game code as errors" OFF)
 if(EDIFICE_WERROR)
-  set(HK_WERROR_TARGETS Edifice worldrandom_test wire_test voice_test anticheat_test hmac_test
+  set(HK_WERROR_TARGETS ${HK_GAME_TARGETS} worldrandom_test wire_test voice_test anticheat_test hmac_test
     fileio_test map_test props_test lobby_test signaling_test smoke_test)
   if(EDIFICE_GNS)
     list(APPEND HK_WERROR_TARGETS gns_loopback_test gns_netplay_test gns_p2p_test)

@@ -8,6 +8,7 @@
 #include "multiplay.h"
 #include "ui.h"
 #include "voice.h"
+#include "platform.h"
 #include <ctype.h>
 
 #define CHATHISTORY 32
@@ -44,6 +45,12 @@ void ChatAddLine(const char *name,int team,int teamonly,const char *text)
 	line.text[255]=0;
 	line.time=curtime;
 	numlines++;
+	if(HKDedicated())
+	{
+		char text[400];
+		snprintf(text,sizeof(text),"%s%s: %s",teamonly?"(team) ":"",line.name,line.text);
+		ConsoleDisplayText(text);
+	}
 }
 
 void ChatOpened(int key)

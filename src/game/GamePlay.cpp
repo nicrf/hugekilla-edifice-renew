@@ -1,3 +1,4 @@
+#include "platform.h"
 #include "redrawing.h"
 #include "hugekilla.h"
 #include "multiplay.h"
@@ -233,6 +234,7 @@ void GRestartPlayers()
 		GetPlayer(i)->playstate=1;
 		GetPlayer(i)->team=0;
 	}
+	if(HKDedicated()) return;   //never in the game itself (StartServer)
 	GetLocalPlayer()->playstate=10;
 	GPlayerEnterGame(0);
 }

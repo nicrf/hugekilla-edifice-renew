@@ -240,7 +240,9 @@ void LobbyHostStart()
 	NetHostBanner(1);
 	hostnext=HKTicks();
 	hostplayers=-1;
-	hostnumlan=LanAddresses(hostlan,LOBBY_MAXLAN);
+	//debug aid (tests/net_p2p.py): HK_LOBBY_NOLAN=1 announces no LAN address, so that a
+	//client on this machine joins P2P instead of by the LAN route
+	hostnumlan=getenv("HK_LOBBY_NOLAN")?0:LanAddresses(hostlan,LOBBY_MAXLAN);
 	for(int i=0;i<hostnumlan;i++) fprintf(stderr,"lobby: LAN address %s\n",hostlan[i]);
 }
 
@@ -254,7 +256,7 @@ static void HostSend(int players)
 	a.version=EDIFICE_VERSION_STRING;
 	a.protocol=EDIFICE_PROTOCOL_VERSION;
 	a.players=players;
-	a.maxplayers=ServerMaxPlayers();
+	a.maxplayers=ServerListedMaxPlayers();
 	a.mode=sv.gamemode;
 	a.visibility=hostvisibility;
 	a.identity=hostp2p&&s?s->identity:"";   //the lobby lists it with its token only

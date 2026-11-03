@@ -170,11 +170,31 @@ jobs:
             libxkbcommon-dev libwayland-dev libasound2-dev libpulse-dev libcurl4-openssl-dev \
             xvfb libgl1-mesa-dri
 
+      # + the dedicated server (edifice-server: no window, renderer nor audio), which
+      # builds on each system too
       - name: Build (Debug, sokol_gfx) and unit tests
         shell: bash
         env:
           EDIFICE_CMAKE_ARGS: -DEDIFICE_WERROR=ON
-        run: python build.py --config Debug --no-gns --test
+        run: python build.py --config Debug --no-gns --test --dedicated
+
+      # the dedicated server with test clients (tests/net_dedicated.py; the Docker image
+      # has its own run, server-image.yml), and on macOS a real game joining it too
+      # (HK_JOIN): on one Linux machine the game's UDP data socket would share the
+      # server's port (SO_REUSEADDR) and get its own datagrams back
+      - name: Dedicated server (test clients, a game client on macOS)
+        if: matrix.name != 'windows'
+        shell: bash
+        timeout-minutes: 10
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            build/linux-debug/edifice-server --version
+            NET_DEDICATED_LOGS=dedicated-logs python3 tests/net_dedicated.py build/linux-debug/edifice-server
+          else
+            build/macos-debug/edifice-server --version
+            NET_DEDICATED_LOGS=dedicated-logs python3 tests/net_dedicated.py build/macos-debug/edifice-server \
+              --game build/macos-debug/Edifice.app/Contents/MacOS/Edifice
+          fi
 
       - name: Draw the menus and a game
         shell: bash
@@ -210,6 +230,7 @@ jobs:
           path: |
             shots
             shots-gl
+            dedicated-logs
           if-no-files-found: ignore
 
   web:

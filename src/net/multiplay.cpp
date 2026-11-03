@@ -40,7 +40,6 @@ static_assert(FIRETICKAT==FIREGUNSIZE,"netsync.h: FIRETICKAT must be FIREGUNSIZE
 #ifndef _WIN32
 #include <netdb.h>
 #endif
-#include <SDL.h>
 
 
 RemoteGameData rgd;
@@ -78,6 +77,15 @@ static int UsedSlots()
 	int n=0;
 	for(int i=0;i<numplayers;i++) n+=slotused[i]!=0;
 	return n;
+}
+//what the game lists say: a dedicated server's own slot 0 is nobody (src/platform/dedicated.cpp)
+int ServerListedPlayers()
+{
+	return UsedSlots()-(HKDedicated()&&UsedSlots()>0);
+}
+int ServerListedMaxPlayers()
+{
+	return ServerMaxPlayers()-(HKDedicated()!=0);
 }
 
 
@@ -192,8 +200,8 @@ static void SendInfo(SOCKADDR_IN dest)
 	int len=2+nl+1;
 	len+=WriteVersionTrailer(&buf[len]);
 	//server details for the join list (ignored by older clients)
-	buf[len++]=(char)UsedSlots();
-	buf[len++]=(char)ServerMaxPlayers();
+	buf[len++]=(char)ServerListedPlayers();
+	buf[len++]=(char)ServerListedMaxPlayers();
 	buf[len++]=(char)sv.gamemode;
 	buf[len++]=(char)sv.capturelimit;
 	//capabilities (M11 phases 2, 3a and 3b, version.h; ignored by older clients)
@@ -1917,10 +1925,14 @@ void LoadNetSettings()
 	netsettings.datasendport=htons(netsetfile.GetValuei("datasendport"));
 	char *servername;
 	servername=netsetfile.GetValues("servername");
-	if(servername) strcpy(netsettings.servername,servername);
+	if(servername) CopyIniString(netsettings.servername,servername,sizeof(netsettings.servername));
 	char *playername;
 	playername=netsetfile.GetValues("name");
-	if(playername) strcpy(netsettings.playername,playername);
+	if(playername) CopyIniString(netsettings.playername,playername,sizeof(netsettings.playername));
+	//the players a dedicated server takes (ServerMaxPlayers); a game hosting from its
+	//window takes everyone, as before
+	int max=netsetfile.GetValuei("maxplayers");
+	netsettings.maxplayers=max>=1&&max<MAXPLAYERS?max:MAXPLAYERS-1;
 }
 
 
@@ -1955,7 +1967,9 @@ void StartServer()
 	infosock.Open(NetOpenInfoLink(netsettings.infosendport,1,LobbyHostInternet()));
 
 	SetLocalNum(0);
-	GetLocalPlayer()->playstate=10;
+	//a dedicated server is player 0 too, but never in the game: not drawn, in no
+	//team, out of the snapshots and the player counts (playstate 1, as joining)
+	GetLocalPlayer()->playstate=HKDedicated()?1:10;
 
 	ConsoleDisplayText("Started server");
 	RedrawSplash(800,"Loading Textures");
@@ -1970,10 +1984,13 @@ void StartServer()
 	}
 
 	consolevisible=0;
-	strcpy(GetLocalPlayer()->name,netsettings.playername);
+	strcpy(GetLocalPlayer()->name,HKDedicated()?"Server":netsettings.playername);
 	curport=netsettings.datasendport;
-	LockCursor(1);
-	GPlayerEnterGame(GetLocalNum());
+	if(!HKDedicated())
+	{
+		LockCursor(1);
+		GPlayerEnterGame(GetLocalNum());
+	}
 	LobbyHostStart();   //announced on the Internet list if net.ini says so
 }
 
@@ -2057,7 +2074,8 @@ void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pn
 		case REQUESTINFO:
 		{
 			SendInfo(source);
-			ConsoleDisplayText("received info request");
+			//a dedicated server's log: not each LAN search and healthcheck
+			if(!HKDedicated()) ConsoleDisplayText("received info request");
 			break;
 		}
 		case PORTACK:
@@ -2212,6 +2230,8 @@ int ServerMaxPlayers()
 #ifdef __EMSCRIPTEN__
 	return WEBHOSTMAXPLAYERS;
 #else
+	//a dedicated server: net.ini maxplayers (--max-players), and its own slot 0
+	if(HKDedicated()) return (int)netsettings.maxplayers+1;
 	return MAXPLAYERS;
 #endif
 }
@@ -2221,7 +2241,7 @@ int ServerMaxPlayers()
 void ServerLoop()
 {
 	GTick();
-	LobbyHostLoop(UsedSlots());
+	LobbyHostLoop(ServerListedPlayers());
 	PropsServerFrame();
 	AcServerFrame();
 	static Message msg;

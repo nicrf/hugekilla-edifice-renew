@@ -3,6 +3,42 @@
 #include "fileio.h"
 #include "cfgfile.h"
 #include "vector.h"
+#include <string.h>
+#include <string>
+#include <vector>
+
+struct CfgOverrideLine
+{
+	std::string file,key,value;
+};
+static std::vector<CfgOverrideLine> overrides;
+
+void CfgFile::Override(const char *file,const char *key,const char *value)
+{
+	std::string v;
+	for(const char *c=value;*c;c++)
+		if(*c!='\r'&&*c!='\n') v+=*c;   //one line
+	for(CfgOverrideLine &o:overrides)
+		if(o.file==file&&o.key==key)
+		{
+			o.value=v;
+			return;
+		}
+	overrides.push_back({file,key,v});
+}
+
+//the overrides of the file at this path, as lines in front of its own: FindValue takes
+//the first line of a key
+static std::string OverrideLines(const char *filename)
+{
+	const char *base=filename;
+	for(const char *c=filename;*c;c++)
+		if(*c=='/'||*c=='\\') base=c+1;
+	std::string lines;
+	for(const CfgOverrideLine &o:overrides)
+		if(!strcasecmp(o.file.c_str(),base)) lines+=o.key+"="+o.value+"\r\n";
+	return lines;
+}
 
 CfgFile::CfgFile()
 {
@@ -16,7 +52,18 @@ int CfgFile::Load(const char *filename)
 {
 	long size;
 	char *file=HKReadFile(filename,&size);
-	if(!file) return 0;
+	std::string lines=OverrideLines(filename);
+	if(!file&&lines.empty()) return 0;
+	if(!lines.empty())
+	{
+		long total=(long)lines.size()+(file?size:0);
+		char *both=new char[total+1];
+		memcpy(both,lines.data(),lines.size());
+		if(file) memcpy(both+lines.size(),file,size);
+		delete []file;
+		file=both;
+		size=total;
+	}
 	
 	if(data)delete []data;
 	data=file;

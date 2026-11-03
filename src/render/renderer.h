@@ -175,6 +175,10 @@ void RPopAttrib();
 //---- frame ----
 
 void RInit();                 //after the context is created
+//no GPU at all (the dedicated server, src/platform/dedicated.cpp): the draws and
+//uploads go nowhere, images aren't even read; set before anything draws
+void RSetHeadless();
+int RHeadless();
 void RClearColor(float r,float g,float b,float a);
 void RClear(int color,int depth);
 void RFlush();                //draws the batch: before presenting the frame

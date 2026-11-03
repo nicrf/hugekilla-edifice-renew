@@ -50,6 +50,7 @@ const unsigned char *TexFontAlpha(int *width,int *height)
 
 int LoadTexture(char *filename,unsigned num)
 {
+	if(RHeadless()) return 1;   //the dedicated server draws nothing: not even read
 	if(strcasecmp(&filename[strlen(filename)-4],".pxr")==0)
 	{
 		return LoadRaw(filename,num);;
@@ -73,6 +74,7 @@ int LoadTexture(char *filename,unsigned num)
 
 int LoadRaw(char *filename,unsigned num)
 {
+	if(RHeadless()) return 1;
 	//.pxr: a 1024-byte header, then square 8-bit pixels; the size tells the channels.
 	//stb_image doesn't know it, so it keeps its own reader.
 	long filelen;

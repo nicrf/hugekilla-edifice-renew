@@ -75,7 +75,7 @@ details = t[11 + vlen:11 + vlen + 4]
 if len(details) == 4:
     players, maxplayers, mode, captures = details
     print("INFO details: players=%d/%d mode=%d captures=%d" % (players, maxplayers, mode, captures))
-    ok &= 1 <= players <= maxplayers
+    ok &= 0 <= players <= maxplayers   # a dedicated server counts nobody of its own
 ok &= magic == MAGIC and proto >= 2
 
 # 2. original client (no trailer) is refused with VERSIONMISMATCH + readable text

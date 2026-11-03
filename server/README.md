@@ -8,6 +8,8 @@ Petit service en un seul binaire Go pour jouer à Edifice par Internet :
 
 Licence MIT (programme séparé du jeu, qui reste sous LGPL).
 
+Ce dossier décrit aussi le **serveur de jeu dédié** `edifice-server` (le jeu sans fenêtre, sous LGPL comme lui), qui peut tourner à côté du lobby : voir [plus bas](#serveur-de-jeu-dédié-edifice-server).
+
 ## Lancer
 
 ```bash
@@ -115,6 +117,62 @@ Une ligne par message, le protocole de l'exemple de Valve (`examples/trivial_sig
 2. ensuite : `DESTINATAIRE CHARGE` → relayé au destinataire sous la forme `EXPÉDITEUR CHARGE`.
 
 Le jeu (`src/net/gnssignal.cpp`) y envoie les signaux de GameNetworkingSockets en hexadécimal, comme l'exemple de Valve, et vérifie que chaque signal reçu se dit bien venir de l'expéditeur garanti par le serveur. Lignes de 4 Ko maximum, 50 messages par seconde et par connexion (au-delà, ignorés : la signalisation ne garantit pas la livraison), déconnexion après 5 minutes d'inactivité. En WebSocket : trames masquées et non fragmentées (sinon fermeture), pings répondus ; les ouvertures comptent dans la limite de requêtes par IP.
+
+## Serveur de jeu dédié (edifice-server)
+
+`edifice-server` est le serveur du jeu, sans fenêtre, sans rendu, sans son, sans joueur à lui : tous les slots vont aux joueurs. Il s'annonce sur le lobby comme un hôte ordinaire et prend les joueurs en UDP direct, en P2P (GameNetworkingSockets, par la signalisation et le relais TURN du lobby) et depuis le navigateur (WebRTC, la version web). Le monde vient de ses réglages (`sv.ini`, les variables de la console) ou d'une carte sauvegardée. Son journal va sur stdout, ses commandes de console arrivent par stdin. Détails, build et tests : `BUILD.md`, « Serveur dédié ».
+
+L'image `ghcr.io/nicrf/edifice-server` (amd64 et arm64, `server/edifice-server.Dockerfile`, construite depuis la racine du dépôt) suit les mêmes tags que celle du lobby : `latest` suit `main`, chaque release a `X.Y.Z` et `X.Y`, chaque commit `sha-<commit>`. Utilisateur non root, réglages dans le volume `/var/lib/edifice` (`net.ini`, `sv.ini`, `maps/`), healthcheck intégré (`edifice-server --healthcheck` : une demande INFO sur son port, celui de `HK_PORT` : dans un conteneur, donner le port par cette variable plutôt que par `--port`). Environ 180 Mo d'image, 60 Mo de mémoire au repos.
+
+### Avec le lobby (Docker Compose)
+
+Le service `game` de `compose.yaml` est derrière le profil `game` : `docker compose up -d` seul ne lance toujours que le lobby.
+
+```bash
+cd server && cp .env.example .env    # puis régler EDIFICE_GAME_* (et EDIFICE_GAME_LOBBY : l'adresse HTTPS publique du lobby)
+docker compose --profile game pull && docker compose --profile game up -d
+docker compose logs -f game          # le journal, avec le code de partie
+docker attach $(docker compose ps -q game)   # la console (status, kick 2, say …) ; Ctrl-P Ctrl-Q pour en sortir
+```
+
+Le service tourne en `network_mode: host` : son port UDP (`EDIFICE_GAME_PORT`, 27020) et ceux des joueurs qui suivent (un chacun en UDP simple, jusqu'à `EDIFICE_GAME_PORT+33`) sont ceux de la machine, à ouvrir dans le pare-feu ; GameNetworkingSockets et WebRTC y trouvent l'adresse publique pour le P2P ; et le lobby voit la partie arriver de l'IP publique du serveur. Derrière un réseau Docker en pont, il verrait une adresse privée et la refuserait : `EDIFICE_GAME_LOBBY` doit donc être l'adresse publique HTTPS du lobby (par Caddy), jamais `http://lobby:8080`. `docker compose stop game` envoie SIGTERM : les joueurs sont prévenus et la partie quitte le lobby aussitôt.
+
+| Variable (`.env`) | Variable du conteneur | Défaut | Rôle |
+|---|---|---|---|
+| `EDIFICE_SERVER_TAG` | — | `latest` | version de l'image, comme `EDIFICE_LOBBY_TAG` |
+| `EDIFICE_GAME_PORT` | `HK_PORT` | `27020` | port UDP du serveur (les joueurs en UDP simple ont les suivants, à partir de +2) |
+| `EDIFICE_GAME_NAME` | `HK_SERVER_NAME` | `Edifice dedicated server` | nom dans les listes |
+| `EDIFICE_GAME_MAX_PLAYERS` | `HK_MAX_PLAYERS` | `16` | joueurs acceptés (1 à 31) |
+| `EDIFICE_GAME_VISIBILITY` | `HK_VISIBILITY` | `public` | `public` (listée), `friends` ou `private` (rejointe par le code de partie du journal), `lan` (pas annoncée) |
+| `EDIFICE_GAME_LOBBY` | `HK_LOBBY` | le lobby public | adresse HTTPS publique du lobby ; vide : aucun |
+| `EDIFICE_GAME_MODE` | `HK_MODE` | `ctf` | `ctf` (capture du drapeau) ou `sandbox` |
+| `EDIFICE_GAME_MAP` | `HK_MAP` | — | une carte sauvegardée (`maps/NOM.map` dans le volume), sinon un terrain au hasard |
+| `EDIFICE_GAME_EXEC` | `HK_CONSOLE_RUN` | — | commandes de console au démarrage, séparées par `;` (`timelimit 20;capturelimit 3`) |
+
+Les autres réglages du jeu (`HK_P2P`, `HK_TRANSPORT`, `HK_SEED`…) passent aussi en variables (`environment:` du service), ou dans `net.ini` / `sv.ini` du volume : la liste complète est dans `BUILD.md` et dans `edifice-server --help`.
+
+### Docker seul
+
+```bash
+docker run -d --name edifice-game --network host -e HK_SERVER_NAME="Mon serveur" -e HK_VISIBILITY=public \
+  -e HK_LOBBY=https://lobby.example.org -v edifice-game:/var/lib/edifice ghcr.io/nicrf/edifice-server:latest
+docker run --rm -it -p 27020-27053:27020-27053/udp ghcr.io/nicrf/edifice-server:latest --visibility lan --lobby ""   # une partie de LAN, ports publiés
+```
+
+Construire l'image soi-même, depuis la racine du dépôt : `docker build -f server/edifice-server.Dockerfile -t edifice-server .` (le premier build compile les bibliothèques de vcpkg, une demi-heure environ ; ensuite leur couche reste en cache), ou `docker compose --profile game build`.
+
+### Sans Docker
+
+```bash
+python3 build.py --server            # build/<os>-release-gns-server/edifice-server, avec P2P et WebRTC
+build/linux-release-gns-server/edifice-server --name "Mon serveur" --visibility public --max-players 16
+```
+
+Ou le jeu lui-même : `Edifice --dedicated` (les mêmes options). Sans GameNetworkingSockets (`build.py --server --no-gns`), le serveur ne prend que l'UDP direct : ses ports doivent être joignables.
+
+### Ressources
+
+Mesuré sur un Mac Apple Silicon : 0,2 % d'un cœur au repos (la boucle dort entre deux ticks de 60 Hz), 1 % avec 8 joueurs qui marchent et tirent, 2,5 % avec 24 ; 15 à 70 Mo de mémoire (les tableaux statiques du jeu). Un petit VPS suffit largement ; la bande passante dépend surtout des instantanés (30 par seconde et par joueur, en delta).
 
 ## Tests
 

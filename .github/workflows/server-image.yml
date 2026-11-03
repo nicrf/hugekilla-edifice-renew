@@ -1,0 +1,191 @@
+# Builds the edifice-server container (server/edifice-server.Dockerfile: the dedicated
+# game server, no window nor GPU) and publishes it to the GitHub container registry,
+# as lobby-image.yml does the lobby's: ghcr.io/<owner>/edifice-server
+#  - push to main touching the game's code: tag "latest" (+ "sha-<commit>")
+#  - tag v1.2.3: tags "1.2.3" and "1.2"
+#  - pull request touching it: built and tested, not pushed
+# amd64 and arm64 each on a runner of its own (no QEMU: vcpkg's libraries would take
+# hours emulated), each image tested (tests/net_dedicated.py: test clients join, walk,
+# shoot, the console, SIGTERM; with a local lobby built from server/), pushed by
+# digest, then one multi-platform manifest gets the tags.
+name: Game server image
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths:
+      - 'src/**'
+      - 'data/**'
+      - 'cmake/**'
+      - 'CMakeLists.txt'
+      - 'vcpkg.json'
+      - 'server/edifice-server.Dockerfile*'
+      - 'tests/net_dedicated.py'
+      - 'tests/netclient.py'
+      - '.github/workflows/server-image.yml'
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'data/**'
+      - 'cmake/**'
+      - 'CMakeLists.txt'
+      - 'vcpkg.json'
+      - 'server/edifice-server.Dockerfile*'
+      - 'tests/net_dedicated.py'
+      - 'tests/netclient.py'
+      - '.github/workflows/server-image.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/edifice-server
+
+jobs:
+  image:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            arch: amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # vcpkg at the commit of the releases (release.yml's VCPKG_COMMIT)
+      - name: vcpkg commit
+        id: vcpkg
+        run: |
+          echo "commit=$(sed -n 's/^  VCPKG_COMMIT: *//p' .github/workflows/release.yml)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Image labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          labels: |
+            org.opencontainers.image.title=edifice-server
+            org.opencontainers.image.description=Edifice dedicated game server (no window nor GPU; UDP, P2P and WebRTC through the lobby)
+            org.opencontainers.image.licenses=LGPL-3.0-only
+
+      # first into the local engine, to be tested; the push below reuses its layers
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: server/edifice-server.Dockerfile
+          platforms: ${{ matrix.platform }}
+          load: true
+          tags: edifice-server:test
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: VCPKG_COMMIT=${{ steps.vcpkg.outputs.commit }}
+          cache-from: type=gha,scope=edifice-server-${{ matrix.arch }}
+          cache-to: type=gha,scope=edifice-server-${{ matrix.arch }},mode=max
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache-dependency-path: server/go.sum
+
+      - name: Test the image (test clients, a local lobby)
+        timeout-minutes: 10
+        run: |
+          docker image ls edifice-server:test
+          docker run --rm edifice-server:test --version
+          (cd server && go build -o ../build/edifice-lobby .)
+          NET_DEDICATED_LOGS=logs python3 tests/net_dedicated.py --docker edifice-server:test --lobby build/edifice-lobby
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: server-image-logs-${{ matrix.arch }}
+          path: logs
+          if-no-files-found: ignore
+
+      - name: Log in to ghcr.io
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push by digest
+        id: push
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: server/edifice-server.Dockerfile
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: VCPKG_COMMIT=${{ steps.vcpkg.outputs.commit }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=edifice-server-${{ matrix.arch }}
+
+      - name: Keep the digest
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p digests
+          touch "digests/${DIGEST#sha256:}"
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+
+      - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
+        with:
+          name: digests-${{ matrix.arch }}
+          path: digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  manifest:
+    # both platforms under the tags: latest on main, X.Y.Z and X.Y for a release
+    if: github.event_name != 'pull_request'
+    needs: image
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image name and tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+
+      - name: Create the manifest list
+        working-directory: digests
+        run: |
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.IMAGE }}@sha256:%s ' *)
+
+      - name: Inspect
+        run: docker buildx imagetools inspect ${{ env.IMAGE }}:${{ steps.meta.outputs.version }}

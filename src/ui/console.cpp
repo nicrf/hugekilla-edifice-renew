@@ -12,6 +12,7 @@
 #include "ui.h"
 #include "hkkeys.h"
 #include <ctype.h>
+#include <time.h>
 
 char consoletext[100][500];
 char consolecommand[500];
@@ -71,10 +72,27 @@ static void SetLineKind()
 	consolekind[0]=nextconsolekind>=0?nextconsolekind:ConsoleLineKind(consoletext[0]);
 }
 
+//the dedicated server's log: each line on stdout, after the time (UTC)
+static void LogLines(const char *text)
+{
+	char stamp[32];
+	time_t now=time(0);
+	strftime(stamp,sizeof(stamp),"%Y-%m-%d %H:%M:%S",gmtime(&now));
+	for(;;)
+	{
+		size_t n=strcspn(text,"\r");
+		printf("%s %.*s\n",stamp,(int)n,text);
+		if(!text[n]) break;
+		text+=n+1;
+	}
+	fflush(stdout);
+}
+
 void ConsoleDisplayText(char *text)
 {
 	static int log=getenv("HK_CONSOLE_LOG")!=0;   //debug aid: the console on stderr (tests)
 	if(log) fprintf(stderr,"console: %s\n",text);
+	if(HKDedicated()) LogLines(text);
 	int len=strlen(text);
 	char *curtext=text;
 	for(int i=0;i<len;i++)
@@ -99,7 +117,7 @@ void ConsoleDisplayText(char *text)
 	SetLineKind();
 	nextconsolekind=-1;
 			
-	if(consolevisible&&!consoleoverlay) DrawConsole();
+	if(consolevisible&&!consoleoverlay&&!HKDedicated()) DrawConsole();
 
 }
 
@@ -314,34 +332,30 @@ void ConsoleCommand()
 						strcpy((char *)consolevarptr[i],val);
 						break;
 					}
-					ScrollConsoleText();
-					consolekind[0]=KIND_VALUE;
-					strcat(consoletext[0],var);
-					strcat(consoletext[0]," changed to ");
-					strcat(consoletext[0],val);
+					char text[500];
+					snprintf(text,sizeof(text),"%s changed to %.400s",var,val);
+					nextconsolekind=KIND_VALUE;
+					ConsoleDisplayText(text);
 					SendServerVars(0);
 				}
 			}
 			else
 			{
-				ScrollConsoleText();
-				consolekind[0]=KIND_VALUE;
-				strcat(consoletext[0],var);
-				strcat(consoletext[0]," is ");
+				char text[500];
 				switch (consolevartype[i])
 				{
 				case 1:
-					{
-						sprintf(&consoletext[0][strlen(consoletext[0])],"%f",*(float *)consolevarptr[i]);
-					}
+					snprintf(text,sizeof(text),"%s is %f",var,*(float *)consolevarptr[i]);
 					break;
 				case 2:
-					sprintf(&consoletext[0][strlen(consoletext[0])],"%i",*(int *)consolevarptr[i]);
+					snprintf(text,sizeof(text),"%s is %i",var,*(int *)consolevarptr[i]);
 					break;
-				case 3:
-					strcpy(&consoletext[0][strlen(consoletext[0])],(char *)consolevarptr[i]);
+				default:
+					snprintf(text,sizeof(text),"%s is %.400s",var,(char *)consolevarptr[i]);
 					break;
 				}
+				nextconsolekind=KIND_VALUE;
+				ConsoleDisplayText(text);
 				
 			}
 		}

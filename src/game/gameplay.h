@@ -29,6 +29,7 @@ int GCanClaimObject(int pnum,int sonum);
 int GClaimObject(int pnum,int sonum);
 int GDropObject(int pnum,int sonum);
 int GetTeamSize(int teamnum,int living=1);
+char *teamname(int team);         //"free", "red", "blue"
 
 struct Team
 {

@@ -291,8 +291,9 @@ check(a.syncmode is not None and b.syncmode is not None, "both are in the game (
 
 # dead a moment, then alive: the server puts them somewhere, they fall
 play(0.5, (a, b), alive=False)
-first = [x for x in a.log if x[2]]
-check(first and first[0][1] == 0, "the first snapshot with others in it is complete (basetick %s)" % (first and first[0][1]))
+# (the first one at all: a dedicated server, with nobody of its own, sends Alpha
+# deltas of nobody before Bravo comes in one)
+check(a.log and a.log[0][1] == 0, "the first snapshot is complete (basetick %s)" % (a.log and a.log[0][1]))
 play(3, (a, b))
 
 # 30 Hz, deltas on what was acked, never itself
