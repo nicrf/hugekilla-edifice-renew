@@ -122,7 +122,7 @@ Le jeu (`src/net/gnssignal.cpp`) y envoie les signaux de GameNetworkingSockets e
 
 `edifice-server` est le serveur du jeu, sans fenêtre, sans rendu, sans son, sans joueur à lui : tous les slots vont aux joueurs. Il s'annonce sur le lobby comme un hôte ordinaire et prend les joueurs en UDP direct, en P2P (GameNetworkingSockets, par la signalisation et le relais TURN du lobby) et depuis le navigateur (WebRTC, la version web). Le monde vient de ses réglages (`sv.ini`, les variables de la console) ou d'une carte sauvegardée. Son journal va sur stdout, ses commandes de console arrivent par stdin. Détails, build et tests : `BUILD.md`, « Serveur dédié ».
 
-L'image `ghcr.io/nicrf/edifice-server` (amd64 et arm64, `server/edifice-server.Dockerfile`, construite depuis la racine du dépôt) suit les mêmes tags que celle du lobby : `latest` suit `main`, chaque release a `X.Y.Z` et `X.Y`, chaque commit `sha-<commit>`. Utilisateur non root, réglages dans le volume `/var/lib/edifice` (`net.ini`, `sv.ini`, `maps/`), healthcheck intégré (`edifice-server --healthcheck` : une demande INFO sur son port).
+L'image `ghcr.io/nicrf/edifice-server` (amd64 et arm64, `server/edifice-server.Dockerfile`, construite depuis la racine du dépôt) suit les mêmes tags que celle du lobby : `latest` suit `main`, chaque release a `X.Y.Z` et `X.Y`, chaque commit `sha-<commit>`. Utilisateur non root, réglages dans le volume `/var/lib/edifice` (`net.ini`, `sv.ini`, `maps/`), healthcheck intégré (`edifice-server --healthcheck` : une demande INFO sur son port, celui de `HK_PORT` : dans un conteneur, donner le port par cette variable plutôt que par `--port`). Environ 180 Mo d'image, 60 Mo de mémoire au repos.
 
 ### Avec le lobby (Docker Compose)
 

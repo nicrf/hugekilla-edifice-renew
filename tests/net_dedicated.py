@@ -143,8 +143,10 @@ try:
     if IMAGE:
         net = ["--network", "host"] if sys.platform.startswith("linux") else \
             ["-p", "%d-%d:%d-%d/udp" % (PORT, PORT + 2 + MAXPLAYERS + 2, PORT, PORT + 2 + MAXPLAYERS + 2)]
+        # the port as compose.yaml gives it (HK_PORT): the image's healthcheck reads it
+        dflags = flags[2:]
         cmd = ["docker", "run", "--rm", "-i", "--name", CONTAINER] + net + \
-            sum((["-e", "%s=%s" % kv] for kv in testenv.items()), []) + [IMAGE] + flags
+            sum((["-e", "%s=%s" % kv] for kv in dict(testenv, HK_PORT=str(PORT)).items()), []) + [IMAGE] + dflags
         env = None
     else:
         cmd = [SERVER] + ([] if os.path.basename(SERVER).startswith("edifice-server") else ["--dedicated"]) + flags
