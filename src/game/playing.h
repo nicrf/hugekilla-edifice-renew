@@ -116,6 +116,7 @@ struct Player
 
 	char credits[10];
 
+	char nopos;   //a remote player whose position hasn't come yet: not drawn (M16 phase 4)
 };
 struct Object
 {

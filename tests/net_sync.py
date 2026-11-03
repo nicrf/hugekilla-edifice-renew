@@ -15,7 +15,10 @@ at the same moment:
  - lag: the delay that best explains what is drawn (the true path shifted back by
    it), and the error left once shifted: what is noise rather than latency;
  - snaps: frames where the drawn player jumps more than SNAP units further than
-   the true one moved in the same time (teleports, rubber bands), per second.
+   the true one moved in the same time (teleports, rubber bands), per second;
+   and the same against the true path lag earlier (@lag/s): a player drawn late on
+   purpose (docs/M16.md phase 4, 100 ms) still falls when the true one has landed,
+   which isn't a jump.
 Each --netsim value (HK_NETSIM, both instances: <latency ms>,<jitter ms>,<loss %>
 per direction) is one run; "0" is a run without it. Default: 0 and 100,20,2.
 --fps: HK_MAXFPS of both, or of the host then the client (no VSync: the frames keep
@@ -229,17 +232,26 @@ def measure(true, view):
     if len(e) < 60:
         return None
     best = min((sum(x) / len(x), lag) for lag in [l / 1000 for l in range(0, 501, 10)] for x in [errors(lag)] if x)
-    snaps, jumps = 0, []
-    for a, b in zip(view, view[1:]):
-        if b[0] - a[0] > 0.1:
-            continue
-        qa, qb = path.at(a[0]), path.at(b[0])
-        if qa is None or qb is None:
-            continue
-        j = norm([x - y for x, y in zip(wrapdiff(a[2], b[2]), wrapdiff(qa, qb))])
-        jumps.append(j)
-        if j > SNAP:
-            snaps += 1
+    def jumpsat(lag):
+        """frames jumping more than SNAP units further than the true path, lag earlier,
+        moved in the same time; and those excesses"""
+        snaps, jumps = 0, []
+        for a, b in zip(view, view[1:]):
+            if b[0] - a[0] > 0.1:
+                continue
+            qa, qb = path.at(a[0] - lag), path.at(b[0] - lag)
+            if qa is None or qb is None:
+                continue
+            j = norm([x - y for x, y in zip(wrapdiff(a[2], b[2]), wrapdiff(qa, qb))])
+            jumps.append(j)
+            if j > SNAP:
+                snaps += 1
+        return snaps, jumps
+
+    snaps, jumps = jumpsat(0)
+    # against the path as it was lag ago: a player drawn on time but late isn't jumping
+    # when the true one stops a fall the drawn one is still in (docs/M16.md, phase 4)
+    lagsnaps, _ = jumpsat(best[1])
     dur = view[-1][0] - view[0][0]
     # how fast the player went meanwhile, for scale
     i0, i1 = bisect.bisect_left(path.t, view[0][0]), bisect.bisect_left(path.t, view[-1][0])
@@ -248,6 +260,7 @@ def measure(true, view):
     jumps.sort()
     return dict(n=len(e), dur=dur, t0=view[0][0], t1=view[-1][0], mean=sum(e) / len(e), p95=e[int(len(e) * .95)], max=e[-1],
                 lag=best[1] * 1000, lagerr=best[0], snaps=snaps, snaprate=snaps / dur if dur else 0,
+                lagsnaprate=lagsnaps / dur if dur else 0,
                 jump95=jumps[int(len(jumps) * .95)] if jumps else 0, speed=dist / dur if dur else 0)
 
 
@@ -318,19 +331,22 @@ def main():
                 continue
             rows.append((ns, what, r))
             if what == "client seen by host":
-                mode = "inputs" if re.search(r"^netsyncmode 256 ", client, re.M) else "legacy"
+                m = re.search(r"^netsyncmode (\d+) ", client, re.M)
+                mode = "legacy"
+                if m and int(m.group(1)) & 256:
+                    mode = "snapshots" if int(m.group(1)) & 512 else "inputs"
                 p = prediction(client, r["t0"], r["t1"])
                 preds.append((ns, mode, p))
     print()
-    print("%-10s %-20s %6s %6s %6s %6s %6s %7s %6s %6s %6s" % ("netsim", "", "mean", "p95", "max", "lag", "@lag",
-                                                             "snaps/s", "jmp95", "u/s", "secs"))
+    print("%-10s %-20s %6s %6s %6s %6s %6s %7s %6s %7s %6s %6s" % ("netsim", "", "mean", "p95", "max", "lag", "@lag",
+                                                                 "snaps/s", "jmp95", "@lag/s", "u/s", "secs"))
     for ns, what, r in rows:
-        print("%-10s %-20s %6.2f %6.2f %6.2f %4.0fms %6.2f %7.2f %6.2f %6.1f %6.1f" % (
-            ns, what, r["mean"], r["p95"], r["max"], r["lag"], r["lagerr"], r["snaprate"], r["jump95"], r["speed"],
-            r["dur"]))
+        print("%-10s %-20s %6.2f %6.2f %6.2f %4.0fms %6.2f %7.2f %6.2f %7.2f %6.1f %6.1f" % (
+            ns, what, r["mean"], r["p95"], r["max"], r["lag"], r["lagerr"], r["snaprate"], r["jump95"],
+            r["lagsnaprate"], r["speed"], r["dur"]))
     print("(units; lag: delay that best explains the drawn path, @lag: mean error left once shifted;"
           " snaps: frames jumping > %.2f units more than the true motion; jmp95: p95 of that excess;"
-          " u/s: the player's mean speed)" % SNAP)
+          " @lag/s: snaps against the true motion lag earlier; u/s: the player's mean speed)" % SNAP)
     print()
     print("%-10s %-14s %6s %8s %8s %8s %7s %8s %6s %7s %7s" % ("netsim", "client's own", "states", "err", "err p95",
                                                            "err max", "corr", "corr/s", "snaps", "shft95", "shftmax"))

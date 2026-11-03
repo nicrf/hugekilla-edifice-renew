@@ -123,6 +123,36 @@ int main(int argc,char **argv)
 	ss.state.thrustfuel=1; ss.state.flags=SYNCSTATE_GROUND; ss.state.playstate=10; ss.state.life=100;
 	Bytes snapself=Msg<SnapshotMessage,WriteSnapshotSelf>(ss);
 	Seed("fuzz_snapshotself","snapshotself.bin",snapself.data(),snapself.size());
+	//phase 4: the others, complete, then as a delta on FuzzSnapBase (one turns, one
+	//leaves, one comes), with our own state
+	{
+		static SnapPlayers base,cur;
+		FuzzSnapBase(&base);
+		static unsigned char buf[SNAPSHOTSELFSIZE+SNAPMAXPLAYERS*SNAPENTRYMAX];
+		ss.tick=5002;
+		int n=WritePlayerSnapshot(buf,sizeof(buf),&ss,base,0);
+		Seed("fuzz_playersnapshot","complete.bin",buf,n);
+		cur=base;
+		cur.p[1].yaw=1234;
+		cur.p[5].x+=100;
+		cur.p[5].vel[1]=-3000;
+		memset(&cur.p[31],0,sizeof(cur.p[31]));
+		SnapState st;
+		memset(&st,0,sizeof(st));
+		st.pos[0]=10; st.pos[1]=50; st.pos[2]=20; st.playstate=11; st.flags=SNAPFLAG_GLIDING; st.roll=-20;
+		SnapPack(st,&cur.p[9]);
+		ss.tick=5004;
+		ss.basetick=5002;
+		n=WritePlayerSnapshot(buf,sizeof(buf),&ss,cur,&base);
+		Seed("fuzz_playersnapshot","delta.bin",buf,n);
+		ss.self=0;
+		ss.tick=5006;
+		ss.basetick=5004;
+		n=WritePlayerSnapshot(buf,sizeof(buf),&ss,cur,&cur);   //nothing changed
+		Seed("fuzz_playersnapshot","nochange.bin",buf,n);
+		ss.self=1;
+		ss.basetick=0;
+	}
 
 	FireGunDirection fg;
 	memset(&fg,0,sizeof(fg));

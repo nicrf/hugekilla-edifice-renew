@@ -705,6 +705,7 @@ if(EDIFICE_FUZZ)
     hk_fuzzer(${lower} tests/fuzz/fuzz_msg.cpp src/game/Vector.cpp)
     target_compile_definitions(fuzz_${lower} PRIVATE FUZZ_NAME=${msgname} FUZZ_TYPE=${msgtype} FUZZ_${upper})
   endforeach()
+  hk_fuzzer(playersnapshot tests/fuzz/fuzz_playersnapshot.cpp src/game/Vector.cpp)   # M16 phase 4
   hk_fuzzer(playernames tests/fuzz/fuzz_playernames.cpp src/game/Vector.cpp)
   hk_fuzzer(chat tests/fuzz/fuzz_chat.cpp src/game/Vector.cpp)
   hk_fuzzer(blocks tests/fuzz/fuzz_blocks.cpp src/game/Vector.cpp)

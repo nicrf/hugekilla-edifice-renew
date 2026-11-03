@@ -276,6 +276,8 @@ Les joueurs distants sautent et reviennent en arrière : chaque client simule so
   2. Mouvement décidé par le serveur d'après des commandes d'entrée numérotées (INPUTCMD, capacité `HELLOCAP_INPUTS` 256, deuxième octet de capacités).
   3. Prédiction côté client et réconciliation.
   4. Instantanés datés en delta à 30 Hz (SNAPSHOT, `HELLOCAP_SNAPSHOTS` 512), joueurs distants dessinés 100 ms dans le passé, meilleure quantification.
+
+     *Fait :* SNAPSHOT avec les autres joueurs en delta sur l'instantané accusé (`netsync.h`, `tests/wire_test.cpp`, `fuzz_playersnapshot`, `tests/net_snapshot.py`), dessinés 100 ms dans le passé, interpolés ; plus d'à-coups une fois le retard voulu décalé (chiffres dans `docs/M16.md`), plus de chute dessinée qui monte, plus de joueur en (0,0,0) à l'arrivée.
   5. Compensation de latence au tick que le tireur voyait, grenades et fumigènes prédits, événements fiables datés (`HELLOCAP_TICKEVENTS` 1024).
   6. Retrait du chemin du protocole 5 : protocole 6, version 0.8.0, les anciens refusés.
 - **Compatibilité :** protocole 5 jusqu'à la phase 6, chaque nouveauté seulement entre deux pairs qui l'annoncent ; un client 0.7 joue dans la même partie avec les positions d'avant.

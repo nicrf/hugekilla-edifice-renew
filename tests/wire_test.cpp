@@ -192,6 +192,250 @@ int main()
 		CHECK(caps.caps==(HELLOCAP_SMOKE|HELLOCAP_INPUTS));
 		ReadHelloCaps(hello,t+1,&caps);
 		CHECK(caps.caps==HELLOCAP_SMOKE);
+		c=WriteHelloCaps(hello+t,HELLOCAP_INPUTS|HELLOCAP_SNAPSHOTS,0);
+		ReadHelloCaps(hello,t+c,&caps);
+		CHECK(c==2&&caps.caps==(HELLOCAP_INPUTS|HELLOCAP_SNAPSHOTS));
+	}
+	// phase 4: a player's state through the wire (SnapPack, SnapUnpack)
+	{
+		SnapState st;
+		memset(&st,0,sizeof(st));
+		st.pos[0]=600.25f;     //the world repeats: 88.25
+		st.pos[1]=-10.5f;
+		st.pos[2]=-0.5f;       //511.5
+		st.vel[1]=-2.5f;       //a fast fall: a char/64 wrapped it to rising
+		st.vel[0]=40;          //beyond +-32: held there
+		st.vel[2]=0.0009765625f;
+		st.yaw=-1.5707963f;    //a quarter turn back: 49152
+		st.pitch=.3f;
+		st.roll=-200;
+		st.keys=MOVEKEY_UP|MOVEKEY_JETPACK;
+		st.weapon=3;
+		st.playstate=10;
+		st.flags=SNAPFLAG_GROUND;
+		SnapPlayer p;
+		SnapPack(st,&p);
+		CHECK(p.in==1&&p.x==(uint16_t)(88.25f*128)&&p.z==(uint16_t)(511.5f*128)&&p.y==-672);
+		CHECK(p.vel[1]==-2560&&p.vel[0]==32767&&p.vel[2]==1);
+		CHECK(p.yaw==49152&&p.pitch==3000&&p.roll==-127);
+		SnapState o;
+		SnapUnpack(p,&o);
+		CHECK(o.pos[0]==88.25f&&o.pos[1]==-10.5f&&o.pos[2]==511.5f&&o.vel[1]==-2.5f);
+		CHECK(fabsf(o.yaw-(6.28318530718f-1.5707963f))<1e-4f&&fabsf(o.pitch-.3f)<1e-6f);
+		CHECK(o.keys==st.keys&&o.weapon==3&&o.playstate==10&&o.flags==SNAPFLAG_GROUND&&o.roll==-127);
+		st.pos[0]=st.pos[1]=st.vel[0]=st.yaw=nanf("");   //not a number: 0, not undefined
+		SnapPack(st,&p);
+		CHECK(p.x==0&&p.y==0&&p.vel[0]==0&&p.yaw==0);
+	}
+	// phase 4: SNAPSHOT with the others, complete, then as deltas on a base
+	{
+		SnapPlayers a;
+		memset(&a,0,sizeof(a));
+		SnapState st;
+		memset(&st,0,sizeof(st));
+		st.playstate=10;
+		for(int i=0;i<3;i++)
+		{
+			st.pos[0]=100.f+i;
+			st.pos[1]=40;
+			st.pos[2]=200;
+			st.weapon=(unsigned char)i;
+			SnapPack(st,&a.p[i==2?31:i]);   //players 0, 1 and 31
+		}
+		SnapshotMessage m;
+		memset(&m,0,sizeof(m));
+		m.type=SNAPSHOT;
+		m.tick=1000;
+		m.lastcmd=55;
+		unsigned char buf[SNAPSHOTSELFSIZE+SNAPMAXPLAYERS*SNAPENTRYMAX];
+		int n=WritePlayerSnapshot(buf,sizeof(buf),&m,a,0);
+		const int head=SNAPSHOTSELFSIZE-SYNCSTATESIZE;
+		CHECK(m.n==3&&n==head+3*SNAPENTRYMAX);
+		// the first entry, byte for byte: pnum, mask, x z y, vel, yaw pitch, keys,
+		// weapon playstate flags, roll
+		const unsigned char entry[SNAPENTRYMAX]={0,SNAPF_ALL, 0x00,0x32, 0x00,0x64, 0x00,0x0A,
+			0,0, 0,0, 0,0, 0,0, 0,0, 0, 0,10,0, 0};
+		CHECK(buf[head-1]==3&&memcmp(buf+head,entry,sizeof(entry))==0);
+		CHECK(buf[head+2*SNAPENTRYMAX]==31);
+		SnapshotMessage om;
+		SnapPlayers oa;
+		CHECK(ReadPlayerSnapshot(buf,n,&om,&oa,0));
+		CHECK(om.tick==1000&&om.basetick==0&&om.lastcmd==55&&om.n==3&&memcmp(&oa,&a,sizeof(a))==0);
+		CHECK(!ReadPlayerSnapshot(buf,n-1,&om,&oa,0));   //cut short
+		// its header alone, as phase 2 reads it (the base it needs)
+		CHECK(ReadSnapshotSelf(buf,n,&om)&&om.n==3&&om.basetick==0);
+		// nothing changed: a delta of no player at all
+		m.tick=1002;
+		m.basetick=1000;
+		n=WritePlayerSnapshot(buf,sizeof(buf),&m,a,&a);
+		CHECK(n==head&&m.n==0);
+		// player 1 turns, 31 leaves, 5 comes: three entries, only what changed
+		SnapPlayers b=a;
+		b.p[1].yaw=1234;
+		memset(&b.p[31],0,sizeof(b.p[31]));
+		st.pos[0]=300;
+		SnapPack(st,&b.p[5]);
+		m.tick=1004;
+		n=WritePlayerSnapshot(buf,sizeof(buf),&m,b,&a);
+		CHECK(m.n==3&&n==head+(2+4)+SNAPENTRYMAX+2);
+		CHECK(buf[head]==1&&buf[head+1]==SNAPF_VIEW&&buf[head+6]==5&&buf[head+7]==SNAPF_ALL);
+		CHECK(buf[head+6+SNAPENTRYMAX]==31&&buf[head+7+SNAPENTRYMAX]==SNAPF_GONE);
+		SnapPlayers ob;
+		CHECK(ReadPlayerSnapshot(buf,n,&om,&ob,&a));
+		CHECK(om.basetick==1000&&memcmp(&ob,&b,sizeof(b))==0);
+		// the base is needed, and only for a delta
+		CHECK(!ReadPlayerSnapshot(buf,n,&om,&ob,0));
+		m.basetick=0;
+		CHECK(WritePlayerSnapshot(buf,sizeof(buf),&m,b,&a)==0);
+		m.basetick=1000;
+		CHECK(WritePlayerSnapshot(buf,sizeof(buf),&m,b,0)==0);
+		// a 31-player complete snapshot fits in a datagram (MAXPACKETSIZE 1000, less
+		// the 3 bytes of grouping)
+		SnapPlayers full;
+		for(int i=0;i<SNAPMAXPLAYERS;i++) SnapPack(st,&full.p[i]);
+		memset(&full.p[7],0,sizeof(full.p[7]));   //the client's own: never in it
+		m.basetick=0;
+		m.self=1;
+		n=WritePlayerSnapshot(buf,sizeof(buf),&m,full,0);
+		CHECK(n==SNAPSHOTSELFSIZE+31*SNAPENTRYMAX&&n<=997);
+		m.self=0;
+		// what a reader refuses (each from a good complete snapshot of players 0, 1, 31)
+		m.tick=1000;
+		n=WritePlayerSnapshot(buf,sizeof(buf),&m,a,0);
+		unsigned char bad[sizeof(buf)];
+		memcpy(bad,buf,n);
+		bad[head]=32;   //no such player
+		CHECK(!ReadPlayerSnapshot(bad,n,&om,&oa,0));
+		memcpy(bad,buf,n);
+		bad[head+SNAPENTRYMAX]=0;   //player 0 twice
+		CHECK(!ReadPlayerSnapshot(bad,n,&om,&oa,0));
+		memcpy(bad,buf,n);
+		bad[head+1]=SNAPF_ALL|64;   //an unknown field
+		CHECK(!ReadPlayerSnapshot(bad,n,&om,&oa,0));
+		memcpy(bad,buf,n);
+		bad[head+1]=0;   //nothing
+		CHECK(!ReadPlayerSnapshot(bad,n,&om,&oa,0));
+		// a new player without all its fields; one that leaves without being there
+		m.tick=1002;
+		m.basetick=1000;
+		memset(&b,0,sizeof(b));
+		n=WritePlayerSnapshot(buf,sizeof(buf),&m,b,&a);   //all three leave
+		CHECK(m.n==3&&ReadPlayerSnapshot(buf,n,&om,&ob,&a)&&!ob.p[0].in&&!ob.p[31].in);
+		SnapPlayers empty;
+		memset(&empty,0,sizeof(empty));
+		CHECK(!ReadPlayerSnapshot(buf,n,&om,&ob,&empty));
+		n=WritePlayerSnapshot(buf,sizeof(buf),&m,a,&b);   //all three come back, complete
+		buf[head+1]=SNAPF_POS;
+		CHECK(!ReadPlayerSnapshot(buf,n,&om,&ob,&b));
+	}
+	// phase 4: the server's deltas against what the client acked, through losses,
+	// an ack that never comes back, a base gone on either side
+	{
+		SnapRing sent,recv;
+		memset(&sent,0,sizeof(sent));
+		memset(&recv,0,sizeof(recv));
+		uint32_t acked=0;
+		int anyack=0,deltas=0,fulls=0,dropped=0,got=0;
+		SnapPlayers cur;
+		memset(&cur,0,sizeof(cur));
+		SnapState st;
+		memset(&st,0,sizeof(st));
+		st.playstate=10;
+		unsigned char buf[SNAPSHOTSELFSIZE+SNAPMAXPLAYERS*SNAPENTRYMAX];
+		uint32_t newest=0;
+		for(int k=1;k<=120;k++)
+		{
+			uint32_t tick=0xFFFFFF00u+2*k;   //across the wrap of the tick numbers
+			st.pos[0]=(float)k;   //player 2 walks, player 4 stands
+			SnapPack(st,&cur.p[2]);
+			if(k==1) SnapPack(st,&cur.p[4]);
+			// the server: on the newest acked if it still has it (as SendSnapshots)
+			const SnapPlayers *base=anyack?SnapFind(&sent,acked):0;
+			SnapshotMessage m;
+			memset(&m,0,sizeof(m));
+			m.type=SNAPSHOT;
+			m.tick=tick;
+			m.basetick=base?acked:0;
+			int n=WritePlayerSnapshot(buf,sizeof(buf),&m,cur,base);
+			CHECK(n>0);
+			SnapStore(&sent,tick,cur);
+			if(base) deltas++; else fulls++;
+			if(base&&k>2&&k<50) CHECK(n==SNAPSHOTSELFSIZE-SYNCSTATESIZE+2+6);   //player 2's x only
+			// the network: 10..19 lost; 60..99 come but the acks don't go back
+			if(k>=10&&k<20) continue;
+			// the client (as ClientSnapshot): the base it names, if it has it
+			SnapshotMessage h;
+			CHECK(ReadSnapshotSelf(buf,n,&h));
+			const SnapPlayers *cbase=0;
+			if(h.basetick&&!(cbase=SnapFind(&recv,h.basetick)))
+				dropped++;
+			else
+			{
+				SnapPlayers out;
+				CHECK(ReadPlayerSnapshot(buf,n,&h,&out,cbase));
+				CHECK(memcmp(&out,&cur,sizeof(out))==0);
+				got++;
+				SnapStore(&recv,tick,out);
+				newest=tick;
+			}
+			//the client forgets (renumbered players) while its ack of 105 is lost
+			if(k==105) memset(&recv,0,sizeof(recv));
+			if((k>=60&&k<100)||k==105) continue;
+			// the ack back to the server (as SnapAck): 0 when it has nothing
+			uint32_t ack=SnapFind(&recv,newest)?newest:0;
+			if(!ack) anyack=0;
+			else if(!anyack||CmdNewer(ack,acked)) { acked=ack; anyack=1; }
+		}
+		// complete: the first; 92..100, once the ack of 59 (60..99 not acked) has left
+		// the server's 32; 107, after the forgetting at 105 (106: a delta on 104 the
+		// client no longer has, dropped, then its ack 0)
+		CHECK(dropped==1&&got==120-10-1);
+		CHECK(fulls==1+9+1&&deltas==120-fulls);
+		SnapState o;
+		uint32_t last=0xFFFFFF00u+240;
+		// drawn between two: player 2 at 119.5 between the ticks of 119 and 120
+		CHECK(SnapSample(&recv,2,last-1,0,&o)==SNAPSAMPLE_LERP&&fabsf(o.pos[0]-119.5f)<1e-3f);
+		// before anything kept: nothing; past the newest: with its velocity, 6 ticks at most
+		CHECK(SnapSample(&recv,2,last-60,0,&o)==SNAPSAMPLE_NONE);
+		CHECK(SnapSample(&recv,3,last,0,&o)==SNAPSAMPLE_NONE);   //never there
+		CHECK(SnapSample(&recv,4,last,.5f,&o)==SNAPSAMPLE_EXTRAP&&o.pos[0]==1);
+	}
+	// phase 4: SnapSample across the edge of the world, a teleport, a player leaving
+	{
+		SnapRing r;
+		memset(&r,0,sizeof(r));
+		SnapPlayers s;
+		memset(&s,0,sizeof(s));
+		SnapState st;
+		memset(&st,0,sizeof(st));
+		st.playstate=10;
+		st.pos[0]=511.75f;
+		st.vel[0]=1;   //a unit per 40 ms step
+		st.yaw=3.1f;
+		SnapPack(st,&s.p[1]);
+		SnapPack(st,&s.p[2]);
+		SnapPack(st,&s.p[3]);
+		SnapStore(&r,100,s);
+		st.pos[0]=.25f;   //over the edge: half a unit on
+		st.yaw=-3.1f;     //and across the half turn
+		SnapPack(st,&s.p[1]);
+		st.pos[0]=200;    //far: a respawn
+		SnapPack(st,&s.p[2]);
+		memset(&s.p[3],0,sizeof(s.p[3]));   //gone
+		SnapStore(&r,102,s);
+		SnapState o;
+		CHECK(SnapSample(&r,1,101,0,&o)==SNAPSAMPLE_LERP&&fabsf(o.pos[0]-512)<1e-3f);
+		CHECK(fabsf(fabsf(o.yaw)-3.14159f)<.01f);   //the short way round, not through 0
+		CHECK(SnapSample(&r,2,101,0,&o)==SNAPSAMPLE_HOLD&&fabsf(o.pos[0]-511.75f)<1e-3f);
+		CHECK(SnapSample(&r,2,102,0,&o)==SNAPSAMPLE_EXTRAP&&o.pos[0]==200);
+		CHECK(SnapSample(&r,3,101,.9f,&o)==SNAPSAMPLE_HOLD);
+		CHECK(SnapSample(&r,3,102,0,&o)==SNAPSAMPLE_NONE);
+		// extrapolated 100 ms at most: 6 ticks of 1/1024-rounded velocity
+		CHECK(SnapSample(&r,1,120,0,&o)==SNAPSAMPLE_EXTRAP&&fabsf(o.pos[0]-(.25f+6*SNAPSTEPSPERTICK))<1e-3f);
+		// a snapshot older than all the kept ones, once full, isn't kept
+		for(uint32_t t=104;t<104+2*SNAPRING;t+=2) SnapStore(&r,t,s);
+		SnapStore(&r,50,s);
+		CHECK(!SnapFind(&r,50)&&!SnapFind(&r,100)&&SnapFind(&r,104+2*SNAPRING-2));
 	}
 
 	if(failures) { printf("%d failure(s)\n",failures); return 1; }

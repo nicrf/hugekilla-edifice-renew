@@ -278,8 +278,11 @@ check(len(b.voices) >= 4, "back in range: %d/5 frames" % len(b.voices))
 a.pump(0.5)
 if a.hostpos:
     hx, hy, hz = a.hostpos
+    # the position every other frame: 25 a second, within what the server takes
+    # (ac_posrate, 2 per positionresendtime: ~28 a second after a burst of 10)
     for k in range(30):
-        a.send(position(hx + 2, hy, hz), voice(0, 400 + k, os.urandom(1 + k * 13)))
+        frame = voice(0, 400 + k, os.urandom(1 + k * 13))
+        a.send(*((position(hx + 2, hy, hz), frame) if k % 2 == 0 else (frame,)))
         time.sleep(0.02)
     print("sent garbage frames next to the host at (%.0f, %.0f, %.0f)" % (hx, hy, hz))
 else:
