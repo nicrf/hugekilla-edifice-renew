@@ -24,10 +24,13 @@ what is tested is the signaling, ICE, the TURN relay and the game over them, not
 the NAT traversal itself.
 The games run on Linux (XDG_DATA_HOME gives each its own net.ini; they need a
 display, e.g. xvfb-run), and on macOS with NET_P2P_GAMES=1 (CFFIXED_USER_HOME; the
-screen must not be locked). HK_P2P_ADDRESS overrides the LAN address used."""
+screen must not be locked). HK_P2P_ADDRESS overrides the LAN address used.
+NET_P2P_HOST=<edifice-server, or the game>: the host is that dedicated server (its
+--dedicated for the game), the client still the game; the host then counts 1 player."""
 import json, os, platform, shutil, signal, socket, ssl, subprocess, sys, tempfile, time, urllib.request
 
 GAME, LOBBY, P2PTEST = (os.path.abspath(a) for a in sys.argv[1:4])
+HOST = os.path.abspath(os.environ["NET_P2P_HOST"]) if os.environ.get("NET_P2P_HOST") else None
 LOGDIR = os.path.abspath(os.environ.get("NET_P2P_LOGS", "p2p-logs"))
 URL = "https://127.0.0.1:18090"
 MAC = platform.system() == "Darwin"
@@ -160,7 +163,8 @@ def game_env(name, ports, extra):
         f.write("infosendport=%d\ndatasendport=%d\nservername=P2P test %s\nname=%s\n"
                 "lobby=%s\nservervisibility=public\n" % (ports, ports + 1, name, name, URL))
     env = dict(os.environ, XDG_DATA_HOME=home, CFFIXED_USER_HOME=home, SDL_AUDIODRIVER="dummy", HK_CONSOLE_LOG="1",
-               ASAN_OPTIONS="detect_leaks=0", HK_SHOT="/dev/null", HK_SHOT_FRAME="999999")
+               ASAN_OPTIONS="detect_leaks=0", HK_SHOT="/dev/null", HK_SHOT_FRAME="999999",
+               HK_USERDIR=folder + os.sep)   # the same folder, for a dedicated server too
     env.update(extra)
     return env
 
@@ -176,10 +180,16 @@ def listed(name):
 
 
 def games(tag, relay):
-    """the game: a host on the lobby, a client joining it P2P by its code"""
-    mode = {"HK_P2P": "relay"} if relay else {}
+    """the game: a host on the lobby, a client joining it P2P by its code (the host
+    announces no LAN address, HK_LOBBY_NOLAN: on one machine the client would take
+    that route, the lobby gives it to the players behind the same address)"""
+    mode = {"HK_P2P": "relay", "HK_LOBBY_NOLAN": "1"} if relay else {"HK_LOBBY_NOLAN": "1"}
     hostname, clientname = "host" + tag, "client" + tag
-    host = start("game-" + hostname, [GAME], game_env(hostname, 27020, dict(mode, HK_AUTOSTART="1")))
+    if HOST:
+        dedicated = [] if os.path.basename(HOST).startswith("edifice-server") else ["--dedicated"]
+        host = start("game-" + hostname, [HOST] + dedicated, game_env(hostname, 27020, mode))
+    else:
+        host = start("game-" + hostname, [GAME], game_env(hostname, 27020, dict(mode, HK_AUTOSTART="1")))
     game = wait_for("the host is listed (%s)" % tag, lambda: listed(hostname), 60)
     if not game:
         stop(host)
@@ -201,8 +211,10 @@ def games(tag, relay):
     check("console: received landinfo" in clog, "the client got the land (%s)" % tag)
     check(" at 0.0." in hlog and "requests to connect" in hlog,
           "the host saw the client come P2P, from a made-up 0.0.x.y address (%s)" % tag)
-    if wait_for("the host reports 2 players (%s)" % tag, lambda: (listed(hostname) or {}).get("players") == 2 or None, 30):
-        check(True, "the host's renewal says 2 players (%s)" % tag)
+    players = 1 if HOST else 2   # a dedicated server isn't a player
+    if wait_for("the host reports %d players (%s)" % (players, tag),
+                lambda: (listed(hostname) or {}).get("players") == players or None, 30):
+        check(True, "the host's renewal says %d players (%s)" % (players, tag))
     stop(client)
     stop(host)
 

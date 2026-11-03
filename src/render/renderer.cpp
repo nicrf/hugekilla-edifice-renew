@@ -15,6 +15,7 @@ static std::vector<RCmd> cmds;
 static int inprim;            //between RBegin and REnd
 static RPrim curprim;
 static int primfirst;         //first vertex of the open primitive
+static int headless;          //RSetHeadless: no backend behind
 
 struct SavedAttrib
 {
@@ -44,7 +45,18 @@ static void InitState()
 void RInit()
 {
 	InitState();
-	RBackendInit();
+	if(!headless) RBackendInit();
+}
+
+void RSetHeadless()
+{
+	headless=1;
+	InitState();
+}
+
+int RHeadless()
+{
+	return headless;
 }
 
 void RGrowBatch()
@@ -57,7 +69,7 @@ void RGrowBatch()
 
 void RFlush()
 {
-	if(!cmds.empty()) RBackendDraw(state,rbatch.verts,cmds.data(),(int)cmds.size());
+	if(!cmds.empty()&&!headless) RBackendDraw(state,rbatch.verts,cmds.data(),(int)cmds.size());
 	cmds.clear();
 	if(inprim)
 	{
@@ -346,19 +358,20 @@ void RClearColor(float r,float g,float b,float a)
 void RClear(int color,int depth)
 {
 	RFlush();
-	RBackendClear(state,color,depth);
+	if(!headless) RBackendClear(state,color,depth);
 }
 
 void RReadPixels(int x,int y,int w,int h,int bgr,unsigned char *out)
 {
 	RFlush();
-	RBackendReadPixels(x,y,w,h,bgr,out);
+	if(headless) memset(out,0,(size_t)w*h*3);
+	else RBackendReadPixels(x,y,w,h,bgr,out);
 }
 
 void RReadDepth(int x,int y,float *depth)
 {
 	RFlush();
-	RBackendReadDepth(x,y,depth);
+	if(!headless) RBackendReadDepth(x,y,depth);
 }
 
 //---- Ultra graphics ----
@@ -369,7 +382,7 @@ static int inscene;           //between RUltraBegin and RUltraEnd
 
 int RUltraSupported()
 {
-	return RBackendUltraSupported();
+	return !headless&&RBackendUltraSupported();
 }
 
 void RSetUltra(int on)
@@ -379,7 +392,7 @@ void RSetUltra(int on)
 
 int RUltra()
 {
-	return ultrawanted&&RBackendUltraSupported();
+	return ultrawanted&&RUltraSupported();
 }
 
 //Classic never sees a material: no state change, no flush, the same batches

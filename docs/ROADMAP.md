@@ -435,5 +435,5 @@ uint32 magic 'EDV1' | uint16 protocol | uint32 layoutHash | uint8 verLen | char 
 5. **Hash des données de gameplay :** refus strict ou simple avertissement ?
 6. ~~**Anciens `.sav` après M4 et M6 :** chargement legacy ou rupture assumée et annoncée ?~~ Chargement legacy (M6) : le relief, le ciel et les bâtiments sont repris ; le décor (arbres, taches) diffère depuis le générateur PCG32 du protocole 3.
 7. **Numéro de version de départ :** `0.2.0` et protocole 2 ? Afficher le build ID ?
-8. **HKDS (serveur dédié) :** reste-t-il en UDP pur, ou faut-il prévoir SteamGameServer plus tard ?
+8. ~~**HKDS (serveur dédié) :** reste-t-il en UDP pur, ou faut-il prévoir SteamGameServer plus tard ?~~ Revenu en `edifice-server` (après M16) : le même code de jeu sans fenêtre, rendu ni son, en UDP direct, en P2P GameNetworkingSockets par le lobby et en WebRTC pour les navigateurs, aussi en image Docker (`ghcr.io/nicrf/edifice-server`) ; pas de SteamGameServer (pas de code Steam dans les builds publics). Voir `BUILD.md`, « Serveur dédié », et `server/README.md`.
 9. **Gestion de source :** faire un `git init` maintenant ? Le dossier n'est pas un dépôt, ce qui complique la baseline M0 et les petites PR de M12.

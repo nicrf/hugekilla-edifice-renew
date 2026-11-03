@@ -795,6 +795,12 @@ void Playloop()
 	}
 }
 
+//what the dedicated server sleeps between two Playloop (src/platform/dedicated.cpp)
+double PlayNextTickMs()
+{
+	return TICKMS-tickleft;
+}
+
 //Debug aid: HK_SYNCLOG=1 prints, each frame, where every player in the game is drawn,
 //on the wall clock in microseconds (the same for every process of the machine):
 //tests/net_sync.py compares where a player is with where the other game shows it

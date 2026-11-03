@@ -2,7 +2,7 @@
 """Build Edifice (HugeKilla) on macOS, Linux or Windows.
 
     python3 build.py [--config Debug|Release] [--clean] [--run] [--package] [--test]
-                     [--no-gns] [--no-webrtc] [--universal] [--web]
+                     [--no-gns] [--no-webrtc] [--universal] [--web] [--dedicated | --server]
 
 Configures into build/<os>-<config>[-gns][-universal], builds, and optionally runs
 the game or its unit tests, or packages it into dist/Edifice-<version>-<os>.(zip|tar.gz).
@@ -13,6 +13,9 @@ games this build hosts; --no-webrtc leaves that out.
 --web builds the web version instead (Emscripten: EMSDK, else build/emsdk at the
 version of release.yml) into build/web[-debug]: --run serves it on localhost,
 --package zips the site into dist/Edifice-<version>-web.zip.
+--dedicated also builds the dedicated server edifice-server (no window, renderer nor
+audio, see server/README.md) next to the game; --server builds it alone, without SDL,
+into build/<os>-<config>[-gns]-server (--run starts it).
 Python 3 stdlib only.
 """
 import argparse
@@ -240,9 +243,17 @@ def main():
                     help="macOS: one binary for Apple Silicon and Intel (macOS %s or later)" % MACOS_MIN)
     ap.add_argument("--web", action="store_true",
                     help="the web version (Emscripten, WebGL2) in build/web; --run serves it on localhost")
+    ap.add_argument("--dedicated", action="store_true",
+                    help="also build the dedicated server edifice-server (no window, renderer nor audio)")
+    ap.add_argument("--server", action="store_true",
+                    help="build the dedicated server edifice-server alone, without SDL nor a renderer")
     args, game_args = ap.parse_known_args()
     if args.web:
+        if args.dedicated or args.server:
+            die("--dedicated and --server have no web build", hint=False)
         return main_web(args)
+    if args.server and args.package:
+        die("--package is for the game; the dedicated server ships as a Docker image (server/README.md)", hint=False)
     if args.universal and OS != "macos":
         die("--universal is for macOS only", hint=False)
 
@@ -254,6 +265,8 @@ def main():
         name += "-gl"
     if args.universal:
         name += "-universal"
+    if args.server:
+        name += "-server"
     bdir = os.path.join(ROOT, "build", name)
     if args.clean:
         if os.path.isdir(bdir):
@@ -288,6 +301,8 @@ def main():
         if args.universal:
             cfg += ["-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64", "-DCMAKE_OSX_DEPLOYMENT_TARGET=" + MACOS_MIN]
         cfg += ["-DHK_RENDER_SOKOL=" + ("ON" if args.sokol else "OFF")]
+        if args.server:
+            cfg += ["-DEDIFICE_CLIENT=OFF", "-DEDIFICE_DEDICATED=ON"]
         if args.gns:
             cfg += gns_args(args, extra)
         cfg += extra
@@ -308,10 +323,19 @@ def main():
         if cache_value(bdir, "EDIFICE_WEBRTC").upper() not in (want, "1" if args.webrtc else "0"):
             run([cmake, bdir, "-DEDIFICE_WEBRTC=" + want, "-DVCPKG_MANIFEST_FEATURES=" + vcpkg_features(args)])
 
+    # --dedicated on a tree configured without it: the server target too
+    if args.dedicated and cache_value(bdir, "EDIFICE_DEDICATED").upper() not in ("ON", "1", "TRUE"):
+        run([cmake, bdir, "-DEDIFICE_DEDICATED=ON"])
+
     run([cmake, "--build", bdir, "--config", args.config, "--parallel"])
 
-    exe_dir, exe = locate_binary(bdir, args.config)
+    if args.server:
+        exe_dir, exe = locate_binary(bdir, args.config, "edifice-server")
+    else:
+        exe_dir, exe = locate_binary(bdir, args.config)
     print("Built: " + exe)
+    if args.dedicated:
+        print("Built: " + locate_binary(bdir, args.config, "edifice-server")[1])
 
     if args.test:
         run([find_ctest(cmake), "--test-dir", bdir, "-C", args.config, "--output-on-failure"])
@@ -398,13 +422,13 @@ def serve_web(bdir):
         pass
 
 
-def locate_binary(bdir, config):
-    if OS == "macos":
+def locate_binary(bdir, config, target="Edifice"):
+    if OS == "macos" and target == "Edifice":
         app = os.path.join(bdir, "Edifice.app")
         return bdir, app
     multi = os.path.join(bdir, config)   # Visual Studio / multi-config generators
     for d in (multi, bdir):
-        for name in ("Edifice.exe", "Edifice"):
+        for name in (target + ".exe", target):
             p = os.path.join(d, name)
             if os.path.isfile(p):
                 return d, p
@@ -412,7 +436,7 @@ def locate_binary(bdir, config):
 
 
 def launch(exe_dir, exe, game_args):
-    if OS == "macos":
+    if OS == "macos" and exe.endswith(".app"):
         cmd = [os.path.join(exe, "Contents", "MacOS", "Edifice")] + game_args
     else:
         cmd = [exe] + game_args

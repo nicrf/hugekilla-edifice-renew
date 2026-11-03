@@ -7,8 +7,14 @@
 # Beside a game running on this machine (or the user's settings): HK_USERDIR=<a
 # folder with copies of data/*.ini, net.ini on other ports> HK_TEST_PORT=<its
 # infosendport> tests/run_netplay_tests.sh <binary>
+# Against the dedicated server (edifice-server, or the game with --dedicated): its
+# binary in NETPLAY_SERVER, the game as <binary> for the tests that also start a game
+# client (net_props), e.g.
+#   NETPLAY_SERVER=build/linux-release/edifice-server tests/run_netplay_tests.sh build/linux-release/Edifice
+# (the server's port and settings: HK_PORT, HK_LOBBY, HK_VISIBILITY, see server/README.md)
 set -u
 BIN="$1"
+SERVER="${NETPLAY_SERVER:-$BIN}"
 LOGDIR="${2:-netplay-logs}"
 mkdir -p "$LOGDIR"
 cd "$(dirname "$0")/.."
@@ -71,13 +77,13 @@ for run in ${NETPLAY_TESTS:-net_handshake net_identity net_join net_fuzz net_voi
 		map="$(cd "$LOGDIR" && pwd)/test.map"
 		python3 tests/net_map.py --write "$map" || status=1
 		args=("$map")
-		HK_MAPFILE="$map" "$BIN" >"$log" 2>&1 &
+		HK_MAPFILE="$map" "$SERVER" >"$log" 2>&1 &
 	else
 		# these check the server's log lines
 		{ [ "$t" = net_anticheat ] || [ "$t" = net_slots ] || [ "$t" = net_authmove ] || [ "$t" = net_snapshot ] ||
 			[ "$t" = net_grenade ]; } &&
 			args=("$log")
-		"$BIN" >"$log" 2>&1 &
+		"$SERVER" >"$log" 2>&1 &
 	fi
 	pid=$!
 	echo "== $run"

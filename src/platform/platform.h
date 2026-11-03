@@ -21,6 +21,13 @@ void HKWindowSize(int *w,int *h);   //of the GL drawable, in pixels
 void GetMouseChange(int &x,int &y);
 void LockCursor(int lock);
 const char *UserFile(const char *name);   //name in the per-user settings folder
+//the per-user settings folder (userdir.cpp), with a trailing slash: the defaults of
+//data/ (control.ini, net.ini, sv.ini) are copied into it when missing. "" or never
+//set: the data folder (the working directory)
+void HKSetUserDir(const char *dir);
+const char *HKUserDir();
+//the dedicated server (dedicated.cpp): no window, no player of its own
+int HKDedicated();
 void HKMessageBox(const char *caption,const char *text,int error);   //also on stderr (system_sdl.cpp)
 
 //input from the gamepad (gamepad.cpp), down the keyboard's and the mouse's paths

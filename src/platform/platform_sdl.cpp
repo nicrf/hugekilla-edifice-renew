@@ -21,6 +21,7 @@
 #include "voice.h"
 #include "gamepad.h"
 #include "touch.h"
+#include "dedicated.h"
 #include <SDL.h>
 #include <time.h>   //time(), the seed of rand()
 #ifdef __EMSCRIPTEN__
@@ -497,63 +498,35 @@ static void HandleEvent(const SDL_Event &ev)
 
 // Game data (ini files, textures, sounds) is loaded with relative paths, so
 // run from the game data folder (data/ in the source tree).
-static char userdir[1024];
 
-// Settings the game rewrites (control.ini, net.ini, sv.ini) and screenshots live
-// in the per-user folder (SDL_GetPrefPath), never in the data folder: that keeps
-// the signed .app intact and survives updates. Defaults come from data/.
+// The settings the game rewrites live in the per-user folder (userdir.cpp):
+// SDL_GetPrefPath, or HK_USERDIR.
 static void InitUserDir()
 {
 	// Debug aid: HK_USERDIR=<folder/> keeps test runs away from the real settings
 	if (const char *dir = getenv("HK_USERDIR"))
-		snprintf(userdir, sizeof(userdir), "%s", dir);
+		HKSetUserDir(dir);
 #ifdef __EMSCRIPTEN__
 	// web: SDL's pref path is in memory; /user is the IndexedDB folder that
 	// web/pre.js mounts and loads before main()
 	else if (HKFileExists("/user"))
-		snprintf(userdir, sizeof(userdir), "/user/");
+		HKSetUserDir("/user/");
 #endif
 	else
 	{
 		char *pref = SDL_GetPrefPath("", "Edifice");
 		if (!pref)
 			return;                       // fall back to the data folder
-		snprintf(userdir, sizeof(userdir), "%s", pref);
+		HKSetUserDir(pref);
 		SDL_free(pref);
 	}
-	const char *defaults[3] = {"control.ini", "net.ini", "sv.ini"};
-	for (int i = 0; i < 3; i++)
-	{
-		char dst[1200];
-		snprintf(dst, sizeof(dst), "%s%s", userdir, defaults[i]);
-		if (HKFileExists(dst)) continue;
-		// UTF-8 user folder (SDL_GetPrefPath): not for the ANSI fopen of Windows
-		FILE *in = HKFileOpen(defaults[i], "rb");
-		FILE *out = in ? HKFileOpen(dst, "wb") : 0;
-		char buf[4096];
-		size_t n;
-		while (in && out && (n = fread(buf, 1, sizeof(buf), in)) > 0)
-			fwrite(buf, 1, n, out);
-		if (in) fclose(in);
-		if (out) fclose(out);
-	}
-}
-
-const char *UserFile(const char *name)
-{
-	static char paths[4][1200];
-	static int next;
-	if (!userdir[0]) return name;     // no user folder: data folder (working directory)
-	char *p = paths[next++ & 3];
-	snprintf(p, sizeof(paths[0]), "%s%s", userdir, name);
-	return p;
 }
 
 static void EnterDataDir(int argc, char **argv)
 {
 	const char *candidates[4] = {0, 0, 0, 0};
 	int n = 0;
-	if (argc > 1) candidates[n++] = argv[1];
+	if (argc > 1 && argv[1][0] != '-') candidates[n++] = argv[1];   // not a flag (--dedicated)
 	if (getenv("HUGEKILLA_DATA")) candidates[n++] = getenv("HUGEKILLA_DATA");
 	char *base = SDL_GetBasePath();
 	static char bundled[2048];
@@ -647,7 +620,7 @@ static void WebFrame()
 	waslocked = locked;
 
 	int writes = HKFilesWritten();
-	if (userdir[0] && writes != syncedwrites && !syncing && HKTicks() - lastsync >= 1000)
+	if (HKUserDir()[0] && writes != syncedwrites && !syncing && HKTicks() - lastsync >= 1000)
 	{
 		syncedwrites = writes;
 		syncing = 1;
@@ -774,7 +747,24 @@ static void Frame()
 
 int main(int argc, char **argv)
 {
+	// --dedicated (HK_DEDICATED=1): the dedicated server, with no window, renderer,
+	// audio nor input; SDL only for its clocks and folders (dedicated.cpp)
+	int exitcode;
+	int dedicated = DedicatedArgs(argc, argv, 0, &exitcode);
+	if (exitcode >= 0) return exitcode;
 	EnterDataDir(argc, argv);
+	if (dedicated)
+	{
+		if (SDL_Init(SDL_INIT_TIMER) != 0)
+		{
+			fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
+			return 1;
+		}
+		InitUserDir();
+		int code = DedicatedRun();
+		SDL_Quit();
+		return code;
+	}
 
 	// Windows: per-monitor DPI aware, with window sizes in scaled points like on macOS,
 	// instead of a blurry bitmap stretched by the system (before SDL_Init)

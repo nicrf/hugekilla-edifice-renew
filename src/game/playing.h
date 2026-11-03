@@ -173,6 +173,7 @@ void Playloop();
 #define TICKMS (1000.0/TICKRATE)
 #define MAXTICKSPERFRAME 15   //250 ms: beyond, the game slows down instead
 extern DWORD simtick;         //ticks simulated since the start
+double PlayNextTickMs();      //after Playloop: ms of real time left before its next tick
 //around drawing: each player between its last two ticks, then back
 void PlayDrawBegin();
 void PlayDrawEnd();

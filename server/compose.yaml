@@ -34,3 +34,46 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+
+  # The dedicated game server (server/edifice-server.Dockerfile), optional: not started
+  # by a plain "docker compose up", only with its profile:
+  #   docker compose --profile game pull && docker compose --profile game up -d
+  # Host networking: the game's UDP port (EDIFICE_GAME_PORT) and the players' own ports
+  # after it (one each with plain UDP) are the server's own, GameNetworkingSockets and
+  # WebRTC find its public address for P2P, and the lobby sees the game come from the
+  # server's public IP (through a bridge network it would see a private one, and refuse
+  # it). Open EDIFICE_GAME_PORT up to EDIFICE_GAME_PORT+33 in UDP in the firewall.
+  # The console: docker attach <container> (detach with Ctrl-P Ctrl-Q).
+  game:
+    profiles: ["game"]
+    image: ghcr.io/nicrf/edifice-server:${EDIFICE_SERVER_TAG:-latest}
+    build:
+      context: ..
+      dockerfile: server/edifice-server.Dockerfile
+    restart: unless-stopped
+    network_mode: host
+    stdin_open: true
+    stop_grace_period: 15s   # SIGTERM: the players are told, the game leaves the lobby
+    environment:
+      HK_PORT: ${EDIFICE_GAME_PORT:-27020}
+      HK_SERVER_NAME: ${EDIFICE_GAME_NAME:-Edifice dedicated server}
+      HK_MAX_PLAYERS: ${EDIFICE_GAME_MAX_PLAYERS:-16}
+      # public (listed), friends or private (joined by the game code in the log), lan
+      HK_VISIBILITY: ${EDIFICE_GAME_VISIBILITY:-public}
+      # the lobby's public HTTPS address (never http://lobby:8080: the lobby must see
+      # the server's public IP)
+      HK_LOBBY: ${EDIFICE_GAME_LOBBY:-https://edifice.rousseaufournier.com}
+      HK_MODE: ${EDIFICE_GAME_MODE:-ctf}
+      HK_MAP: ${EDIFICE_GAME_MAP:-}
+      HK_CONSOLE_RUN: ${EDIFICE_GAME_EXEC:-}
+    volumes:
+      - game-data:/var/lib/edifice   # net.ini, sv.ini, maps/
+    healthcheck:
+      test: ["CMD", "/opt/edifice/edifice-server", "--healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  game-data:

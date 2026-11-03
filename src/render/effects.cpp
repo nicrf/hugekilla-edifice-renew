@@ -92,6 +92,7 @@ static float Clamp01(float v)
 
 void FxLoadTextures()
 {
+	if(RHeadless()) return;   //the dedicated server draws nothing
 	static unsigned char px[FXTEXSIZE*FXTEXSIZE*4];
 	for(int tex=TEX_FX_GLOW;tex<=TEX_FX_BUBBLE;tex++)
 	{

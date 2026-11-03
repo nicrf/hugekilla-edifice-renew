@@ -181,13 +181,15 @@ if cookietime <= 5000:
     old, _, _, _, _ = answer(c, 0.5)
     time.sleep(2 * cookietime / 1000.0 + 0.3)
     request(c, b"Late", CAP_COOKIE, old or b"\x00" * 8)
-    fresh, slot, _, _, _ = answer(c, 0.5)
-    check(slot is None and fresh is not None and fresh != old, "expired cookie -> a new cookie, no ENTER")
-    check(players() == start + joined, "no slot for an expired cookie")
+    fresh, expiredslot, _, _, _ = answer(c, 0.5)
+    # the new cookie at once: it is valid one to two time buckets, and the INFO query
+    # of players() takes 0.6 s, enough to step over the second one now and then
     request(c, b"Late", CAP_COOKIE, fresh or b"")
     _, slot, _, _, _ = answer(c, 2.0)
+    check(expiredslot is None and fresh is not None and fresh != old, "expired cookie -> a new cookie, no ENTER")
     check(slot is not None, "then the new cookie -> ENTER")
     joined += 1
+    check(players() == start + joined, "one slot for the two requests (none for the expired cookie)")
 else:
     print("SKIP expired cookie (ac_cookietime %d ms: set HK_AC_VARS ac_cookietime=1000)" % cookietime)
 

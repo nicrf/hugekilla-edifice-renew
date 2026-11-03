@@ -19,7 +19,9 @@
 #include "lobbygame.h"
 #include "netlink.h"
 #include "hktime.h"
+#ifndef EDIFICE_HEADLESS
 #include <SDL.h>
+#endif
 
 #define MAXRECENT 5
 #define MAXLOCALLIST_UI 128     //MAXLOCALLIST in multiplay.cpp
@@ -559,6 +561,10 @@ void JoinScreenClick(int clicks)
 //returns 1 when the key was used by the join screen (all are, while it is open)
 int HandleJoinScreenKey(int sdlkey)
 {
+#ifdef EDIFICE_HEADLESS
+	(void)sdlkey;   //the dedicated server: no keyboard, nor SDL
+	return 0;
+#else
 	if(!joinscreen) return 0;
 	char *typed=tab==TAB_INTERNET?code:address;
 	char *field=focus==FOCUS_ADDRESS?typed:focus==FOCUS_NAME?playername:0;
@@ -610,12 +616,15 @@ int HandleJoinScreenKey(int sdlkey)
 		break;
 	}
 	return 1;
+#endif
 }
 
 void HandleJoinScreenText(const char *text)
 {
 	if(!joinscreen||focus==FOCUS_NONE) return;
+#ifndef EDIFICE_HEADLESS
 	if(SDL_GetModState()&(KMOD_GUI|KMOD_CTRL)) return;
+#endif
 	if(focus==FOCUS_ADDRESS)
 	{
 		char *field=tab==TAB_INTERNET?code:address;

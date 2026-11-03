@@ -170,11 +170,23 @@ jobs:
             libxkbcommon-dev libwayland-dev libasound2-dev libpulse-dev libcurl4-openssl-dev \
             xvfb libgl1-mesa-dri
 
+      # + the dedicated server (edifice-server: no window, renderer nor audio), which
+      # builds on each system too
       - name: Build (Debug, sokol_gfx) and unit tests
         shell: bash
         env:
           EDIFICE_CMAKE_ARGS: -DEDIFICE_WERROR=ON
-        run: python build.py --config Debug --no-gns --test
+        run: python build.py --config Debug --no-gns --test --dedicated
+
+      # the dedicated server with test clients, then a real game joining it (HK_JOIN):
+      # tests/net_dedicated.py (the Docker image has its own run, server-image.yml)
+      - name: Dedicated server (test clients and a game client)
+        if: matrix.name == 'linux'
+        timeout-minutes: 10
+        run: |
+          build/linux-debug/edifice-server --version
+          NET_DEDICATED_LOGS=dedicated-logs xvfb-run -a -s "-screen 0 1280x1024x24" \
+            python3 tests/net_dedicated.py build/linux-debug/edifice-server --game build/linux-debug/Edifice
 
       - name: Draw the menus and a game
         shell: bash
@@ -210,6 +222,7 @@ jobs:
           path: |
             shots
             shots-gl
+            dedicated-logs
           if-no-files-found: ignore
 
   web:

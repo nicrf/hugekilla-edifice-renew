@@ -90,6 +90,7 @@ static float Noise2(float x,float y,int period,int seed)
 
 static void MakeTextures()
 {
+	if(RHeadless()) return;   //the dedicated server draws nothing
 	static unsigned char px[PROPTEXSIZE*PROPTEXSIZE*3];
 	for(int t=0;t<4;t++)
 	{
