@@ -26,6 +26,9 @@ export HK_AUTOSTART=1 HK_SHOT=/dev/null HK_SHOT_FRAME=999999
 # anti-cheat events on stderr (roadmap M11): net_anticheat reads them, and the
 # other tests (normal play) must not trigger any check that refuses something
 export HK_ANTICHEAT_LOG=1
+# the test clients ask the server where to put their player (tests/netclient.py
+# place: since protocol 6 the server moves them, docs/M16.md)
+export HK_TESTPLACE=1
 
 status=0
 # name@N: the same test in the world of HK_SEED=N, on top of the random one
@@ -33,10 +36,10 @@ status=0
 # net_cookie@require: the same server vars plus ac_requirecookie 1 (docs/M11.md)
 # net_props@on|off: the rocks and trees that block on and off (docs/PROPS.md); the
 # other tests join as older builds (without HELLOCAP_PROPS): props 0 for them
-# net_authmove: the server moves a client from its input commands, beside a 0.7 one
-# (docs/M16.md, sv_authmove 1); net_snapshot: two clients get the others in delta
-# snapshots, beside a 0.7 one (phase 4); net_grenade: shots at a tick, grenades and
-# smoke grenades the server owns, timestamped events, beside a 0.7 one (phase 5)
+# net_authmove: the server moves a client from its input commands (docs/M16.md);
+# net_snapshot: clients get the others in delta snapshots (phase 4); net_grenade:
+# shots at a tick, grenades and smoke grenades the server owns, timestamped events
+# (phase 5)
 # NETPLAY_TESTS="net_slots net_grenade": only these
 for run in ${NETPLAY_TESTS:-net_handshake net_identity net_join net_fuzz net_voice net_voice@1 net_voice@2 \
 		net_voice@3 net_voice@10 net_voice@26 net_voice@40 net_map net_anticheat \
@@ -58,8 +61,6 @@ for run in ${NETPLAY_TESTS:-net_handshake net_identity net_join net_fuzz net_voi
 			HK_AC_VARS="$HK_AC_VARS ac_requirecookie=1"
 			args=(require)
 		fi
-	elif [ "$t" = net_authmove ] || [ "$t" = net_snapshot ] || [ "$t" = net_grenade ]; then
-		export HK_AC_VARS="$HK_AC_VARS sv_authmove=1"
 	elif [ "$run" != "$t" ]; then
 		export HK_SEED="${run#*@}"
 	fi
@@ -91,7 +92,7 @@ for run in ${NETPLAY_TESTS:-net_handshake net_identity net_join net_fuzz net_voi
 	kill "$pid" 2>/dev/null
 	wait "$pid" 2>/dev/null
 	if [ "$t" != net_anticheat ] && [ "$t" != net_fuzz ] && [ "$t" != net_slots ] && [ "$t" != net_authmove ] &&
-			grep -E "anticheat: (kill|death|fire|ammo|build|state|ip|origin|position|cmd):" "$log"; then
+			grep -E "anticheat: (kill|death|fire|ammo|build|state|ip|origin|cmd):" "$log"; then
 		echo "anti-cheat false positive during $run"
 		status=1
 	fi

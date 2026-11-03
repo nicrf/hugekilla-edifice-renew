@@ -57,7 +57,6 @@ int PlayerSlotUsed(int i);   //0: nobody has number i (a player left it, M11 pha
 void SendLandInfo(int num);
 void ApplyLand(const LandDefs *defs,const SkySettings *sky);   //builds this land, clears the blocks
 void SendSimple(char num,char type,DWORD msg,DWORD msg2);
-void SendPosition(char srcnum,char destnum);
 void ReceiveBlockBuffer(char *buf,int pnum,int len);
 void SendBlockBuffer();
 void AddBlockBuffer(char x,char y,char z,char type,char team,char top,char side,char bottom,char del);
@@ -86,7 +85,7 @@ void AcBulletTick(Object *o,Vector prev);
 int ServerDecidesHits();   //1: don't count the local player's damage (M11 phase 3a)
 void AcGrenade(Object *o);
 //movement from input commands (docs/M16.md, phases 2 and 3), called by Play() each tick.
-//Server: player i is moved by its commands (a HELLOCAP_INPUTS client, sv_authmove 1);
+//Server: player i is moved by its commands (every client once in the game);
 //NetServerMove runs this tick's (ev: the last one's), returns how many.
 //Client: the server moves us and we predict (NETSYNCMODE); NetPredictTick applies
 //this tick's command to the local player and sends it.
@@ -96,14 +95,12 @@ int NetServerMoves(int i);
 int NetServerMove(int i,float speedpenalty,MoveEvents *ev);
 int NetPredicting();
 void NetPredictTick(const MoveCmd &c,float speedpenalty,MoveEvents *ev);
-extern int sv_authmove;     //server: moves the clients that can from their commands
 //phase 4: the other players in SNAPSHOT. Server: NetTickEnd at the end of each tick
 //sends them (30 Hz). Client (NetSnapshotView: the server said so): NetSnapshotPlayers,
 //each tick, puts every other player where the snapshots have it SNAPINTERP ticks ago
 //(netsync.h); NetSnapshotDrawPos, each frame, where it is drawn (0: no data, hidden).
 //NetPlayerShown: player i has data to be drawn (on any side: not before its first
 //position, Player::nopos)
-extern int sv_snapshots;
 void NetTickEnd();
 int NetSnapshotView();
 void NetSnapshotPlayers();
@@ -113,8 +110,8 @@ int NetPlayerShown(int i);
 //them AUTHDRAWDELAY ticks back (the queue runs them by bursts with the jitter); 0: as
 //the ticks have it
 int NetServerDrawPos(int i,Vector *pos);
-//phase 5: client, the server said it rewinds our shots to the tick we drew and sends
-//TICKEVENT (NetTickEventsOn); NetNextObjId numbers a grenade we draw before the
+//phase 5: client, in the game the server rewinds our shots to the tick we drew and
+//sends TICKEVENT (NetTickEventsOn); NetNextObjId numbers a grenade we draw before the
 //server's comes; NetTickEvents, each tick, applies the events whose tick we now draw
 int NetTickEventsOn();
 int NetNextObjId();

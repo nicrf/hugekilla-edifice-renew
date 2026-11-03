@@ -1,10 +1,9 @@
-//The messages of the server-authoritative movement (docs/M16.md, phases 2 to 4):
-//the client's numbered input commands (INPUTCMD) and the server's snapshots
-//(SNAPSHOT): the exact state of the client's own player, and the other players,
-//timestamped, as a delta on one the client acked. Only between a client with
-//HELLOCAP_INPUTS (HELLOCAP_SNAPSHOTS) and a server that said it moves it
-//(NETSYNCMODE). Apart from netmsg.h, on wire.h alone, so tests/wire_test.cpp and
-//the movement code use them without the game.
+//The messages of the server-authoritative movement (docs/M16.md, protocol 6): the
+//client's numbered input commands (INPUTCMD) and the server's snapshots (SNAPSHOT):
+//the exact state of the client's own player, and the other players, timestamped, as
+//a delta on one the client acked; the shots at the tick seen and the events at a
+//tick (phase 5). Apart from netmsg.h, on wire.h alone, so tests/wire_test.cpp and the
+//movement code use them without the game.
 
 #ifndef NETSYNCH
 #define NETSYNCH
@@ -13,11 +12,9 @@
 
 #define INPUTCMD 21   //client to server, unreliable, every tick
 #define SNAPSHOT 22   //server to client, unreliable, 30 Hz
-//SIMPLE message: msg = the HELLOCAP_* sync bits the server applies to this client
-//(HELLOCAP_INPUTS: it moves the client's player from its commands;
-//HELLOCAP_SNAPSHOTS: the others come in SNAPSHOT, no PLAYERPOSITION), msg2 = the
-//server's tick. At the join and when sv_authmove changes; only to clients with
-//HELLOCAP_INPUTS.
+//SIMPLE message, at the join: the client is in the game, the server moves it from its
+//commands from now on and sends it SNAPSHOT and TICKEVENT; msg 0, msg2 = the server's
+//tick
 #define NETSYNCMODE 41
 
 //one tick of a player's input
@@ -123,8 +120,7 @@ template<class IO> inline void SyncSyncState(IO &io,SyncState &s)
 
 //SNAPSHOT: uint8 type, uint32 tick (the server's), uint32 basetick (0: complete),
 //uint32 lastcmd (this client's last command run), uint8 self (1: the exact state of
-//its player follows, SYNCSTATESIZE bytes), uint8 n (other players: phase 4, below;
-//0 to a client without HELLOCAP_SNAPSHOTS)
+//its player follows, SYNCSTATESIZE bytes), uint8 n (other players: phase 4, below)
 struct SnapshotMessage
 {
 	char type;
@@ -460,11 +456,9 @@ inline int SnapSample(const SnapRing *r,int pnum,uint32_t tick,float frac,SnapSt
 }
 
 //---- phase 5: shots at the tick seen, predicted grenades, timestamped events ----
-//(only between a client with HELLOCAP_TICKEVENTS and a server whose NETSYNCMODE
-//says so, with HELLOCAP_SNAPSHOTS)
 
-//FIREGUN and THROWSMOKE from such a client: the FIREGUN bytes (FIREGUNSIZE,
-//netmsg.h), then FIRETICKSIZE more, which older servers don't read:
+//FIREGUN and THROWSMOKE from a client: the FIREGUN bytes (FIREGUNSIZE, netmsg.h),
+//then FIRETICKSIZE more (the server refuses a shot without them):
 //  uint32 viewtick, uint8 viewfrac  the moment it drew the others when it shot (the
 //                                   server's tick and 1/256: phase 4's render time)
 //  uint32 cmd                       its last command applied: it shot from there
@@ -500,7 +494,7 @@ inline int ReadFireTick(const void *buf,int len,FireTick *t)
 	return r.Ok();
 }
 //FIREGUN relayed by the server (a shot of someone else): the FIREGUN bytes, then
-//uint32 tick, the server's tick of the shot (older clients read FIREGUNSIZE bytes)
+//uint32 tick, the server's tick of the shot
 #define FIRERELAYSIZE 4
 inline int ReadFireRelayTick(const void *msg,int len,uint32_t *tick)
 {

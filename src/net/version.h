@@ -24,10 +24,12 @@
 #ifndef EDIFICE_VERSION_STRING
 #define EDIFICE_VERSION_STRING "dev"
 #endif
-#define EDIFICE_PROTOCOL_VERSION 5   // 1 = original game, no version sent
+#define EDIFICE_PROTOCOL_VERSION 6   // 1 = original game, no version sent
                                      // 2 = version handshake; 3 = PCG32 world (worldrandom.h)
                                      // 4 = explicit serialization (wire.h), no raw structs
                                      // 5 = VOICE message (proximity voice chat, voicemsg.h)
+                                     // 6 = the server moves the players (M16, docs/M16.md):
+                                     //     INPUTCMD, SNAPSHOT, TICKEVENT, no PLAYERPOSITION
 #define EDIFICE_NET_MAGIC 0x31564445u // "EDV1", start of the version trailer
 // Layout field of the trailer. Up to protocol 3 it was a hash of the sizes of the
 // structs sent raw; since 4 nothing is sent raw, so it is this constant and is
@@ -48,9 +50,9 @@ struct PeerVersion
 	char version[16];
 };
 
-// Capabilities (M11 phases 2, 3a and 3b, docs/M11.md; props, docs/PROPS.md; M16,
-// docs/M16.md), still protocol 5. After the version trailer, where builds before them
-// stop reading; the second byte (bits 256 and up) after what the 0.7 builds read:
+// Capabilities (M11 phases 2, 3a and 3b, docs/M11.md; props, docs/PROPS.md). After the
+// version trailer; a second byte (bits 256 and up, none yet: protocol 5's HELLOCAP_INPUTS,
+// SNAPSHOTS and TICKEVENTS of M16 are protocol 6 itself) after the cookie:
 //   REQUESTENTER: ... trailer | uint8 caps | cookie[HELLOCOOKIE_SIZE] if caps & HELLOCAP_HASCOOKIE | uint8 caps2
 //   INFO:         ... trailer | 4 bytes of details | uint8 caps | uint8 caps2
 #define HELLOCAP_COOKIE 1        // REQUESTENTER: the client answers ENTERCOOKIE; INFO: the server sends it
@@ -60,23 +62,13 @@ struct PeerVersion
                                  // decides hits (ac_serverhits, M11 phase 3a)
 #define HELLOCAP_STABLESLOTS 16  // REQUESTENTER: the client understands PLAYERLEFT_KEEPSLOTS (DELETEPLAYER
                                  // without renumbering, M11 phase 3b); INFO: the server keeps slots
-#define HELLOCAP_POSSEQ 32       // REQUESTENTER: its PLAYERPOSITIONs end with a uint16 sequence number
-                                 // (POSITIONSEQSIZE, netmsg.h); the server drops those without one
+                                 // 32: HELLOCAP_POSSEQ until protocol 5 (numbered PLAYERPOSITIONs)
 #define HELLOCAP_PROPS 64        // REQUESTENTER: the client has the rocks and trees that block (props.h,
                                  // docs/PROPS.md) and obeys PROPSMODE; INFO: the server has them on
                                  // (sv.ini props) and refuses clients without this bit
 #define HELLOCAP_SMOKE 128       // REQUESTENTER: the client draws smoke grenades (SMOKECLOUD server objects,
                                  // smoke.h) and may throw them (THROWSMOKE); INFO: the server has them.
                                  // Clients without it never get a smoke object (an empty slot)
-#define HELLOCAP_INPUTS 256      // REQUESTENTER: the client sends numbered input commands (INPUTCMD) and
-                                 // predicts its own player from the server's state; INFO: the server
-                                 // moves such players itself (sv_authmove, M16 phases 2 and 3)
-#define HELLOCAP_SNAPSHOTS 512   // REQUESTENTER: the client reads the other players from SNAPSHOT (deltas,
-                                 // acked in INPUTCMD) and draws them in the past; INFO: the server sends
-                                 // them (sv_snapshots) instead of PLAYERPOSITION (M16 phase 4)
-#define HELLOCAP_TICKEVENTS 1024 // REQUESTENTER: its shots say which tick it saw the others at (FIREGUN +
-                                 // FireTick, netsync.h), it predicts its grenades and reads TICKEVENT;
-                                 // INFO: the server rewinds to that tick and sends them (M16 phase 5)
 #define HELLOCOOKIE_SIZE 8
 #define HELLOCAPS_MAX (2+HELLOCOOKIE_SIZE)
 

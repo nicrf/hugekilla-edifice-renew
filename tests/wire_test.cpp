@@ -172,32 +172,30 @@ int main()
 		CHECK(WriteSnapshotSelf(sb,sizeof(sb),&s)==SNAPSHOTSELFSIZE-SYNCSTATESIZE);
 	}
 	// the second capability byte (version.h): after the cookie, or after caps;
-	// absent (a 0.7 build): 0
+	// absent: 0. No bit of it is in use (protocol 6): CAP2 and CAP2B stand for them
 	{
+		const int CAP2=256,CAP2B=1024;
 		char hello[VERSIONTRAILER_MAX+HELLOCAPS_MAX];
 		int t=WriteVersionTrailer(hello);
 		const unsigned char cookie[HELLOCOOKIE_SIZE]={1,2,3,4,5,6,7,8};
-		int c=WriteHelloCaps(hello+t,HELLOCAP_COOKIE|HELLOCAP_INPUTS,cookie);
-		CHECK(c==2+HELLOCOOKIE_SIZE&&(unsigned char)hello[t+c-1]==HELLOCAP_INPUTS>>8);
+		int c=WriteHelloCaps(hello+t,HELLOCAP_COOKIE|CAP2,cookie);
+		CHECK(c==2+HELLOCOOKIE_SIZE&&(unsigned char)hello[t+c-1]==CAP2>>8);
 		HelloCaps caps;
 		ReadHelloCaps(hello,t+c,&caps);
-		CHECK(caps.caps==(HELLOCAP_COOKIE|HELLOCAP_HASCOOKIE|HELLOCAP_INPUTS)&&caps.cookie[7]==8);
-		ReadHelloCaps(hello,t+c-1,&caps);   //0.7: the cookie and nothing after
+		CHECK(caps.caps==(HELLOCAP_COOKIE|HELLOCAP_HASCOOKIE|CAP2)&&caps.cookie[7]==8);
+		ReadHelloCaps(hello,t+c-1,&caps);   //the cookie and nothing after
 		CHECK(caps.caps==(HELLOCAP_COOKIE|HELLOCAP_HASCOOKIE));
 		ReadHelloCaps(hello,t+5,&caps);     //cut in the cookie: neither it nor caps2
 		CHECK(caps.caps==HELLOCAP_COOKIE);
-		c=WriteHelloCaps(hello+t,HELLOCAP_SMOKE|HELLOCAP_INPUTS,0);
+		c=WriteHelloCaps(hello+t,HELLOCAP_SMOKE|CAP2,0);
 		CHECK(c==2);
 		ReadHelloCaps(hello,t+c,&caps);
-		CHECK(caps.caps==(HELLOCAP_SMOKE|HELLOCAP_INPUTS));
+		CHECK(caps.caps==(HELLOCAP_SMOKE|CAP2));
 		ReadHelloCaps(hello,t+1,&caps);
 		CHECK(caps.caps==HELLOCAP_SMOKE);
-		c=WriteHelloCaps(hello+t,HELLOCAP_INPUTS|HELLOCAP_SNAPSHOTS,0);
+		c=WriteHelloCaps(hello+t,CAP2|CAP2B,0);
 		ReadHelloCaps(hello,t+c,&caps);
-		CHECK(c==2&&caps.caps==(HELLOCAP_INPUTS|HELLOCAP_SNAPSHOTS));
-		c=WriteHelloCaps(hello+t,HELLOCAP_INPUTS|HELLOCAP_SNAPSHOTS|HELLOCAP_TICKEVENTS,0);   //phase 5
-		ReadHelloCaps(hello,t+c,&caps);
-		CHECK(c==2&&(unsigned char)hello[t+1]==7&&caps.caps==(HELLOCAP_INPUTS|HELLOCAP_SNAPSHOTS|HELLOCAP_TICKEVENTS));
+		CHECK(c==2&&(unsigned char)hello[t+1]==5&&caps.caps==(CAP2|CAP2B));
 	}
 	// phase 4: a player's state through the wire (SnapPack, SnapUnpack)
 	{

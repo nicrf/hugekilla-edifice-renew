@@ -1,17 +1,14 @@
-"""The other players in timestamped delta snapshots (docs/M16.md, phase 4):
-    HK_ANTICHEAT_LOG=1 HK_AC_VARS="props=0 sv_authmove=1" HK_AUTOSTART=1 <Edifice binary> 2>server.log &
+"""The other players in timestamped delta snapshots (docs/M16.md, phase 4; protocol 6):
+    HK_ANTICHEAT_LOG=1 HK_AC_VARS="props=0" HK_TESTPLACE=1 HK_AUTOSTART=1 <Edifice binary> 2>server.log &
     python3 tests/net_snapshot.py server.log
-Three clients join a local server: two announce HELLOCAP_INPUTS and
-HELLOCAP_SNAPSHOTS (the second capability byte), send input commands and ack the
-newest SNAPSHOT they have in them (INPUTCMD acksnap); one is a 0.7 build that sends
-its positions (PLAYERPOSITION), in the same game.
- - The new clients are told so (NETSYNCMODE 256|512); after that they get no
-   PLAYERPOSITION, the old one still does (of the new ones too).
+Two clients join a local server, send input commands and ack the newest SNAPSHOT
+they have in them (INPUTCMD acksnap).
+ - They are told they are in the game (NETSYNCMODE).
  - SNAPSHOT at 30 Hz: complete (basetick 0) until the client acks one, then deltas
    on the newest it acked; never its own player in it.
- - The old client is in them where it says it is; each new one sees the other where
-   the server has it (the other's own exact state of the same tick, to the
-   quantization: the velocity of a fall too, no longer wrapped on a char).
+ - Each sees the other where the server has it (the other's own exact state of the
+   same tick, to the quantization: the velocity of a fall too, no longer wrapped on a
+   char), and where the server put it when it asked (HK_TESTPLACE).
  - An ack held back: deltas on it while the server keeps it (32 snapshots), then
    complete ones; an ack of 0 (the client lost its snapshots): complete ones; acks
    again: deltas again.
@@ -19,11 +16,10 @@ The server log (its stderr) must show no anti-cheat event."""
 import math, os, socket, struct, sys, time
 
 SERVER = ("127.0.0.1", int(os.environ.get("HK_TEST_PORT", "27020")))
-REQUESTENTER, INFO, PLAYERPOSITION, SIMPLE = 1, 2, 3, 5
+REQUESTENTER, INFO, PLAYERPOSITION, SIMPLE, CHATMESSAGE = 1, 2, 3, 5, 8
 INPUTCMD, SNAPSHOT = 21, 22
 REQUESTINFO, ENTER, PORTACK, JOINGAME, PING, PINGREPLY = 1, 2, 4, 8, 12, 13
 NETSYNCMODE = 41
-HELLOCAP_INPUTS, HELLOCAP_SNAPSHOTS = 256, 512
 MOVEKEY_UP, MOVECMD_ALIVE = 1, 1
 RELIABLE, LASTRELIABLE, ACK = 0xFF, 0xFE, 0xFD
 LANDGRIDSIZE = 512
@@ -250,20 +246,16 @@ def pump(wait):
         time.sleep(0.003)
 
 
-nextold = [0]
 
 
-def play(secs, movers, old, oldpos, **kw):
-    """the new clients send a command a tick (acking), the old one its position every 70 ms"""
+def play(secs, movers, **kw):
+    """the clients send a command a tick (acking)"""
     start = time.time()
     ticks = 0
     while time.time() - start < secs:
         for cl in movers:
             cl.tick(**kw)
         ticks += 1
-        if time.time() >= nextold[0]:
-            old.send(position(*oldpos))
-            nextold[0] = time.time() + 0.07
         pump(max(0, start + ticks * TICK - time.time()))
 
 
@@ -286,30 +278,22 @@ t = info[2 + info[1] + 1:]
 _, proto, layout, vlen = struct.unpack_from("<IHIB", t, 0)
 trailer = t[:11 + vlen]
 caps = t[11 + vlen + 4:]
-check(len(caps) >= 2 and caps[1] & (HELLOCAP_SNAPSHOTS >> 8), "INFO announces HELLOCAP_SNAPSHOTS in its second byte")
+check(proto == 6, "INFO says protocol 6 (%d)" % proto)
 
-caps2 = bytes([0, (HELLOCAP_INPUTS | HELLOCAP_SNAPSHOTS) >> 8])
-a, b, old = Client(b"Alpha", True), Client(b"Bravo", True), Client(b"Oldie", False)
-for cl, tr in ((a, trailer + caps2), (old, trailer), (b, trailer + caps2)):
-    if not cl.join(tr, clients):
+a, b = Client(b"Alpha", True), Client(b"Bravo", True)
+for cl in (a, b):
+    if not cl.join(trailer + bytes([0]), clients):
         print("FAIL: %s could not join" % cl.name.decode()); sys.exit(1)
     clients.append(cl)
-print("Alpha in slot %d, Oldie in slot %d, Bravo in slot %d" % (a.slot, old.slot, b.slot))
+print("Alpha in slot %d, Bravo in slot %d" % (a.slot, b.slot))
 pump(1.0)
-both = HELLOCAP_INPUTS | HELLOCAP_SNAPSHOTS
-check(a.syncmode == both and b.syncmode == both, "the new clients get the others in snapshots (NETSYNCMODE %s, %s)" % (a.syncmode, b.syncmode))
-check(old.syncmode is None, "the old client isn't told anything")
+check(a.syncmode is not None and b.syncmode is not None, "both are in the game (NETSYNCMODE)")
 
 # dead a moment, then alive: the server puts them somewhere, they fall
-oldpos = (700.0, 60.0, 700.0)
-play(0.5, (a, b), old, oldpos, alive=False)
+play(0.5, (a, b), alive=False)
 first = [x for x in a.log if x[2]]
 check(first and first[0][1] == 0, "the first snapshot with others in it is complete (basetick %s)" % (first and first[0][1]))
-for cl in (a, b, old):
-    cl.positions = 0
-play(3, (a, b), old, oldpos)
-check(a.positions == 0 and b.positions == 0, "no PLAYERPOSITION to the new clients (%d, %d)" % (a.positions, b.positions))
-check(old.positions > 20, "the old client still gets them (%d)" % old.positions)
+play(3, (a, b))
 
 # 30 Hz, deltas on what was acked, never itself
 recent = [x for x in a.log if newer(x[0], a.log[-1][0] - 120)]
@@ -325,11 +309,6 @@ check(all(a.slot not in p for p in a.recv.values()) and all(b.slot not in p for 
 check(a.nobase == 0 and b.nobase == 0, "never a base it lacks (%d, %d)" % (a.nobase, b.nobase))
 
 # where the others are
-tick = a.newest
-seenold = a.recv[tick].get(old.slot)
-check(seenold and seenold["state"] == 10 and
-      wrapdist((seenold["x"] / 128, 0, seenold["z"] / 128), (oldpos[0], 0, oldpos[2])) < 1.5,
-      "the old client is in them where it says it is, on the ground the server has there (%s)" % str(seenold and (seenold["x"] / 128, seenold["y"] / 64, seenold["z"] / 128)))
 same = [t for t in b.history if t in a.own and a.slot in b.history[t]]
 worst, fall = 0, 0
 for t in same:
@@ -342,14 +321,18 @@ check(len(same) > 30 and worst < 0.02,
       "each sees the other where the server has it, velocity too (%d ticks, %.4f off at most)" % (len(same), worst))
 sawfall = [b.history[t][a.slot]["vy"] / 1024 for t in same if a.own[t][4] < -1]
 check(all(v < -1 for v in sawfall), "a fall is seen falling (down to %.2f units a step)" % fall)
-seennew = old.pos.get(a.slot)
-check(seennew and wrapdist(seennew, a.own[max(a.own, key=lambda x: x)][0:3]) < 3,
-      "the old client sees the new one (PLAYERPOSITION from the server's state)")
+# put somewhere by the server (HK_TESTPLACE): seen there, falling from there
+place = b"/place 700 120 700"
+a.send(struct.pack("<BBBH", CHATMESSAGE, 0, 0, len(place)) + place)
+play(0.6, (a, b))
+seenat = b.recv[b.newest].get(a.slot)
+check(seenat and wrapdist((seenat["x"] / 128, 0, seenat["z"] / 128), (700, 0, 700)) < .5,
+      "put at 700, 700 by the server, the other sees it there (%s)" % str(seenat and (seenat["x"] / 128, seenat["z"] / 128)))
 
 # an ack held back: deltas on it while the server has it, then complete ones
 a.log = []
 a.holdack = a.newest
-play(1.6, (a, b), old, oldpos, keys=MOVEKEY_UP)
+play(1.6, (a, b), keys=MOVEKEY_UP)
 on = [x for x in a.log if x[1] == a.holdack]
 full = [x for x in a.log if x[1] == 0]
 check(len(on) >= SNAPRING - 6 and len(on) <= SNAPRING and full and min(x[0] for x in full) == max(x[0] for x in on) + 2,
@@ -357,11 +340,11 @@ check(len(on) >= SNAPRING - 6 and len(on) <= SNAPRING and full and min(x[0] for 
 # an ack of 0: it has nothing, complete ones
 a.log = []
 a.holdack = 0
-play(0.3, (a, b), old, oldpos)
+play(0.3, (a, b))
 check(a.log and all(x[1] == 0 for x in a.log[3:]), "ack 0: complete snapshots (%d)" % len(a.log))
 a.holdack = None
 a.log = []
-play(0.5, (a, b), old, oldpos)
+play(0.5, (a, b))
 check(a.log and all(x[1] for x in a.log[4:]), "acking again: deltas again")
 check(a.nobase == 0, "never a base it lacks")
 

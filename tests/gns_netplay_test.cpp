@@ -2,8 +2,9 @@
 // uses them, against a real server started with HK_AUTOSTART=1 HK_TRANSPORT=gns.
 // Two clients join the way tests/net_join.py and net_voice.py do over UDP: INFO,
 // REQUESTENTER/ENTER, PORTACK, player names, LANDINFO and the blocks (reliable
-// transfers), JOINGAME. Then they play next to the host: positions relayed, the voice
-// frames of one relayed to the other, the host's own voice (HK_VOICE_TEST_TONE +
+// transfers), JOINGAME. Then they play next to the host (their input commands, put
+// there by the server's HK_TESTPLACE): each other in the snapshots, the voice frames
+// of one relayed to the other, the host's own voice (HK_VOICE_TEST_TONE +
 // HK_VOICE_AUTOTALK) sent to both. Every connection must be encrypted.
 // A client has one connection per server address: the second one names the server
 // with another info port (the connection goes to gnsport all the same).
@@ -18,6 +19,7 @@
 #include "land.h"
 #include "multiplaystruct.h"
 #include "netmsg.h"
+#include "netsync.h"
 #include "gnslink.h"
 #include "version.h"
 
@@ -51,11 +53,6 @@ static int Encrypted(unsigned int conn)
 		!(info.m_nFlags&k_nSteamNetworkConnectionInfoFlags_Unencrypted);
 }
 
-static int Quantize(float v)
-{
-	return (int)(v/LANDGRIDSIZE*65536)&0xffff;
-}
-
 struct Client
 {
 	const char *name;
@@ -67,7 +64,8 @@ struct Client
 	int names,landinfo,blocks,joined;
 	int hostknown;
 	float hostpos[3];
-	int sawpositionof[MAXPLAYERS];
+	int sawpositionof[MAXPLAYERS];   //in a snapshot
+	unsigned int cmd;                //the next input command's number
 	int voices[MAXPLAYERS];    //VOICE frames received, per player
 	int intact[MAXPLAYERS];    //...whose content was as sent (seq 100+k: 40 bytes 0x40+k)
 };
@@ -174,14 +172,21 @@ static void Handle(Client &c,const Message &msg,int len)
 	case BLOCKS:
 		c.blocks++;
 		break;
-	case PLAYERPOSITION:
-		if(len<16||m[1]>=MAXPLAYERS) break;
-		c.sawpositionof[m[1]]=1;
-		if(m[1]==0)
+	case SNAPSHOT:
 		{
-			c.hostknown=1;
-			for(int i=0;i<3;i++)
-				c.hostpos[i]=WireGetU16(&m[7+2*i])*(float)LANDGRIDSIZE/65536;
+			//complete ones: we never ack any (INPUTCMD acksnap 0)
+			static SnapshotMessage sm;
+			static SnapPlayers players;
+			if(!ReadPlayerSnapshot(&msg,len,&sm,&players,0)) break;
+			for(int i=0;i<SNAPMAXPLAYERS;i++)
+				if(players.p[i].in) c.sawpositionof[i]=1;
+			if(players.p[0].in)
+			{
+				SnapState st;
+				SnapUnpack(players.p[0],&st);
+				c.hostknown=1;
+				for(int i=0;i<3;i++) c.hostpos[i]=st.pos[i];
+			}
 		}
 		break;
 	case VOICE:
@@ -229,17 +234,33 @@ static int Join(Client &c)
 	return c.joined;
 }
 
-static void Position(Client &c,float x,float y,float z)
+//a tick of input: alive, no key (the server moves us, protocol 6)
+static void Command(Client &c)
 {
-	unsigned char p[16];
-	memset(p,0,sizeof(p));
-	p[0]=PLAYERPOSITION;
-	p[4]=10;   //state: playing
-	p[5]=p[6]=128;
-	WirePutU16(&p[7],Quantize(x));
-	WirePutU16(&p[9],Quantize(y));
-	WirePutU16(&p[11],Quantize(z));
-	c.datasock->Send(p,sizeof(p));
+	InputCmdMessage in;
+	memset(&in,0,sizeof(in));
+	in.type=INPUTCMD;
+	in.n=1;
+	in.firstcmd=c.cmd++;
+	in.cmd[0].flags=MOVECMD_ALIVE;
+	in.cmd[0].msec=17;
+	char buf[INPUTCMDHEADER+MOVECMDSIZE];
+	int n=WriteInputCmd(buf,sizeof(buf),&in);
+	if(n) c.datasock->Send(buf,n);
+}
+
+//the server puts our player at x y z (HK_TESTPLACE: a chat line)
+static void Place(Client &c,float x,float y,float z)
+{
+	char text[80];
+	int n=snprintf(text,sizeof(text),"/place %.2f %.2f %.2f",x,y,z);
+	unsigned char m[5+80];
+	m[0]=CHATMESSAGE;
+	m[1]=CMSG_BROADCAST;
+	m[2]=0;
+	WirePutU16(&m[3],n);
+	memcpy(&m[5],text,n);
+	c.datasock->SendReliable(m,5+n,0);
 }
 
 static void Voice(Client &c,int seq)
@@ -272,22 +293,27 @@ int main(int argc,char **argv)
 	Check(a.slot!=b.slot,"two slots");
 	if(failures) return 1;
 
-	//play: next to the host, both send their position, Alice talks
+	//play: alive (input commands), next to the host, Alice talks
+	a.cmd=b.cmd=1000;
 	for(DWORD start=HKTicks();HKTicks()-start<5000&&!a.hostknown;)
 	{
+		Command(a);
+		Command(b);
 		Pump(a);
 		Pump(b);
-		Wait(10);
+		Wait(16);
 	}
-	Check(a.hostknown,"Alice gets the host's position");
+	Check(a.hostknown,"Alice gets the host's position (SNAPSHOT)");
+	float *h=a.hostpos;
+	Place(a,h[0]+2,h[1],h[2]);
+	Place(b,h[0]+3,h[1],h[2]);
 	memset(a.voices,0,sizeof(a.voices));
 	memset(b.voices,0,sizeof(b.voices));
 	memset(b.intact,0,sizeof(b.intact));
 	for(int k=0;k<60;k++)
 	{
-		float *h=a.hostpos;
-		Position(a,h[0]+2,h[1],h[2]);
-		Position(b,h[0]+3,h[1],h[2]);
+		Command(a);
+		Command(b);
 		if(k>=20&&k<50) Voice(a,100+k-20);
 		Pump(a);
 		Pump(b);
@@ -299,7 +325,7 @@ int main(int argc,char **argv)
 		Pump(b);
 		Wait(10);
 	}
-	Check(b.sawpositionof[a.slot],"Bob gets Alice's position");
+	Check(b.sawpositionof[a.slot],"Bob gets Alice's position (SNAPSHOT)");
 	int fromalice=b.voices[a.slot],fromhost=b.voices[0],fromhosta=a.voices[0];
 	char text[200];
 	snprintf(text,sizeof(text),"Bob hears Alice: %d/30 frames, %d intact",fromalice,b.intact[a.slot]);

@@ -45,8 +45,6 @@ struct ServerVars
 	int capturelimit;
 	int timelimit;
 	int gamemode;
-
-	int positionresendtime;
 };
 
 struct Player

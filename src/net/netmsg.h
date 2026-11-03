@@ -27,35 +27,6 @@ template<class IO> inline void SyncVec(IO &io,Vector &v)
 inline int Write##name(void *buf,int size,T *s) { ByteWriter w(buf,size); Sync##name(w,*s); return w.Ok()?w.Size():0; } \
 inline int Read##name(const void *buf,int len,T *s) { ByteReader r(buf,len); Sync##name(r,*s); return r.Ok(); }
 
-//PLAYERPOSITION, 16 bytes
-template<class IO> inline void SyncPosition(IO &io,PlayerPosition &p)
-{
-	io.i8(p.type);
-	io.i8(p.pnum);
-	io.i8(p.weapon);
-	io.i8(p.keys);
-	io.i8(p.state);
-	io.u8(p.fwd);
-	io.u8(p.tilt);
-	io.u16(p.posx);
-	io.u16(p.posy);
-	io.u16(p.posz);
-	io.i8(p.velx);
-	io.i8(p.vely);
-	io.i8(p.velz);
-}
-WIREPAIR(Position,PlayerPosition)
-#define POSITIONSIZE 16
-//from a client with HELLOCAP_POSSEQ (M11 phase 3b): + uint16 sequence number,
-//one more for each position it sends. Older servers read the first 16 bytes only.
-#define POSITIONSEQSIZE (POSITIONSIZE+2)
-//the sequence number of a position, -1 if it has none
-inline int ReadPositionSeq(const void *buf,int len)
-{
-	if(len<POSITIONSEQSIZE) return -1;
-	return WireGetU16((const unsigned char *)buf+POSITIONSIZE);
-}
-
 //FIREGUN, 27 bytes
 template<class IO> inline void SyncFireGun(IO &io,FireGunDirection &f)
 {
@@ -171,11 +142,10 @@ template<class IO> inline void SyncServerVars(IO &io,ServerVarsMessage &m)
 	io.i32(v.capturelimit);
 	io.i32(v.timelimit);
 	io.i32(v.gamemode);
-	io.i32(v.positionresendtime);
 }
 WIREPAIR(ServerVars,ServerVarsMessage)
-#define SERVERVARSSIZE (1+46*4)
-static_assert(sizeof(ServerVars)==46*4,"ServerVars changed: update SyncServerVars and bump the protocol");
+#define SERVERVARSSIZE (1+45*4)
+static_assert(sizeof(ServerVars)==45*4,"ServerVars changed: update SyncServerVars and bump the protocol");
 
 //REMOTEGAMEDATA: type, int32 gamestate
 struct RemoteGameDataMessage

@@ -7,7 +7,7 @@
 //main messages
 #define REQUESTENTER 1
 #define INFO 2
-#define PLAYERPOSITION 3
+//3 was PLAYERPOSITION, until protocol 5 (M16: the server moves the players)
 #define LANDINFO 4
 #define CONSOLEMESSAGE 6
 #define BLOCKS 7
@@ -91,18 +91,6 @@ struct LandInfo
 	SkySettings skysets;
 };
 
-
-struct PlayerPosition
-{
-	char type;
-	char pnum;
-	char weapon;
-	char keys;
-	char state;
-	unsigned char fwd,tilt;
-	WORD posx,posy,posz;
-	char velx,vely,velz;
-};
 
 struct FireGunDirection
 {

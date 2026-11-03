@@ -11,7 +11,8 @@ import os, socket, struct, sys, time
 # HK_TEST_PORT: a server on another info port than the default 27020
 SERVER = ("127.0.0.1", int(os.environ.get("HK_TEST_PORT", "27020")))
 SIMPLE, INFO, REQUESTENTER, CHATMESSAGE, BLOCKS = 5, 2, 1, 8, 7
-PLAYERPOSITION, KILLEDPOSITION, UPDATESERVEROBJECT, VOICE = 3, 14, 12, 16
+KILLEDPOSITION, UPDATESERVEROBJECT, VOICE, FIREGUN, THROWSMOKE = 14, 12, 16, 10, 20
+INPUTCMD = 21
 REQUESTINFO, ENTER, CREDITS, RECEIVEDLANDINFO = 1, 2, 24, 5
 RELIABLE, LASTRELIABLE, ACK = 0xFF, 0xFE, 0xFD
 MAGIC = 0x31564445
@@ -109,7 +110,14 @@ attacks = [
     ("chat with length 60000", packet(bytes([CHATMESSAGE, 0, 0]) + struct.pack("<H", 60000) + b"D" * 50)),
     ("BLOCKS claiming 4 billion blocks", packet(bytes([BLOCKS]) + struct.pack("<I", 0xFFFFFFFF) + b"\x01" * 18)),
     ("killed position with killer 200", packet(bytes([KILLEDPOSITION, 1, 200]) + b"\x00" * 13)),
-    ("position for player 120", packet(bytes([PLAYERPOSITION, 120, 50, 0, 10]) + b"\x00" * 13)),
+    ("a protocol 5 position (type 3, no longer one)", packet(bytes([3, 120, 50, 0, 10]) + b"\x00" * 13)),
+    ("input commands, n 200", packet(bytes([INPUTCMD, 200]) + b"\x01" * 40)),
+    ("input commands cut short", packet(bytes([INPUTCMD, 4]) + struct.pack("<II", 7, 0) + b"\x02" * 15)),
+    ("input commands with NaN-free garbage", packet(bytes([INPUTCMD, 4]) + struct.pack("<II", 0xFFFFFFF0, 0xFFFFFFFF) + b"\xff" * 40)),
+    ("a shot without its tick", packet(bytes([FIREGUN, 0, 0]) + b"\x00" * 24)),
+    ("a shot at a tick 4 billion ago", packet(bytes([FIREGUN, 0, 0]) + struct.pack("<6f", 0, 0, 1, 1e30, 1e30, 1e30) +
+                                              struct.pack("<IBIH", 1, 255, 0xFFFFFFFF, 0xFFFF))),
+    ("a smoke grenade cut in its tick", packet(bytes([THROWSMOKE, 0, 0]) + b"\x00" * 24 + b"\x01\x02")),
     ("fake RECEIVEDLANDINFO", packet(simple(RECEIVEDLANDINFO))),
     ("kill credited to player 4000", packet(simple(19, 0, 4000))),
     ("team 77", packet(simple(20, 0, 77))),

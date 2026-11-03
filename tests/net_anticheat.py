@@ -1,240 +1,65 @@
-"""Anti-cheat checks of the server (roadmap M11 phases 1 and 3a, docs/M11.md):
-    HK_ANTICHEAT_LOG=1 HK_AUTOSTART=1 <Edifice binary> 2>server.log &
+"""Anti-cheat checks of the server (roadmap M11 phases 1 and 3a, docs/M11.md), protocol 6:
+    HK_ANTICHEAT_LOG=1 HK_TESTPLACE=1 HK_AUTOSTART=1 <Edifice binary> 2>server.log &
     python3 tests/net_anticheat.py server.log
-Three clients join a local server like net_voice.py, as builds before phase 3a
-(they count their own damage); a fourth announces HELLOCAP_SERVERHITS.
+Clients of protocol 6 (tests/netclient.py: input commands, the server moves them,
+HK_TESTPLACE puts them where the test wants). Three join without
+HELLOCAP_SERVERHITS (they would count their own damage); a fourth announces it.
  - A victim of the other team is shot at point blank and never sends KILLED:
-   the server kills it itself (KILLED to everyone, the victim too), keeps it
-   dead (state 11 relayed, its shots dropped) whatever it reports.
+   the server kills it itself (TE_KILLED to everyone, the victim too), keeps it
+   dead (state 11 in the snapshots, its shots dropped) whatever its commands say.
  - A flood of KILLED / KILLEDPOSITION from one client: one death counted, not
    credited to the player it blames (the server never saw it hit).
  - Shots faster than the gat allows, or more than its magazine: not relayed.
  - Blocks far from their builder: refused; near it: relayed.
- - A teleport is logged; info requests from one IP are rate limited.
+ - Info requests from one IP are rate limited.
  - Phase 3a, against the new client: the server tells it it decides hits
-   (HITMODE); a shot from far from its shooter is refused; shots that miss it
-   (aimed away, or beside it) and its own KILLED blaming someone do nothing; a
-   real shot from the shooter's place hurts it (SERVERHIT, PAIN for the others)
-   until the server kills it.
+   (HITMODE); a shot that says it comes from next to it leaves from where the server
+   has its shooter (60 units away); shots that miss it (aimed away, or beside it)
+   and its own KILLED blaming someone do nothing; a real shot from the shooter's
+   place hurts it (SERVERHIT, TE_PAIN for the others) until the server kills it.
 The server log (its stderr) must show each event."""
-import math, os, socket, struct, sys, time
+import socket, struct, sys, time
+from netclient import *
 
-# HK_TEST_PORT: a server on another info port than the default 27020
-SERVER = ("127.0.0.1", int(os.environ.get("HK_TEST_PORT", "27020")))
-REQUESTENTER, INFO, PLAYERPOSITION, BLOCKS, SIMPLE, FIREGUN, KILLEDPOSITION = 1, 2, 3, 7, 5, 10, 14
-REQUESTINFO, ENTER, PORTACK, JOINGAME, PING, PINGREPLY = 1, 2, 4, 8, 12, 13
-KILLED, CHANGETEAM, CREDITS = 19, 20, 24
-SERVERHIT, HITMODE, PAIN = 28, 29, 18
-HELLOCAP_SERVERHITS = 8
-RELIABLE, LASTRELIABLE, ACK = 0xFF, 0xFE, 0xFD
-LANDGRIDSIZE, BLOCKSIZE = 512, 2
 LOG = sys.argv[1] if len(sys.argv) > 1 else None
-
-
-def packet(*msgs):
-    out = b"\x00"
-    for m in msgs:
-        out += struct.pack("<H", len(m)) + m
-    return out
-
-
-def simple(type2, msg=0, msg2=0):
-    return struct.pack("<bbxxII", SIMPLE, type2, msg, msg2)
-
-
-def messages(data):
-    pos, out = 1, []
-    while pos + 2 <= len(data):
-        (n,) = struct.unpack_from("<H", data, pos)
-        out.append(data[pos + 2:pos + 2 + n])
-        pos += 2 + n
-    return out
-
-
-def checksum(data):
-    c = [0, 0, 0, 0]
-    for i, b in enumerate(data):
-        c[i & 3] ^= b
-    return bytes(c)
-
-
-def position(x, y, z, state=10, weapon=0):
-    q = lambda v: int(v % LANDGRIDSIZE / LANDGRIDSIZE * 65536) & 0xFFFF
-    return struct.pack("<bbbbbBBHHHbbb", PLAYERPOSITION, 0, weapon, 0, state, 128, 128, q(x), q(y), q(z), 0, 0, 0)
-
-
-def firegun(pos, d, reload=0):
-    return struct.pack("<bbb3f3f", FIREGUN, 0, reload, d[0], d[1], d[2], pos[0], pos[1], pos[2])
+CREDITS, BLOCKSIZE = 24, 2
+OLD = HELLOCAP_STABLESLOTS | HELLOCAP_SMOKE   # counts its own damage (no HELLOCAP_SERVERHITS)
 
 
 def block(x, y, z, delete=0):
     return struct.pack("<bI", BLOCKS, 1) + struct.pack("<bbbbbbbbb", x, y, z, 1, 0, 0, 0, 0, delete)
 
 
-class Client:
-    def __init__(self, name):
-        self.s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.s.bind(("127.0.0.1", 0))
-        self.name = name
-        self.lastid = 0
-        self.got = []        # every message received
-        self.pos = {}        # player -> (x, y, z, state), from relayed positions
-        self.teams = {}      # player -> team, from CHANGETEAM
-        self.credits = 0     # build credits (CREDITS 0)
-
-    def note(self, m):
-        self.got.append(m)
-        if m[0] == SIMPLE and len(m) >= 12:
-            t, msg, msg2 = m[1], *struct.unpack_from("<II", m, 4)
-            if t == CHANGETEAM:
-                self.teams[msg] = msg2
-            if t == CREDITS and msg == 0:
-                self.credits = msg2
-            if t == PING:
-                self.s.sendto(packet(simple(PINGREPLY, msg, 0)), self.client)
-        if m[0] == PLAYERPOSITION and len(m) >= 16:
-            x, y, z = [v * LANDGRIDSIZE / 65536 for v in struct.unpack_from("<HHH", m, 7)]
-            self.pos[m[1]] = (x, y, z, m[4])
-
-    def handle(self, data):
-        """acks reliable parts, answers pings, notes every message"""
-        kind = data[0]
-        if kind in (RELIABLE, LASTRELIABLE) and len(data) >= 9:
-            body = data[5:]
-            rid, num = struct.unpack_from("<HH", body, 0)
-            self.s.sendto(bytes([ACK]) + body[:4], self.client)
-            if rid != (self.lastid + 1) & 0xFFFF:
-                return
-            self.parts[num] = body[4:]
-            if kind == LASTRELIABLE:
-                self.lastid = rid
-                buf = b"".join(self.parts[i] for i in sorted(self.parts))
-                self.parts = {}
-                pos = 0
-                while pos + 4 <= len(buf):
-                    (n,) = struct.unpack_from("<I", buf, pos)
-                    m = buf[pos + 4:pos + 4 + n]
-                    if m:
-                        self.note(m)
-                    pos += 4 + n
-        elif kind == 0:
-            for m in messages(data):
-                if m:
-                    self.note(m)
-
-    def drain(self):
-        if not hasattr(self, "client"):
-            return
-        self.s.setblocking(False)
-        try:
-            while True:
-                data, addr = self.s.recvfrom(65536)
-                if data:
-                    self.handle(data)
-        except (BlockingIOError, socket.error):
-            pass
-
-    def join(self, trailer, others=()):
-        self.s.sendto(packet(bytes([REQUESTENTER, len(self.name)]) + self.name + b"\x00" + trailer), SERVER)
-        port = None
-        end = time.time() + 3
-        while time.time() < end and port is None:
-            for o in others:
-                o.drain()
-            self.s.settimeout(0.5)
-            try:
-                data, addr = self.s.recvfrom(65536)
-            except socket.timeout:
-                continue
-            if data and data[0] == 0:
-                for m in messages(data):
-                    if len(m) >= 12 and m[0] == SIMPLE and m[1] == ENTER:
-                        p, self.slot = struct.unpack_from("<II", m, 4)
-                        port = socket.ntohs(p & 0xFFFF)
-        if port is None:
-            return False
-        self.client = (SERVER[0], port)
-        self.parts = {}
-        payload = simple(PORTACK, socket.htons(port))
-        body = struct.pack("<HHI", 1, 0, len(payload)) + payload
-        self.s.sendto(bytes([LASTRELIABLE]) + checksum(body) + body, self.client)
-        end = time.time() + 15
-        while time.time() < end:
-            for o in others:
-                o.drain()
-            self.drain()
-            if any(m[0] == SIMPLE and len(m) >= 12 and m[1] == JOINGAME and
-                   struct.unpack_from("<I", m, 4)[0] == self.slot for m in self.got):
-                return True
-            time.sleep(0.05)
-        return False
-
-    def send(self, *msgs):
-        self.s.sendto(packet(*msgs), self.client)
+def fires(cl, slot, mark):
+    """FIREGUNs relayed to cl from player slot since mark"""
+    return [m for m in cl.since(mark) if m[0] == FIREGUN and len(m) >= 27 and m[1] == slot]
 
 
-def pump(wait):
-    end = time.time() + wait
-    while time.time() < end:
-        for cl in clients:
-            cl.drain()
-        time.sleep(0.01)
+def kills(cl, mark, killed=None, killer=None):
+    return [e for e in cl.events(mark, TE_KILLED) if (killed is None or e["killed"] == killed) and
+            (killer is None or e["killer"] == killer)]
 
 
-def count(cl, pred, since=0):
-    return sum(1 for m in cl.got[since:] if pred(m))
+def credits(cl):
+    got = [b for a, b in cl.simples(0, CREDITS) if a == 0]
+    return got[-1] if got else 0
 
 
-def is_simple(m, t, msg=None, msg2=None):
-    if m[0] != SIMPLE or len(m) < 12 or m[1] != t:
-        return False
-    a, b = struct.unpack_from("<II", m, 4)
-    return (msg is None or a == msg) and (msg2 is None or b == msg2)
-
-
-def fires_from(slot):
-    return lambda m: m[0] == FIREGUN and len(m) >= 27 and m[1] == slot
-
-
-ok = True
-
-
-def check(cond, what):
-    global ok
-    print(("ok   " if cond else "FAIL ") + what)
-    ok &= bool(cond)
-
-
-# version trailer from INFO
-probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-probe.bind(("127.0.0.1", 0))
-info = None
-for _ in range(40):
-    probe.sendto(packet(simple(REQUESTINFO)), SERVER)
-    probe.settimeout(1.0)
-    try:
-        data, addr = probe.recvfrom(65536)
-        info = next((m for m in messages(data) if m and m[0] == INFO), None)
-    except socket.timeout:
-        pass
-    if info:
-        break
-if not info:
-    print("FAIL: no INFO reply"); sys.exit(1)
-t = info[2 + info[1] + 1:]
-_, proto, layout, vlen = struct.unpack_from("<IHIB", t, 0)
-trailer = t[:11 + vlen]
-
-clients = [Client(n) for n in (b"Alice", b"Bob", b"Carol")]
-for n, c in enumerate(clients):
-    if not c.join(trailer, clients[:n]):
-        print("FAIL: %s could not join" % c.name.decode()); sys.exit(1)
-    print("%s joined as slot %d" % (c.name.decode(), c.slot))
-pump(1.0)
+trailer, caps, info = server_info()
+game = Game()
+check = game.check
+clients = game.clients
+for n in ("Alice", "Bob", "Carol"):
+    c = Client(n, OLD)
+    if not c.join(trailer, clients):
+        print("FAIL: %s could not join" % n); sys.exit(1)
+    game.add(c)
+    print("%s joined as slot %d" % (n, c.slot))
+game.pump(1.0)
 teams = {}
 for cl in clients:
     teams.update(cl.teams)
-print("teams:", teams, " credits:", [cl.credits for cl in clients])
+print("teams:", teams, " credits:", [credits(cl) for cl in clients])
 
 # a victim and a shooter on different teams (free for all: team 0, anyone)
 pair = None
@@ -252,132 +77,115 @@ victim, shooter = pair
 third = next(c for c in clients if c is not victim and c is not shooter)
 print("victim %d (team %d), shooter %d (team %d), watcher %d" % (
     victim.slot, teams.get(victim.slot, 0), shooter.slot, teams.get(shooter.slot, 0), third.slot))
+shooter.weapon = 0   # the gat: 100 ms, 50 rounds
 
 # ---- the victim never sends KILLED: the server kills it ----
-for _ in range(3):
-    victim.send(position(100, 60, 100))
-    shooter.send(position(101, 60, 100))
-    third.send(position(300, 60, 300))
-    pump(0.05)
-pump(1.5)   # the host sets them on the ground
-start = [len(cl.got) for cl in clients]
-killed = False
-shots = 0
+victim.place(100, 120, 100)
+shooter.place(101, 120, 100)
+third.place(300, 120, 300)
+game.settle(clients, 6)
+start = {cl.name: cl.mark() for cl in clients}
+killed, shots = False, 0
 for k in range(60):
-    vp = shooter.pos.get(victim.slot)
-    if not vp:
-        pump(0.1)
+    v = shooter.others().get(victim.slot)
+    if not v or not shooter.own:
+        game.pump(0.1)
         continue
-    x, y, z, state = vp
-    # point blank, level with the victim (the bullet starts .2 lower)
-    shooter.send(firegun((x - 0.3, y, z), (1, 0, 0)))
+    shooter.fire(aim(shooter.own[0:3], v))
     shots += 1
-    pump(0.11)
-    if count(third, lambda m: is_simple(m, KILLED, victim.slot, shooter.slot), start[2]):
+    game.pump(0.11)
+    if kills(third, start[third.name], victim.slot, shooter.slot):
         killed = True
         break
-pump(0.5)
+game.pump(0.5)
 print("%d shots fired at the victim" % shots)
-check(killed, "the server killed the victim (KILLED %d by %d)" % (victim.slot, shooter.slot))
-check(count(victim, lambda m: is_simple(m, KILLED, victim.slot), start[clients.index(victim)]) == 1,
-      "the victim was told it died")
-check(count(shooter, lambda m: is_simple(m, KILLED, victim.slot), start[clients.index(shooter)]) == 1,
-      "the shooter saw it once")
+check(killed, "the server killed the victim (TE_KILLED %d by %d)" % (victim.slot, shooter.slot))
+check(len(kills(victim, start[victim.name], victim.slot)) == 1, "the victim was told it died")
+check(len(kills(shooter, start[shooter.name], victim.slot)) == 1, "the shooter saw it once")
 
-# dead while the server says so: state 11 relayed, shots dropped, own KILLED ignored
-mark = len(third.got)
+# dead while the server says so: state 11 in the snapshots, shots dropped, own KILLED ignored
+mark = third.mark()
+states = set()
 for k in range(10):
-    victim.send(position(100, 60, 100), firegun((100, 60, 100), (0, 1, 0)))
-    pump(0.1)
+    victim.fire((0, 1, 0))
+    game.pump(0.1)
+    seen = third.others().get(victim.slot)
+    if seen:
+        states.add(seen[3])
 victim.send(simple(KILLED, victim.slot, shooter.slot))
-pump(0.4)
-states = [m[4] for m in third.got[mark:] if m[0] == PLAYERPOSITION and len(m) >= 16 and m[1] == victim.slot]
-check(states and all(s == 11 for s in states), "the victim is relayed dead (states %s)" % sorted(set(states)))
-check(count(third, fires_from(victim.slot), mark) == 0, "its shots are dropped (%d)" % count(third, fires_from(victim.slot), mark))
-check(count(third, lambda m: is_simple(m, KILLED, victim.slot), mark) == 0, "its late KILLED is not counted twice")
+game.pump(0.4)
+check(states == {11}, "the victim is seen dead (states %s)" % sorted(states))
+check(not fires(third, victim.slot, mark), "its shots are dropped (%d)" % len(fires(third, victim.slot, mark)))
+check(not kills(third, mark, victim.slot), "its late KILLED is not counted twice")
 
 # ---- a KILLED / KILLEDPOSITION flood: one death ----
 flooder = third
-mark = [len(cl.got) for cl in clients]
+mark = shooter.mark()
 for k in range(10):
     flooder.send(simple(KILLED, 0, shooter.slot))
     flooder.send(struct.pack("<bbb3f", KILLEDPOSITION, 0, shooter.slot, 300, 60, 300))
     time.sleep(0.01)
-pump(0.8)
-kills = count(shooter, lambda m: is_simple(m, KILLED, flooder.slot), mark[clients.index(shooter)])
-kps = count(shooter, lambda m: m[0] == KILLEDPOSITION and len(m) >= 15 and m[1] == flooder.slot, mark[clients.index(shooter)])
-check(kills + kps == 1, "a flood of 20 deaths counted once (%d KILLED, %d KILLEDPOSITION)" % (kills, kps))
-blamed = count(shooter, lambda m: is_simple(m, KILLED, flooder.slot, shooter.slot), mark[clients.index(shooter)])
-blamedkp = count(shooter, lambda m: m[0] == KILLEDPOSITION and len(m) >= 15 and m[1] == flooder.slot and
-                 m[2] == shooter.slot, mark[clients.index(shooter)])
-check(blamed + blamedkp == 0, "the forged deaths credit no kill to %d (the server never saw it hit)" % shooter.slot)
-pump(4.0)   # dead for the server 3/4 of ac_deadtime, then ac_killinterval
-mark = len(shooter.got)
+game.pump(0.8)
+k = kills(shooter, mark, flooder.slot)
+check(len(k) == 1, "a flood of 20 deaths counted once (%d TE_KILLED)" % len(k))
+check(not kills(shooter, mark, flooder.slot, shooter.slot),
+      "the forged deaths credit no kill to %d (the server never saw it hit)" % shooter.slot)
+game.pump(4.0)   # dead for the server 3/4 of ac_deadtime, then ac_killinterval
+mark = shooter.mark()
 flooder.send(simple(KILLED, 0, shooter.slot))
-pump(0.5)
-check(count(shooter, lambda m: is_simple(m, KILLED, flooder.slot), mark) == 1, "a death 4 s later is counted")
+game.pump(0.5)
+check(len(kills(shooter, mark, flooder.slot)) == 1, "a death 4 s later is counted")
 
 # ---- fire rate and magazine (gat: 100 ms, 50 rounds), shooting at the sky ----
-sp = third.pos.get(shooter.slot, (101, 60, 100, 10))
-up = (sp[0], sp[1], sp[2])
-shooter.send(firegun(up, (0, 1, 0), reload=1))
-pump(2.6)   # reload: 3000 ms x .75
-mark = len(third.got)
+shooter.fire((0, 1, 0), reload=1)
+game.pump(2.6)   # reload: 3000 ms x .75
+mark = third.mark()
 for k in range(40):
-    shooter.send(firegun(up, (0, 1, 0)))
+    shooter.fire((0, 1, 0))
     time.sleep(0.005)
-pump(0.5)
-n = count(third, fires_from(shooter.slot), mark)
+game.pump(0.5)
+n = len(fires(third, shooter.slot, mark))
 check(2 <= n <= 12, "40 shots in 0.2 s: %d relayed" % n)
-
-shooter.send(firegun(up, (0, 1, 0), reload=1))
-pump(2.6)
-mark = len(third.got)
-for k in range(60):
-    shooter.send(firegun(up, (0, 1, 0)))
-    pump(0.11)
-pump(0.3)
-n = count(third, fires_from(shooter.slot), mark)
+shooter.fire((0, 1, 0), reload=1)
+game.pump(2.6)
+mark = third.mark()
+game.pump(60 * 0.11, each=lambda k: shooter.fire((0, 1, 0)) if k % 7 == 0 else None)
+game.pump(0.3)
+n = len(fires(third, shooter.slot, mark))
 check(45 <= n <= 52, "60 shots at the gat's rate, one magazine of 50 (+2 slack): %d relayed" % n)
-shooter.send(firegun(up, (0, 1, 0), reload=1))
-pump(2.6)
-mark = len(third.got)
+shooter.fire((0, 1, 0), reload=1)
+game.pump(2.6)
+mark = third.mark()
 for k in range(3):
-    shooter.send(firegun(up, (0, 1, 0)))
-    pump(0.15)
-pump(0.3)
-n = count(third, fires_from(shooter.slot), mark)
+    shooter.fire((0, 1, 0))
+    game.pump(0.15)
+game.pump(0.3)
+n = len(fires(third, shooter.slot, mark))
 check(n == 3, "after a reload: %d/3 relayed" % n)
 
 # ---- building: far refused (any client), near relayed (one with a credit) ----
-builder = next((c for c in clients if c.credits > 0), clients[0])
+builder = next((c for c in clients if credits(c) > 0), clients[0])
 watcher = next(c for c in clients if c is not builder)
-for _ in range(3):
-    builder.send(position(200, 60, 200))
-    pump(0.05)
-pump(1.0)
-bp = watcher.pos.get(builder.slot, (200, 60, 200, 10))
-bx, by, bz = int(bp[0] / BLOCKSIZE), int(bp[1] / BLOCKSIZE), int(bp[2] / BLOCKSIZE)
+builder.place(200, 120, 200)
+game.settle([builder], 5)
+bp = builder.own[0:3]
+bx, by, bz = int(bp[0] % LANDGRIDSIZE / BLOCKSIZE), int(bp[1] / BLOCKSIZE), int(bp[2] % LANDGRIDSIZE / BLOCKSIZE)
 sb = lambda v: (v + 128) % 256 - 128   # block coordinates are signed chars
-blocks = lambda m: m[0] == BLOCKS
-mark = len(watcher.got)
+mark = watcher.mark()
 builder.send(block(sb(bx + 100), by, sb(bz)))
-pump(0.8)
-check(count(watcher, blocks, mark) == 0, "a block 100 blocks away is refused")
-if builder.credits > 0:
+game.pump(0.8)
+check(not [m for m in watcher.since(mark) if m[0] == BLOCKS], "a block 100 blocks away is refused")
+if credits(builder) > 0:
     builder.send(block(sb(bx + 2), by + 1, sb(bz)))
-    pump(0.8)
-    check(count(watcher, blocks, mark) == 1, "a block next to the builder is relayed")
+    game.pump(0.8)
+    check(len([m for m in watcher.since(mark) if m[0] == BLOCKS]) == 1, "a block next to the builder is relayed")
 else:
     print("nobody has a build credit: near block not checked")
 
-# ---- a teleport, logged ----
-for p in ((300, 60, 300), (300, 60, 300), (400, 60, 400)):
-    third.send(position(*p))
-    pump(0.35)
-
 # ---- info requests from one IP ----
-pump(1.0)
+game.pump(1.0)
+probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+probe.bind(("127.0.0.1", 0))
 answers = 0
 for k in range(100):
     probe.sendto(packet(simple(REQUESTINFO)), SERVER)
@@ -390,7 +198,7 @@ while time.time() < end:
     except socket.timeout:
         break
 check(1 <= answers <= 30, "100 info requests at once: %d answered" % answers)
-pump(2.0)
+game.pump(2.0)
 probe.sendto(packet(simple(REQUESTINFO)), SERVER)
 probe.settimeout(2.0)
 try:
@@ -401,104 +209,106 @@ except socket.timeout:
 check(alive, "answered again a moment later")
 
 # ---- phase 3a: the server decides the hits of a client that knows it ----
-newcl = Client(b"Dave")
-if not newcl.join(trailer + bytes([HELLOCAP_SERVERHITS]), clients):
+newcl = Client("Dave", OLD | HELLOCAP_SERVERHITS)
+if not newcl.join(trailer, clients):
     print("FAIL: Dave could not join"); sys.exit(1)
-clients.append(newcl)
-pump(1.0)
+game.add(newcl)
+game.pump(1.0)
 for cl in clients:
     teams.update(cl.teams)
 print("Dave joined as slot %d (team %d)" % (newcl.slot, teams.get(newcl.slot, 0)))
-check(count(newcl, lambda m: is_simple(m, HITMODE, 1)) >= 1, "the new client is told the server decides hits (HITMODE 1)")
-check(all(count(c, lambda m: is_simple(m, HITMODE)) == 0 for c in clients[:3]), "the older clients never get HITMODE")
+check(any(a == 1 for a, b in newcl.simples(0, HITMODE)), "the new client is told the server decides hits (HITMODE 1)")
+check(all(not c.simples(0, HITMODE) for c in clients[:3]), "the others never get HITMODE")
 # a shooter of another team (free for all: anyone), and a watcher
 gunner = next(c for c in clients[:3] if teams.get(c.slot, 0) != teams.get(newcl.slot, 0) or teams.get(c.slot, 0) == 0)
 eye = next(c for c in clients[:3] if c is not gunner)
+gunner.weapon = 3
 print("new victim %d, shooter %d, watcher %d" % (newcl.slot, gunner.slot, eye.slot))
-hits = lambda since: [struct.unpack_from("<II", m, 4) for m in newcl.got[since:] if is_simple(m, SERVERHIT)]
-died = lambda since: count(eye, lambda m: is_simple(m, KILLED, newcl.slot), since)
+hits = lambda since: newcl.simples(since, SERVERHIT)
 
-def place(vp, sp, wait=1.5):
-    """victim at vp, shooter at sp, watcher away; they land; returns where the server has them"""
-    for _ in range(4):
-        newcl.send(position(*vp))
-        gunner.send(position(*sp))
-        eye.send(position(320, 60, 320))
-        pump(0.05)
-    pump(wait)
-    return eye.pos.get(newcl.slot), eye.pos.get(gunner.slot)
 
-v, g = place((150, 60, 150), (150, 60, 210))   # 60 units apart
+def place(vp, sp):
+    """victim at vp, shooter at sp (x, z), watcher away; they land; where the shooter sees
+    the victim, and where the server has the shooter"""
+    newcl.place(vp[0], 120, vp[1])
+    gunner.place(sp[0], 120, sp[1])
+    eye.place(320, 120, 320)
+    game.settle(clients, 6)
+    return gunner.others().get(newcl.slot), gunner.own and gunner.own[0:3]
+
+
+v, g = place((150, 150), (150, 210))   # 60 units apart
 if not v or not g:
     print("FAIL: no positions for the new victim or its shooter"); sys.exit(1)
-gunner.send(firegun(g[:3], (0, 1, 0), reload=1))   # a full magazine
-pump(2.6)
+gunner.fire((0, 1, 0), reload=1)   # a full magazine
+game.pump(2.6)
 
-# a shot fired from next to the victim while its shooter is 60 units away: refused
-mark, markv = len(eye.got), len(newcl.got)
+# a shot that says it comes from next to the victim while its shooter is 60 units
+# away: it leaves from the shooter's place (the server's), and misses
+mark, markv = eye.mark(), newcl.mark()
 for k in range(5):
-    gunner.send(firegun((v[0] - 0.3, v[1], v[2]), (1, 0, 0)))
-    pump(0.15)
-pump(0.5)
-check(count(eye, fires_from(gunner.slot), mark) == 0, "shots from 60 units away from their shooter are not relayed")
+    gunner.fire((1, 0, 0), pos=(v[0] - 0.3, v[1], v[2]))
+    game.pump(0.15)
+game.pump(0.5)
+f = fires(eye, gunner.slot, mark)
+sent = [struct.unpack_from("<3f", m, 15) for m in f]
+check(f and all(wrapdist(p, g) < 1 for p in sent),
+      "shots that say they come from next to the victim leave from where the server has their shooter (%s)" % (
+          sent[:1] and [round(c, 1) for c in sent[0]]))
 check(not hits(markv), "and do no damage (%d SERVERHIT)" % len(hits(markv)))
 
 # the shooter next to the victim (2 units on x), level with it
-v, g = place((150, 60, 150), (148, 60, 150))
+v, g = place((150, 150), (148, 150))
 if not v or not g:
     print("FAIL: no positions for the new victim or its shooter"); sys.exit(1)
 print("victim at %.1f %.1f %.1f, shooter at %.1f %.1f %.1f" % (v[0], v[1], v[2], g[0], g[1], g[2]))
-origin = (g[0], g[1], g[2])
-
-def aim(tx, ty, tz):
-    # the bullet starts .2 below the shot's position (HandleFireGun)
-    d = (tx - origin[0], ty - (origin[1] - 0.2), tz - origin[2])
-    n = math.sqrt(sum(c * c for c in d))
-    return tuple(c / n for c in d)
 
 # shots that don't aim at it: away from it, and 3 units beside it
-mark, markv = len(eye.got), len(newcl.got)
-for d in [(-1, 0, 0)] * 4 + [aim(v[0], v[1] - 1, v[2] + 3)] * 4:
-    gunner.send(firegun(origin, d))
-    pump(0.15)
-pump(0.6)
-check(count(eye, fires_from(gunner.slot), mark) == 8, "the shots that miss are relayed (%d/8)" % count(eye, fires_from(gunner.slot), mark))
-check(not hits(markv) and not died(mark), "a shooter not aiming at the victim does no damage (%d SERVERHIT)" % len(hits(markv)))
+mark, markv = eye.mark(), newcl.mark()
+for d in [(-1, 0, 0)] * 4 + [aim(g, (v[0], v[1], v[2] + 3))] * 4:
+    gunner.fire(d)
+    game.pump(0.15)
+game.pump(0.6)
+check(len(fires(eye, gunner.slot, mark)) == 8, "the shots that miss are relayed (%d/8)" % len(fires(eye, gunner.slot, mark)))
+check(not hits(markv) and not kills(eye, mark, newcl.slot),
+      "a shooter not aiming at the victim does no damage (%d SERVERHIT)" % len(hits(markv)))
 
 # its own KILLED blaming the shooter: the server decides, nothing happens
-mark = len(eye.got)
+mark = eye.mark()
 newcl.send(simple(KILLED, 0, gunner.slot))
-pump(0.5)
-check(not died(mark), "a KILLED from the new client blaming %d is ignored" % gunner.slot)
+game.pump(0.5)
+check(not kills(eye, mark, newcl.slot), "a KILLED from the new client blaming %d is ignored" % gunner.slot)
 
 # real shots, from where the shooter is, at the victim's body
-mark, markv = len(eye.got), len(newcl.got)
+mark, markv = eye.mark(), newcl.mark()
 shots = 0
 for k in range(40):
-    gunner.send(firegun(origin, aim(v[0], v[1] - 1, v[2])))
+    gunner.fire(aim(g, v))
     shots += 1
-    pump(0.15)
-    if died(mark):
+    game.pump(0.15)
+    if kills(eye, mark, newcl.slot):
         break
-pump(0.5)
+game.pump(0.5)
 got = hits(markv)
 print("%d shots, SERVERHIT (by, life): %s" % (shots, got))
 check(got and all(by == gunner.slot for by, life in got), "aimed shots hurt the victim (%d SERVERHIT from %d)" % (len(got), gunner.slot))
 check(all(got[i][1] >= got[i + 1][1] for i in range(len(got) - 1)) and got and got[-1][1] == 0,
       "its life only goes down, to 0")
-check(count(eye, lambda m: is_simple(m, PAIN, newcl.slot), mark) >= 1, "the others hear its pain (PAIN from the server)")
-check(died(mark) == 1 and count(eye, lambda m: is_simple(m, KILLED, newcl.slot, gunner.slot), mark) == 1,
+check([e for e in eye.events(mark, TE_PAIN) if e["player"] == newcl.slot], "the others hear its pain (TE_PAIN)")
+check(len(kills(eye, mark, newcl.slot)) == 1 and kills(eye, mark, newcl.slot, gunner.slot),
       "the server killed it, credited to %d" % gunner.slot)
-check(count(newcl, lambda m: is_simple(m, KILLED, newcl.slot, gunner.slot), markv) == 1, "the victim was told")
+check(kills(newcl, markv, newcl.slot, gunner.slot), "the victim was told")
 
 if LOG:
     time.sleep(0.3)
     log = open(LOG, errors="replace").read()
     # (no "kill" line: in phase 3a a death the server decides is no event)
-    for kind in ("death", "fire", "ammo", "build", "move", "ip", "origin"):
+    for kind in ("death", "fire", "ammo", "build", "ip"):
         check("anticheat: %s:" % kind in log, "server log has 'anticheat: %s:'" % kind)
 else:
     print("no server log given: log lines not checked")
-
-print("ALL OK" if ok else "SOME CHECKS FAILED")
-sys.exit(0 if ok else 1)
+for c in clients:
+    if hasattr(c, "client"):
+        c.send(simple(EXIT))
+print("ALL OK" if game.ok else "SOME CHECKS FAILED")
+sys.exit(0 if game.ok else 1)

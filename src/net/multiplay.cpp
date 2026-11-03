@@ -88,7 +88,6 @@ char blockbuffer[50000];
 DWORD blockbufferpos=0;
 DWORD numblocks;
 
-DWORD nextresend;
 
 char curobjective[1000];
 char curscore[1000];
@@ -143,11 +142,8 @@ static void SendRequestEnter()
 	int len=2+nl+1;
 	len+=WriteVersionTrailer(&buf[len]);
 	int cookie=haveentercookie&&entercookieip==infosock.dest.sin_addr.s_addr;
-	//HK_LEGACYMOVE=1 (tests): joins as a 0.7 build moving itself (no HELLOCAP_INPUTS)
-	static int legacymove=getenv("HK_LEGACYMOVE")&&atoi(getenv("HK_LEGACYMOVE"));
-	len+=WriteHelloCaps(&buf[len],HELLOCAP_COOKIE|HELLOCAP_SERVERHITS|HELLOCAP_STABLESLOTS|HELLOCAP_POSSEQ|
-		HELLOCAP_PROPS|HELLOCAP_SMOKE|(legacymove?0:HELLOCAP_INPUTS|HELLOCAP_SNAPSHOTS|HELLOCAP_TICKEVENTS),
-		cookie?entercookie:0);
+	len+=WriteHelloCaps(&buf[len],HELLOCAP_COOKIE|HELLOCAP_SERVERHITS|HELLOCAP_STABLESLOTS|
+		HELLOCAP_PROPS|HELLOCAP_SMOKE,cookie?entercookie:0);
 	infosock.Send(buf,len);
 	infosock.Flush();
 }
@@ -163,7 +159,6 @@ int ac_killinterval=2000;   //ms between two deaths a client may report
 float ac_firetolerance=.75f;//shortest shot interval accepted, times the weapon's
 int ac_fireburst=300;       //ms of shots that may arrive bunched up (jitter)
 int ac_ammoslack=2;         //rounds the server's magazine may be off by, -1: off
-float ac_maxspeed=150;      //units/s between two positions above which it is logged
 int ac_firedist=20;         //units between a shot and its shooter above which it is logged
 int ac_builddist=50;        //blocks from the player a block may be placed or removed
 int ac_ipinfo=5;            //info requests answered per second and IP
@@ -173,22 +168,16 @@ int ac_requirecookie=0;     //1: refuse clients that can't answer a join cookie 
 int ac_cookietime=30000;    //ms of a join cookie time bucket (valid one to two buckets)
 int ac_serverhits=1;        //1: the server decides hits and deaths (phase 3a); 0: phase-1 bounds
 float ac_hittolerance=.5f;  //units added around a player's hitbox when the server tests a bullet
-int ac_lagcomp=300;         //ms of a shooter's lag the server rewinds, at most; 0: no rewind (M16
-                            //phase 5: plus the SNAPINTERP ticks it draws the others in the past)
+int ac_lagcomp=300;         //ms of a shooter's lag the server rewinds, at most, plus the SNAPINTERP
+                            //ticks it draws the others in the past (M16 phase 5); 0: no rewind
 //phase 3b. ac_stableslots isn't a check: it doesn't depend on ac_enable
 int ac_stableslots=1;       //1: a leaver frees its slot, the others keep their numbers (all clients able)
-float ac_posrate=2;         //positions per positionresendtime a client may send (more are dropped), 0: off
-int ac_moveclamp=0;         //1: a player moving faster than ac_maxspeed is held back to it (0: logged only)
 //not a check either: the rocks and trees that block (props.h, docs/PROPS.md). On, clients
 //without them (HELLOCAP_PROPS) are refused: they would walk and shoot through them
 int sv_props=1;             //sv.ini props, Server Setup "Rocks and trees"
-//M16 phases 2 and 3 (docs/M16.md): the server moves the players of the clients that
-//send input commands (HELLOCAP_INPUTS), and bounds their rate
-int sv_authmove=1;          //1: it does (the others move themselves, as before)
+//M16 (docs/M16.md): the server moves every client's player from its input commands, and
+//bounds their rate
 int ac_cmdslack=8;          //ticks of commands a client may be ahead of real time, -1: off
-//M16 phase 4: the other players in SNAPSHOT (deltas, 30 Hz) to the clients it moves
-//that read them (HELLOCAP_SNAPSHOTS), drawn in the past; no PLAYERPOSITION to them
-int sv_snapshots=1;
 
 //server answers an info request, with its version
 static void SendInfo(SOCKADDR_IN dest)
@@ -211,8 +200,7 @@ static void SendInfo(SOCKADDR_IN dest)
 	buf[len++]=(char)((ac_enable?HELLOCAP_COOKIE|(ac_requirecookie?HELLOCAP_REQUIRECOOKIE:0)|
 		(ac_serverhits?HELLOCAP_SERVERHITS:0):0)|(ac_stableslots?HELLOCAP_STABLESLOTS:0)|
 		(sv_props?HELLOCAP_PROPS:0)|HELLOCAP_SMOKE);
-	buf[len++]=(char)(((sv_authmove?HELLOCAP_INPUTS:0)|
-		(sv_authmove&&sv_snapshots?HELLOCAP_SNAPSHOTS|HELLOCAP_TICKEVENTS:0))>>8);   //caps2 (M16)
+	buf[len++]=0;   //caps2: none (protocol 5's M16 bits are protocol 6 itself)
 	infosock.dest=dest;
 	infosock.Send(buf,len);
 	infosock.Flush();
@@ -281,18 +269,17 @@ static void WritePlayerName(ByteWriter &w,int i)
 #define AC_DEATH 1
 #define AC_FIRE 2
 #define AC_AMMO 3
-#define AC_MOVE 4
-#define AC_BUILD 5
-#define AC_IP 6
-#define AC_STATE 7
-#define AC_ORIGIN 8
-#define AC_POSITION 9
-#define AC_CMD 10
-#define ACKINDS 11
-static const char *ackind[ACKINDS]={"kill","death","fire","ammo","move","build","ip","state","origin","position","cmd"};
+#define AC_BUILD 4
+#define AC_IP 5
+#define AC_STATE 6
+#define AC_ORIGIN 7
+#define AC_CMD 8
+#define ACKINDS 9
+static const char *ackind[ACKINDS]={"kill","death","fire","ammo","build","ip","state","origin","cmd"};
 
-//M16 phase 2 (docs/M16.md): a client the server moves from its input commands. They
-//are queued as they come and run at the server's ticks, in order, one tick each.
+//M16 (docs/M16.md): every client's player is moved by the server from its input
+//commands. They are queued as they come and run at the server's ticks, in order, one
+//tick each.
 #define AUTHQUEUE 32
 #define AUTHSILENCE 6   //ticks without a command before its last one is played again,
 #define AUTHREPEAT 6    //at most this many times; then the player waits
@@ -310,7 +297,7 @@ struct AuthShot
 };
 struct AcAuth
 {
-	int on;               //NETSYNCMODE said so: its PLAYERPOSITIONs are ignored
+	int on;               //in the game (NETSYNCMODE sent): its commands are run
 	unsigned int lastcmd; //the last one run (ran: there is one)
 	int ran;
 	MoveCmd last;
@@ -337,11 +324,9 @@ struct AcAuth
 	int nshots;
 };
 
-//M16 phase 4: a client that gets the other players in SNAPSHOT
+//M16 phase 4: the other players it gets in SNAPSHOT
 struct AcSnap
 {
-	int on;               //NETSYNCMODE said so: no PLAYERPOSITION to it
-	int tickev;           //phase 5 too (HELLOCAP_TICKEVENTS): TICKEVENT, shots at their tick
 	uint32_t acked;       //the newest snapshot it said it has (anyack: there is one)
 	int anyack;
 	SnapRing sent;        //the last ones sent to it: the bases of its deltas
@@ -356,18 +341,12 @@ struct AcPlayer
 	DWORD lastfire;
 	AcBucket fire;
 	AcAmmo ammo;
-	AcMove move;
 	//phase 3a: the server decides hits
 	float life;          //as the server counts it (remote players; the host has its own)
 	int lastattacker;    //who hit it last, and when: who a reported death is credited to
 	DWORD lasthit;
-	AcHistory hist;      //where it was, for the lag of the shooters that don't say (0.7 builds)
 	AcTickRing ticks;    //M16 phase 5: where it was at each tick, for the others' shots
 	int caps;            //HELLOCAP_* of its REQUESTENTER (kept by AcJoin)
-	//phase 3b: numbered positions, movement bound
-	AcSeq seq;
-	AcBucket posrate;
-	AcClamp clamp;
 	AcAuth auth;         //M16 phase 2: moved by the server from its commands
 	AcSnap snap;         //M16 phase 4: gets the others in SNAPSHOT
 };
@@ -433,13 +412,12 @@ static void AcInitVars()
 		{&ac_enable,0,"ac_enable"},{&ac_killdamage,0,"ac_killdamage"},{&ac_hitcap,0,"ac_hitcap"},
 		{&ac_deadtime,0,"ac_deadtime"},{&ac_killinterval,0,"ac_killinterval"},
 		{0,&ac_firetolerance,"ac_firetolerance"},{&ac_fireburst,0,"ac_fireburst"},{&ac_ammoslack,0,"ac_ammoslack"},
-		{0,&ac_maxspeed,"ac_maxspeed"},{&ac_firedist,0,"ac_firedist"},{&ac_builddist,0,"ac_builddist"},
+		{&ac_firedist,0,"ac_firedist"},{&ac_builddist,0,"ac_builddist"},
 		{&ac_ipinfo,0,"ac_ipinfo"},{&ac_ipenter,0,"ac_ipenter"},{&ac_ippackets,0,"ac_ippackets"},
 		{&ac_requirecookie,0,"ac_requirecookie"},{&ac_cookietime,0,"ac_cookietime"},
 		{&ac_serverhits,0,"ac_serverhits"},{0,&ac_hittolerance,"ac_hittolerance"},{&ac_lagcomp,0,"ac_lagcomp"},
-		{&ac_stableslots,0,"ac_stableslots"},{0,&ac_posrate,"ac_posrate"},{&ac_moveclamp,0,"ac_moveclamp"},
-		{&sv_props,0,"props"},{&sv_authmove,0,"sv_authmove"},{&ac_cmdslack,0,"ac_cmdslack"},
-		{&sv_snapshots,0,"sv_snapshots"},
+		{&ac_stableslots,0,"ac_stableslots"},
+		{&sv_props,0,"props"},{&ac_cmdslack,0,"ac_cmdslack"},
 	};
 	//debug (tests): HK_AC_VARS="ac_requirecookie=1 ac_cookietime=1000" wins over sv.ini
 	const char *env=getenv("HK_AC_VARS");
@@ -487,10 +465,7 @@ static void AcNewLife(int i)
 	a->fire.started=0;
 	AcAmmoFill(&a->ammo,hold);
 	a->ammo.weapon=GetPlayer(i)->weapon;
-	a->move.valid=0;
-	a->clamp.valid=0;
 	a->life=100;
-	a->hist.count=0;   //respawned somewhere else: no rewind across the teleport
 }
 
 //a client gets slot i: it arrives dead (its first 11 -> 10 is a respawn)
@@ -518,15 +493,15 @@ int ServerDecidesHits()
 	return connected&&clientserverhits;
 }
 
-//M16 phase 3 (docs/M16.md, predict.h): the server moves us from our commands
-//(NETSYNCMODE); we predict our player and send them
+//M16 (docs/M16.md, predict.h): once in the game (NETSYNCMODE), the server moves us from
+//our commands, we predict our player, the others come in snapshots, the events at
+//their tick
 static int clientauthmove;
 static Prediction prediction;
 static unsigned int lastsentcmd;   //newest command sent (sentany: there is one)
 static int sentany;
 
 //M16 phase 4: the others from the server's snapshots (further down)
-static int clientsnapview;      //NETSYNCMODE said HELLOCAP_SNAPSHOTS: no PLAYERPOSITION
 static SnapRing snaprecv;       //the last ones received, complete (the bases of the deltas)
 static uint32_t snapnewest;     //the newest of them (snapany: there is one): what we ack
 static int snapany;
@@ -541,7 +516,6 @@ static char snapshown[MAXPLAYERS];   //had data at the render time: drawn
 static void ClientSnapReset();
 //phase 5: our shots say the tick we saw, our grenades are predicted, the server's
 //events wait for their tick (further down)
-static int clienttickevents;    //NETSYNCMODE said HELLOCAP_TICKEVENTS
 static void ClientEventsFlush(int apply);
 static void ClientAuthMove(int on)
 {
@@ -587,7 +561,7 @@ static void SendInputCmds()
 		m.type=INPUTCMD;
 		m.n=(unsigned char)n;
 		m.firstcmd=first;
-		m.acksnap=clientsnapview&&snapany?snapnewest:0;   //phase 4: the base of the next delta
+		m.acksnap=clientauthmove&&snapany?snapnewest:0;   //phase 4: the base of the next delta
 		for(int k=0;k<n;k++) m.cmd[k]=PredictFind(&prediction,first+k)->cmd;
 		char buf[INPUTCMDHEADER+INPUTCMDMAX*MOVECMDSIZE];
 		int size=WriteInputCmd(buf,sizeof(buf),&m);
@@ -691,7 +665,7 @@ static int SnapRenderTime(uint32_t *tick,float *frac)
 
 int NetSnapshotView()
 {
-	return !server&&connected&&clientsnapview;
+	return !server&&connected&&clientauthmove;
 }
 
 //player i at the render time; 0 if there is nothing for it then
@@ -754,7 +728,7 @@ int NetPlayerShown(int i)
 
 int NetTickEventsOn()
 {
-	return !server&&connected&&clienttickevents;
+	return !server&&connected&&clientauthmove;
 }
 
 //a number for a grenade or smoke grenade we draw at once: 1..0x7fff (the server's
@@ -773,7 +747,7 @@ static int WriteShotTick(char *buf,int size,uint16_t objid)
 	memset(&t,0,sizeof(t));
 	uint32_t tick;
 	float frac;
-	if(clientsnapview&&SnapRenderTime(&tick,&frac)&&tick)
+	if(clientauthmove&&SnapRenderTime(&tick,&frac)&&tick)
 	{
 		t.viewtick=tick;
 		int f=(int)(frac*256);
@@ -895,7 +869,7 @@ void NetTickEvents()
 	if(!npending) return;
 	uint32_t tick=0;
 	float frac;
-	int clock=NetSnapshotView()&&clienttickevents&&SnapRenderTime(&tick,&frac);
+	int clock=NetSnapshotView()&&clientauthmove&&SnapRenderTime(&tick,&frac);
 	double now=LocalMs();
 	int kept=0,n=npending;
 	static PendingEvent due[EVENTQUEUE];
@@ -925,8 +899,8 @@ static int AcKiller(int i,int claimed)
 		AcLog(AC_DEATH,"%.31s (%d) reported being killed by %d, ignored: the server decides",GetPlayer(i)->name,i,claimed);
 		return -1;
 	}
-	//an older client still counts its own damage and dies on its own: its death
-	//stands (it only harms itself), but not who it blames
+	//a client without HELLOCAP_SERVERHITS still counts its own damage and dies on
+	//its own: its death stands (it only harms itself), but not who it blames
 	if(recent&&a->lastattacker==claimed) return claimed;
 	return recent?a->lastattacker:i;
 }
@@ -1034,7 +1008,7 @@ static void AcHit(int v,int attacker,float damage)
 		clientsock[v].SendReliable(hit.b,sizeof(hit.b),0);
 		AcPainOthers(v,150);
 	}
-	//(an older client counts its own damage, sends its own PAIN and KILLED)
+	//(one without HELLOCAP_SERVERHITS counts its own damage, sends its own PAIN and KILLED)
 	if(a->life<=0) AcServerKill(v,attacker);
 }
 
@@ -1058,11 +1032,10 @@ static int AcCountsDamage()
 //One player per bullet. Where the shooter saw it: M16 phase 5, the tick it drew the
 //others at (FireTick, lagticks before the tick the server fired it at: as long as
 //the bullet flies, that far back), where each one was then (AcTickRing), not
-//there if it wasn't alive; else (a 0.7 build) rewound by its ping (AcHistory). At
-//most ac_lagcomp (and the interpolation's SNAPINTERP ticks for the first).
+//there if it wasn't alive; at most ac_lagcomp and the interpolation's SNAPINTERP
+//ticks. The host's own shots: where they are (it draws them as they are).
 static void AcServerBullet(Object *o,Vector prev,int shooter)
 {
-	int rewind=shooter==GetLocalNum()||o->lagtick?0:AcRewind(GetPlayer(shooter)->ping,ac_lagcomp);
 	unsigned int tick=0;
 	float frac=0;
 	if(o->lagtick)
@@ -1082,13 +1055,8 @@ static void AcServerBullet(Object *o,Vector prev,int shooter)
 		Player *pl=GetPlayer(v);
 		if(GetPlayer(shooter)->team==pl->team&&pl->team!=0) continue;
 		if(!AcCanBeHit(v)) continue;
-		float at[3];
-		if(o->lagtick)
-		{
-			if(!AcTickAt(&acplayer[v].ticks,tick,frac,at,LANDGRIDSIZE,SNAPTELEPORT)) continue;
-		}
-		else
-			AcHistoryAt(&acplayer[v].hist,curtime-rewind,pl->pos.x,pl->pos.y,pl->pos.z,curtime,at,LANDGRIDSIZE);
+		float at[3]={pl->pos.x,pl->pos.y,pl->pos.z};
+		if(o->lagtick&&!AcTickAt(&acplayer[v].ticks,tick,frac,at,LANDGRIDSIZE,SNAPTELEPORT)) continue;
 		if(!AcSegmentHits(prev.x,prev.y,prev.z,o->pos.x,o->pos.y,o->pos.z,at[0],at[1],at[2],
 			ac_hittolerance>0?ac_hittolerance:0,LANDGRIDSIZE)) continue;
 		o->achit=~0u;   //spent: no one else (the copies on the clients only show it)
@@ -1225,44 +1193,8 @@ static int AcFire(int i,FireGunDirection *f)
 	return 1;
 }
 
-//phase 3b: is this PLAYERPOSITION of client i (len bytes) one to use. Its rate is
-//bounded (ac_posrate); a client that numbers them (HELLOCAP_POSSEQ) must, and an
-//older or repeated one (overtaken on the way, a duplicate, a replay) is dropped:
-//only the newest position moves the player, feeds the history of the shooters' lag
-//(AcServerFrame) and is relayed.
-static int AcPositionAccepted(int i,const char *msg,int len)
-{
-	if(!ac_enable) return 1;
-	AcPlayer *a=&acplayer[i];
-	if(ac_posrate>0)
-	{
-		//a client sends one every positionresendtime at most (ClientLoop)
-		int interval=sv.positionresendtime>10?sv.positionresendtime:10;
-		if(!AcTake(&a->posrate,curtime,ac_posrate/interval,10))
-		{
-			AcLog(AC_POSITION,"%.31s (%d) sends positions too fast, dropped",GetPlayer(i)->name,i);
-			return 0;
-		}
-	}
-	if(!(a->caps&HELLOCAP_POSSEQ)) return 1;
-	int seq=ReadPositionSeq(msg,len);
-	if(seq<0)
-	{
-		AcLog(AC_POSITION,"%.31s (%d) sent a position without its number, dropped",GetPlayer(i)->name,i);
-		return 0;
-	}
-	if(!AcSeqNewer(&a->seq,seq))
-	{
-		AcLog(AC_POSITION,"%.31s (%d) position %d after %d, dropped",GetPlayer(i)->name,i,seq,a->seq.last);
-		return 0;
-	}
-	return 1;
-}
-
-//a position of client i with state (10 alive, 11 dead) and weapon: returns the
-//state the server keeps. pos may be held back (ac_moveclamp).
-//the state (10 alive, 11 dead) and weapon client i says it has, from a position or
-//a command (M16): the state the server keeps
+//the state (10 alive, 11 dead) and weapon client i says it has in a command (M16):
+//the state the server keeps
 static int AcState(int i,int state,int weapon)
 {
 	if(!ac_enable) return state;
@@ -1277,31 +1209,6 @@ static int AcState(int i,int state,int weapon)
 	int hold[ACWEAPONS];
 	AcHolds(hold);
 	AcAmmoPosition(&a->ammo,weapon,hold);
-	return state;
-}
-
-static int AcPosition(int i,int state,Vector *pos,int weapon)
-{
-	if(!ac_enable) return state;
-	AcPlayer *a=&acplayer[i];
-	state=AcState(i,state,weapon);
-	if(state==10&&ac_maxspeed>0)
-	{
-		float speed=AcMoveSpeed(&a->move,pos->x,pos->y,pos->z,curtime,250,LANDGRIDSIZE);
-		if(speed>ac_maxspeed)
-			AcLog(AC_MOVE,"%.31s (%d) moved at %.0f units/s",GetPlayer(i)->name,i,speed);
-		//phase 3b: held back to ac_maxspeed from the last position kept, so it is
-		//not where it says it went faster (its shots too, ac_firedist), until it
-		//slows down. Off by default: legitimate speeds aren't known well enough yet.
-		if(ac_moveclamp&&
-			AcMoveClamp(&a->clamp,&pos->x,&pos->y,&pos->z,curtime,ac_maxspeed,100,LANDGRIDSIZE))
-			AcLog(AC_MOVE,"%.31s (%d) held back to %.0f units/s",GetPlayer(i)->name,i,ac_maxspeed);
-	}
-	else
-	{
-		a->move.valid=0;
-		a->clamp.valid=0;
-	}
 	return state;
 }
 
@@ -1353,24 +1260,16 @@ static void SendSmokeMode(int i,int allowed)
 //---- M16 phases 2 and 3 (docs/M16.md): the server moves the players of clients that
 //send input commands ----
 
-//whether the server moves client i from its commands (NETSYNCMODE), if it can send
-//them: at the join and when sv_authmove changes
+//client i is in the game: the server moves it from its commands from now on, sends
+//it the others in snapshots (complete ones until it acks one) and the events at
+//their tick (NETSYNCMODE)
 static void SendNetSyncMode(int i)
 {
-	if(!(acplayer[i].caps&HELLOCAP_INPUTS)) return;
 	AcAuth *a=&acplayer[i].auth;
-	int on=sv_authmove!=0;
-	if(on&&!a->on) memset(a,0,sizeof(*a));   //its commands from now on
-	a->on=on;
-	//phase 4: the others in SNAPSHOT, acked in its INPUTCMDs (so only if it sends them)
-	AcSnap *sn=&acplayer[i].snap;
-	int snaps=on&&sv_snapshots&&(acplayer[i].caps&HELLOCAP_SNAPSHOTS);
-	if(snaps&&!sn->on) memset(sn,0,sizeof(*sn));   //complete snapshots until it acks one
-	sn->on=snaps;
-	//phase 5: it draws the others in the past, so its shots and events are at a tick
-	sn->tickev=snaps&&(acplayer[i].caps&HELLOCAP_TICKEVENTS);
-	SimpleBuf mode=MakeSimple(NETSYNCMODE,(on?HELLOCAP_INPUTS:0)|(snaps?HELLOCAP_SNAPSHOTS:0)|
-		(sn->tickev?HELLOCAP_TICKEVENTS:0),simtick);
+	memset(a,0,sizeof(*a));
+	a->on=1;
+	memset(&acplayer[i].snap,0,sizeof(acplayer[i].snap));
+	SimpleBuf mode=MakeSimple(NETSYNCMODE,0,simtick);
 	clientsock[i].SendReliable(mode.b,sizeof(mode.b),0);
 }
 
@@ -1379,12 +1278,12 @@ int NetServerMoves(int i)
 	return server&&i>0&&i<MAXPLAYERS&&SlotUsed(i)&&acplayer[i].auth.on;
 }
 
-//---- M16 phase 5 (docs/M16.md): what happens at a tick, to the clients that apply it
-//when they draw that tick (TICKEVENT); the others get the messages of before ----
+//---- M16 phase 5 (docs/M16.md): what happens at a tick, to the clients, which apply it
+//when they draw that tick (TICKEVENT) ----
 
 static int TickEvents(int i)
 {
-	return i>0&&i<MAXPLAYERS&&SlotUsed(i)&&acplayer[i].snap.tickev;
+	return i>0&&i<MAXPLAYERS&&SlotUsed(i)&&acplayer[i].auth.on;
 }
 
 static void SendTickEvent(int i,TickEvent *e)
@@ -1400,52 +1299,29 @@ static void EventPos(TickEvent *e,const Vector &p)
 	e->pos[0]=p.x;e->pos[1]=p.y;e->pos[2]=p.z;
 }
 
-//to client i: player killed was killed by killer, at pos (KILLEDPOSITION) or where
+//to client i: player killed was killed by killer, at pos (a KILLEDPOSITION) or where
 //it is (KILLED)
 static void SendKilledTo(int i,int killed,int killer,const Vector *pos)
 {
-	if(!SlotUsed(i)||i==0) return;
-	if(TickEvents(i))
-	{
-		TickEvent e;
-		memset(&e,0,sizeof(e));
-		e.tick=simtick;
-		e.kind=TE_KILLED;
-		e.player=(unsigned char)killed;
-		e.other=(unsigned char)killer;
-		if(pos)
-		{
-			e.haspos=1;
-			EventPos(&e,*pos);
-		}
-		SendTickEvent(i,&e);
-		return;
-	}
+	if(!TickEvents(i)) return;
+	TickEvent e;
+	memset(&e,0,sizeof(e));
+	e.tick=simtick;
+	e.kind=TE_KILLED;
+	e.player=(unsigned char)killed;
+	e.other=(unsigned char)killer;
 	if(pos)
 	{
-		KilledPosition kp;
-		kp.type=KILLEDPOSITION;
-		kp.killed=(char)killed;
-		kp.killer=(char)killer;
-		kp.pos=*pos;
-		char kpbuf[KILLEDPOSITIONSIZE];
-		int kpsize=WriteKilledPosition(kpbuf,sizeof(kpbuf),&kp);
-		clientsock[i].SendReliable(kpbuf,kpsize,0);
-		return;
+		e.haspos=1;
+		EventPos(&e,*pos);
 	}
-	SimpleBuf k=MakeSimple(KILLED,killed,killer);
-	clientsock[i].SendReliable(k.b,sizeof(k.b),0);
+	SendTickEvent(i,&e);
 }
 
 //to client i: the pain sound (or death cry) of player, as a PAIN from it would be
 static void SendPainTo(int i,int player,int sound)
 {
-	if(!SlotUsed(i)||i==0) return;
-	if(!TickEvents(i))
-	{
-		SendSimple(i,PAIN,player,sound);
-		return;
-	}
+	if(!TickEvents(i)) return;
 	TickEvent e;
 	memset(&e,0,sizeof(e));
 	e.tick=simtick;
@@ -1464,9 +1340,8 @@ static int HitLog()
 }
 
 //server: shooter's shot (or reload) f went here, as object obj (-1: none). To the
-//others: FIREGUN with the tick of the shot after it (older clients read the shot
-//only); a grenade, to the clients that read TICKEVENT, is the server's object
-//(TE_GRENADE), its thrower's too: its predicted copy has that number.
+//others: FIREGUN with the tick of the shot after it; a grenade is the server's
+//object (TE_GRENADE), to its thrower too: its predicted copy has that number.
 static uint16_t servergrenadeid;
 static void RelayShot(int shooter,FireGunDirection *f,int obj)
 {
@@ -1790,9 +1665,8 @@ static int OnGround(const Player *p)
 	return p->pos.y<ground+1.5f;
 }
 
-//phase 4: every player in the game as the server has it now, the host's, the ones
-//it moves and the 0.7 ones (theirs: what they sent, carried on with their keys);
-//not one whose position hasn't come yet
+//phase 4: every player in the game as the server has it now, the host's and the
+//ones it moves; not one whose first command hasn't come yet
 static void SnapCapture(SnapPlayers *s)
 {
 	memset(s,0,sizeof(*s));
@@ -1822,7 +1696,7 @@ static void SnapCapture(SnapPlayers *s)
 static void SnapAck(int i,uint32_t ack)
 {
 	AcSnap *sn=&acplayer[i].snap;
-	if(!sn->on) return;
+	if(!acplayer[i].auth.on) return;
 	if(!ack)
 	{
 		sn->anyack=0;
@@ -1833,10 +1707,10 @@ static void SnapAck(int i,uint32_t ack)
 	sn->anyack=1;
 }
 
-//at the end of every SNAPRATE-th tick (30 Hz): a SNAPSHOT to each client the server
-//moves (the exact state of its player after its last command run, phase 2) or that
-//gets the others (phase 4: as a delta on the newest it acked, if still kept, else
-//complete)
+//at the end of every SNAPRATE-th tick (30 Hz): a SNAPSHOT to each client in the game:
+//the exact state of its player after its last command run (phase 2, once one has
+//run), the others as a delta on the newest it acked, if still kept, else complete
+//(phase 4)
 static void SendSnapshots()
 {
 	if(!simtick||simtick%SNAPRATE) return;   //(tick 0 would read as "no base")
@@ -1846,8 +1720,8 @@ static void SendSnapshots()
 	{
 		AcAuth *a=&acplayer[i].auth;
 		AcSnap *sn=&acplayer[i].snap;
-		int self=a->on&&a->ran;
-		if(!slotused[i]||!(self||sn->on)||a->lastsnap==simtick) continue;
+		int self=a->ran;
+		if(!slotused[i]||!a->on||a->lastsnap==simtick) continue;
 		a->lastsnap=simtick;
 		Player *p=GetPlayer(i);
 		SnapshotMessage m;
@@ -1868,20 +1742,14 @@ static void SendSnapshots()
 		s.playstate=(unsigned char)p->playstate;
 		s.life=(short)(acplayer[i].life>0?acplayer[i].life+.5f:0);
 		char buf[SNAPSHOTSELFSIZE+SNAPMAXPLAYERS*SNAPENTRYMAX];
-		int size;
-		if(sn->on)
-		{
-			if(!captured) SnapCapture(&all);
-			captured=1;
-			cur=all;
-			memset(&cur.p[i],0,sizeof(cur.p[i]));   //its own player: predicted (phase 3)
-			const SnapPlayers *base=sn->anyack?SnapFind(&sn->sent,sn->acked):0;
-			m.basetick=base?sn->acked:0;
-			size=WritePlayerSnapshot(buf,sizeof(buf),&m,cur,base);
-			if(size) SnapStore(&sn->sent,simtick,cur);
-		}
-		else
-			size=WriteSnapshotSelf(buf,sizeof(buf),&m);
+		if(!captured) SnapCapture(&all);
+		captured=1;
+		cur=all;
+		memset(&cur.p[i],0,sizeof(cur.p[i]));   //its own player: predicted (phase 3)
+		const SnapPlayers *base=sn->anyack?SnapFind(&sn->sent,sn->acked):0;
+		m.basetick=base?sn->acked:0;
+		int size=WritePlayerSnapshot(buf,sizeof(buf),&m,cur,base);
+		if(size) SnapStore(&sn->sent,simtick,cur);
 		if(size) clientsock[i].Send(buf,size);
 	}
 }
@@ -1899,16 +1767,10 @@ void NetTickEnd()
 	SendSnapshots();
 }
 
-//every server frame: where each player is (the shooters' lag), and the hit mode
-//again to the clients when ac_serverhits or ac_enable change on the console
+//every server frame: the hit mode again to the clients when ac_serverhits or
+//ac_enable change on the console, the smoke grenades when who is in changes
 static void AcServerFrame()
 {
-	static int lastauth=-1;   //M16: sv_authmove or sv_snapshots changed on the console
-	int auth=(sv_authmove!=0)|(sv_snapshots!=0)<<1;
-	if(lastauth>=0&&auth!=lastauth)
-		for(int i=1;i<numplayers;i++)
-			if(slotused[i]&&GetPlayer(i)->playstate>=10) SendNetSyncMode(i);
-	lastauth=auth;
 	static int lastmode=-1;
 	int mode=AcServerHits();
 	if(mode!=lastmode&&lastmode>=0)
@@ -1922,16 +1784,6 @@ static void AcServerFrame()
 		for(int i=1;i<numplayers;i++)
 			if(slotused[i]&&GetPlayer(i)->playstate>=10) SendSmokeMode(i,smoke);
 	lastsmoke=smoke;
-	for(int i=0;i<numplayers;i++)
-	{
-		Player *pl=GetPlayer(i);
-		if(pl->playstate!=10)
-		{
-			acplayer[i].hist.count=0;   //dead: it comes back elsewhere
-			continue;
-		}
-		AcHistoryAdd(&acplayer[i].hist,pl->pos.x,pl->pos.y,pl->pos.z,curtime,20);
-	}
 }
 
 //the blocks client pnum sends: all near it (1), else none
@@ -2032,8 +1884,24 @@ static int NetEvents()
 	return on;
 }
 
+//debug aid (tests/net_*.py): HK_TESTPLACE=1 lets a client put its own player at x y z
+//with the chat line "/place x y z": the tests' clients can no longer say where they
+//are since protocol 6 (the server moves them). Never in a real game.
+static int TestPlace(int i,const char *msg,int len)
+{
+	static int on=getenv("HK_TESTPLACE")!=0;
+	ChatMessage chat;
+	if(!on||!ReadChat(msg,len,&chat)||strncmp(chat.text,"/place ",7)) return 0;
+	float x,y,z;
+	if(sscanf(chat.text+7,"%f %f %f",&x,&y,&z)==3&&AcFinite(x)&&AcFinite(y)&&AcFinite(z))
+	{
+		GetPlayer(i)->pos=Vector(x,y,z);
+		GetPlayer(i)->vel=Vector(0,0,0);
+	}
+	return 1;
+}
+
 void HandleSimpleServer(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source,int pnum);
-void ReceivePosition(const char *msg,int msglen,int sender);
 static void RelayVoice(VoiceMessage *voice);
 static void JoinNetAddGame(const char *msg,int msglen,SOCKADDR_IN source);
 void ReceiveChatMessage(char *msg,int msglen);
@@ -2143,7 +2011,6 @@ void Disconnect()
 	connected=0;
 	clientserverhits=0;
 	ClientAuthMove(0);
-	clienttickevents=0;
 	ClientEventsFlush(0);   //the game is over: nothing waits any more
 	PropsSetEnabled(1);   //no server to say otherwise: drawn (a land in the menus)
 	SmokeSetAllowed(0);
@@ -2524,12 +2391,6 @@ void ServerLoop()
 			GetPlayer(i)->timeout=curtime+PEERTIMEOUT;
 			switch(msg.type)
 			{
-				case PLAYERPOSITION:
-					{
-						//a client only moves itself; not one the server moves (M16)
-						if(!acplayer[i].auth.on) ReceivePosition((char *)&msg,clen,i);
-						break;
-					}
 				case INPUTCMD:
 					{
 						InputCmdMessage in;
@@ -2573,6 +2434,7 @@ void ServerLoop()
 				case CHATMESSAGE:
 					{
 						if(clen>=3) msg.buf[1]=i;   //sender: the client, whatever it wrote
+						if(TestPlace(i,(char *)&msg,clen)) break;
 						ReceiveChatMessage((char *)&msg,clen);
 						break;
 					}
@@ -2582,16 +2444,10 @@ void ServerLoop()
 					if(!ReadFireGun(&msg,clen,&firegun)) break;
 					if(NetEvents()) fprintf(stderr,"net: shot from player %d\n",i);
 					//M16 phase 5: at the tick it saw, from where its command put it, once
-					//that command has run here
+					//that command has run here (AuthShotRun: rate, ammo, dead, M11)
 					FireTick ft;
-					if(acplayer[i].snap.tickev&&acplayer[i].auth.on&&
-						ReadFireTick((char *)&msg+FIRETICKAT,clen-FIRETICKAT,&ft))
-					{
-						AuthShotQueue(i,&firegun,&ft,0);
-						break;
-					}
-					if(!AcFire(i,&firegun)) break;   //rate, ammo, dead (M11)
-					TryFireGun(i,firegun.pos,firegun.dir,firegun.reload);
+					if(!acplayer[i].auth.on||!ReadFireTick((char *)&msg+FIRETICKAT,clen-FIRETICKAT,&ft)) break;
+					AuthShotQueue(i,&firegun,&ft,0);
 					break;
 				}
 				case THROWSMOKE:
@@ -2601,17 +2457,8 @@ void ServerLoop()
 					if(!ReadFireGun(&msg,clen,&throwsmoke)) break;
 					if(NetEvents()) fprintf(stderr,"net: smoke grenade from player %d\n",i);
 					FireTick ft;   //phase 5, as FIREGUN: its predicted one has a number
-					if(acplayer[i].snap.tickev&&acplayer[i].auth.on&&
-						ReadFireTick((char *)&msg+FIRETICKAT,clen-FIRETICKAT,&ft))
-					{
-						AuthShotQueue(i,&throwsmoke,&ft,1);
-						break;
-					}
-					if(!(acplayer[i].caps&HELLOCAP_SMOKE)||!ServerSmokeAllowed()) break;
-					if(GetPlayer(i)->weapon!=4||GetPlayer(i)->playstate!=10) break;
-					throwsmoke.reload=0;
-					if(!AcFire(i,&throwsmoke)) break;
-					ServerThrowSmoke(i,throwsmoke.pos,throwsmoke.dir);
+					if(!acplayer[i].auth.on||!ReadFireTick((char *)&msg+FIRETICKAT,clen-FIRETICKAT,&ft)) break;
+					AuthShotQueue(i,&throwsmoke,&ft,1);
 					break;
 				}
 				case KILLEDPOSITION:
@@ -2625,9 +2472,7 @@ void ServerLoop()
 					AcCredited(i,kp.killer,killer);
 					kp.killer=killer;
 					kp.killed=i;
-					//where it died: where the server has it, if it moves it (M16)
-					if(acplayer[i].auth.on) kp.pos=GetPlayer(i)->pos;
-					GetPlayer(i)->pos=kp.pos;
+					kp.pos=GetPlayer(i)->pos;   //where it died: where the server has it (M16)
 					ReceiveKillMessage(i,kp.killer);
 					if(server)
 					{
@@ -2657,19 +2502,6 @@ void ServerLoop()
 	GetPlayer(0)->lastpingtime=curtime;
 	infosock.Flush();
 	
-	if(curtime>nextresend)
-	{
-		char localnum=GetLocalNum();
-		for(i=0;i<numplayers;i++)
-		for(int i2=1;i2<numplayers;i2++)
-		{
-			//not to a client that has the others in SNAPSHOT (M16 phase 4)
-			if(localnum!=i2&&i!=i2&&GetPlayer(i2)->playstate>=10&&GetPlayer(i)->playstate>=10&&
-					!acplayer[i2].snap.on)
-				SendPosition(i,i2);
-		}
-		nextresend=curtime+sv.positionresendtime;
-	}
 	for(i=1;i<numplayers;i++)
 		{
 			if(slotused[i]) clientsock[i].Flush();
@@ -2753,8 +2585,6 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 					SetLocalNum(msg2);
 					clientserverhits=0;   //until this server says otherwise (HITMODE)
 					ClientAuthMove(0);    //and NETSYNCMODE
-					clientsnapview=0;
-					clienttickevents=0;
 					ClientSnapReset();
 					PropsSetEnabled(0);   //and none until it says it has them (PROPSMODE)
 					SmokeSetAllowed(0);   //and SMOKEMODE
@@ -2814,14 +2644,6 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 				GetPlayer(msg)->packetloss=(WORD)(msg2>>16);
 				break;
 			}
-		case PAIN:
-			{
-				if(!ValidPlayer(msg)) break;
-				SetSoundPosition(msg2+1,GetPlayer(msg)->pos);
-				if(msg2<500) PlaySound(msg2+1,0);
-				else PlaySound(msg2,0);
-				break;
-			}
 		case PROPSMODE:
 			{
 				//the server's rocks and trees (docs/PROPS.md): ours come from the same
@@ -2846,18 +2668,14 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 			}
 		case NETSYNCMODE:
 			{
-				//the server moves us from our commands, or no longer (M16)
+				//in the game: the server moves us from our commands (M16)
 				if(!connected) break;
-				int on=(msg&HELLOCAP_INPUTS)!=0;
-				if(on!=clientauthmove)
-					ConsoleDisplayText((char *)(on?"the server moves us from our commands":"we move ourselves"));
-				ClientAuthMove(on);
-				int snaps=on&&(msg&HELLOCAP_SNAPSHOTS);   //phase 4: the others in SNAPSHOT
-				if(snaps!=clientsnapview) ClientSnapReset();
-				clientsnapview=snaps;
-				int tickev=snaps&&(msg&HELLOCAP_TICKEVENTS);   //phase 5
-				if(!tickev) ClientEventsFlush(1);
-				clienttickevents=tickev;
+				if(!clientauthmove)
+				{
+					ConsoleDisplayText((char *)"the server moves us from our commands");
+					ClientSnapReset();
+				}
+				ClientAuthMove(1);
 				if(getenv("HK_SYNCLOG")) fprintf(stderr,"netsyncmode %u %u\n",(unsigned)msg,(unsigned)msg2);
 				break;
 			}
@@ -2877,19 +2695,6 @@ void HandleSimpleClient(char type,DWORD msg,DWORD msg2,SOCKADDR_IN source)
 				if(GetLocalPlayer()->life<=0||GetLocalPlayer()->playstate!=10) break;
 				if((int)msg2>0) GetLocalPlayer()->life=(short)(msg2<100?msg2:100);
 				PlaySound(150,0);
-				break;
-			}
-		case KILLED:
-			{
-				if(!ValidPlayer(msg)||!ValidPlayer(msg2)) break;
-				if((int)msg==GetLocalNum())
-				{
-					//the server killed us (M11): die here too, unless our own death (already
-					//counted) crossed it
-					if(GetLocalPlayer()->life<=0||GetLocalPlayer()->playstate!=10) break;
-					GetLocalPlayer()->life=0;
-				}
-				ReceiveKillMessage(msg,msg2);
 				break;
 			}
 		case CHANGETEAM:
@@ -2972,21 +2777,13 @@ void ClientLoop()
 					HandleSimpleClient(simple.type2,simple.msg,simple.msg2,source);
 					break;
 				}
-			case PLAYERPOSITION:
-				{
-					if(connected&&!clientsnapview)   //(phase 4: the snapshots have them)
-					{
-						ReceivePosition((char *)&msg,msglen,-1);
-					}
-					break;
-				}
 			case SNAPSHOT:
 				{
 					//our player as the server moved it (M16 phase 2), the others (phase 4)
 					static SnapshotMessage snap;
 					if(!connected||!ReadSnapshotSelf(&msg,msglen,&snap)) break;
 					if(clientauthmove&&snap.self) ClientReconcile(&snap);
-					if(clientsnapview) ClientSnapshot(&msg,msglen,&snap);
+					if(clientauthmove) ClientSnapshot(&msg,msglen,&snap);
 					break;
 				}
 			case VOICE:
@@ -3056,7 +2853,7 @@ void ClientLoop()
 					//phase 5: someone else's shot, when we draw its tick (it comes from
 					//the shooter as we see it then)
 					uint32_t tick;
-					if(clienttickevents&&ReadFireRelayTick(&msg,msglen,&tick))
+					if(clientauthmove&&ReadFireRelayTick(&msg,msglen,&tick))
 					{
 						PendingEvent p;
 						memset(&p,0,sizeof(p));
@@ -3072,7 +2869,7 @@ void ClientLoop()
 			case TICKEVENT:
 				{
 					TickEvent e;
-					if(!connected||!clienttickevents||!ReadTickEvent(&msg,msglen,&e)) break;
+					if(!connected||!clientauthmove||!ReadTickEvent(&msg,msglen,&e)) break;
 					ClientTickEvent(&e);
 					break;
 				}
@@ -3095,15 +2892,6 @@ void ClientLoop()
 						ReceiveUpdateServerObject(&update);
 						SmokeReceived(update.num);
 					}
-					break;
-				}
-			case KILLEDPOSITION:
-				{
-					KilledPosition kp;
-					if(!ReadKilledPosition(&msg,msglen,&kp)) break;
-					if(!ValidPlayer(kp.killed)||!ValidPlayer(kp.killer)) break;
-					GetPlayer(kp.killed)->pos=kp.pos;
-					ReceiveKillMessage(kp.killed,kp.killer);
 					break;
 				}
 			case 0:
@@ -3136,12 +2924,7 @@ void ClientLoop()
 	if(connected&&GetLocalPlayer()->playstate>=10&&(curtime+(PEERTIMEOUT-SERVERSILENCE)>GetPlayer(0)->timeout||
 		datasock.reliablefailed))
 		ServerGone("Lost the connection to the server");
-	if(NetPredicting()) SendInputCmds();   //instead of our position (M16)
-	else if(curtime>nextresend)
-	{
-		if(GetLocalPlayer()->playstate>=10)SendPosition(GetLocalNum(),-1);
-		nextresend=curtime+sv.positionresendtime;
-	}
+	if(NetPredicting()) SendInputCmds();   //our commands (M16)
 	datasock.Flush();
 	infosock.Flush();
 	
@@ -3548,113 +3331,6 @@ void SendLandInfo(int num)
 	}
 }
 
-
-//the angles on the wire are computed with this pi, not redrawing.h's longer one
-static const double WIREPI=3.14159265;
-
-
-//converts the angle made by x and y to a byte
-
-unsigned char GetAng(float x,float y)
-{
-	float a=atan(y/x);
-	if(x<0)a-=WIREPI;
-	a/=WIREPI;
-	a+=.5;
-	a*=127;
-	a+=1;
-	//-a is in -128..-1: a negative float straight to unsigned char is undefined (UBSan);
-	//through int it wraps to 128..255, what the x86 and ARM code did anyway
-	return (unsigned char)(int)-a;
-}
-
-//called to receive a player position
-
-//sender: the client that sent it (server side), or -1 for positions relayed by the server
-void ReceivePosition(const char *msg,int msglen,int sender)
-{
-	PlayerPosition position;
-	if(!ReadPosition(msg,msglen,&position)) return;
-	PlayerPosition *pos=&position;
-	int pnum=sender>=0?sender:pos->pnum;
-	if(!ValidPlayer(pnum)) return;
-	if(sender>=0&&!AcPositionAccepted(sender,msg,msglen)) return;   //stale, too fast (M11 phase 3b)
-	Player *src=GetPlayer(pnum);
-	src->up=!!((1<<0)&pos->keys);
-	src->down=!!((1<<1)&pos->keys);
-	src->lstrafe=!!((1<<2)&pos->keys);
-	src->rstrafe=!!((1<<3)&pos->keys);
-	src->jetpack=!!((1<<4)&pos->keys);
-	src->hanggliding=!!((1<<5)&pos->keys);
-	src->pos.x=(float)pos->posx/65536*LANDGRIDSIZE;
-	src->pos.y=(float)pos->posy/65536*LANDGRIDSIZE;
-	src->pos.z=(float)pos->posz/65536*LANDGRIDSIZE;
-	src->fwd.x=sin(((float)pos->fwd/255-.5)*WIREPI*2);
-	src->fwd.z=cos(((float)pos->fwd/255-.5)*WIREPI*2);
-	src->tilt.x=sin(((float)pos->tilt/255-.5)*WIREPI*2);
-	src->tilt.y=cos(((float)pos->tilt/255-.5)*WIREPI*2);
-	src->vel.x=(float)pos->velx/64;
-	src->vel.y=(float)pos->vely/64;
-	src->vel.z=(float)pos->velz/64;
-	src->weapon=ValidWeapon(pos->weapon)?pos->weapon:0;
-	if(sender>=0)
-	{
-		//a client only reports being alive or dead, and stays dead while the
-		//server says so (M11)
-		if(pos->state==10||pos->state==11)
-			src->playstate=AcPosition(pnum,pos->state,&src->pos,src->weapon);
-	}
-	else if(pos->state!=1) 
-		src->playstate=pos->state;
-	src->nopos=0;
-	MakeClose(&src->pos);
-}
-
-//sends a certain player's position
-
-void SendPosition(char srcnum,char destnum)
-{
-	Player *src=GetPlayer(srcnum);
-	PlayerPosition pos;
-	pos.type=PLAYERPOSITION;
-	
-	pos.keys=0;
-	pos.keys|=(1<<0)*src->up;
-	pos.keys|=(1<<1)*src->down;
-	pos.keys|=(1<<2)*src->lstrafe;
-	pos.keys|=(1<<3)*src->rstrafe;
-	pos.keys|=(1<<4)*src->jetpack;
-	pos.keys|=(1<<5)*src->hanggliding;
-	
-	//a position on the world's edge (x == LANDGRIDSIZE) gives 65536, below 0 a negative
-	//value: out of range for a WORD (undefined, UBSan); through int it wraps, as the
-	//compiled code always did (65536 is 0: the same place in the repeating world)
-	pos.posx=(WORD)(int)(src->pos.x/LANDGRIDSIZE*65536);
-	pos.posy=(WORD)(int)(src->pos.y/LANDGRIDSIZE*65536);
-	pos.posz=(WORD)(int)(src->pos.z/LANDGRIDSIZE*65536);
-	pos.fwd=GetAng(src->fwd.x,src->fwd.z);
-	pos.tilt=GetAng(src->tilt.x,src->tilt.y);
-	pos.velx=(char)(int)(src->vel.x*64);   //same: wraps beyond +-2 units per frame
-	pos.vely=(char)(int)(src->vel.y*64);
-	pos.velz=(char)(int)(src->vel.z*64);
-	pos.weapon=src->weapon;
-	pos.pnum=srcnum;
-	pos.state=src->playstate;
-	char buf[POSITIONSEQSIZE];
-	int size=WritePosition(buf,sizeof(buf),&pos);
-	if(!server)
-	{
-		//numbered (HELLOCAP_POSSEQ, M11 phase 3b): the server drops the ones
-		//overtaken on the way. Older servers read the first 16 bytes only.
-		static unsigned int posseq;
-		WirePutU16(&buf[size],++posseq);
-		datasock.Send(buf,size+2);
-	}
-	else
-	{
-		clientsock[destnum].Send(buf,size);
-	}
-}
 
 //---- voice chat (src/audio/voice.cpp): VOICE goes only to players in range ----
 

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(Edifice VERSION 0.7.2 LANGUAGES C CXX)
+project(Edifice VERSION 0.8.0 LANGUAGES C CXX)
 
 # Edifice (HugeKilla) - one build, one code path for every platform:
 #   SDL2 (window, input, audio) + sokol_gfx (Metal on macOS, D3D11 on Windows,
@@ -693,7 +693,7 @@ if(EDIFICE_FUZZ)
   hk_fuzzer(sock tests/fuzz/fuzz_sock.cpp src/net/sock.cpp src/game/Vector.cpp)
   hk_fuzzer(simple tests/fuzz/fuzz_simple.cpp src/net/sock.cpp src/game/Vector.cpp)
   hk_fuzzer(hello tests/fuzz/fuzz_hello.cpp src/net/version.cpp src/game/Vector.cpp)
-  foreach(msg Position:PlayerPosition FireGun:FireGunDirection KilledPosition:KilledPosition
+  foreach(msg FireGun:FireGunDirection KilledPosition:KilledPosition
       UpdateServerObject:UpdateServerObject Snapshot:ServerObjectSnapshot
       ServerVars:ServerVarsMessage RGD:RemoteGameDataMessage LandInfo:LandInfo
       InputCmd:InputCmdMessage SnapshotSelf:SnapshotMessage FireTick:FireTick TickEvent:TickEvent)

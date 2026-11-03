@@ -632,7 +632,6 @@ void InitConsole()
 	AddConsoleVar(&sv.sr1000reloadtime,"sr1000reloadtime",1);
 	
 	AddConsoleVar(&sv.scale,"scale",1);
-	AddConsoleVar(&sv.positionresendtime,"positionresendtime",1);
 
 	AddConsoleVar(&sv.radarenable,"radarenable",1);
 	AddConsoleVar(&sv.chopperthrust,"chopperthrust",1);
