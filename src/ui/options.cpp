@@ -53,12 +53,13 @@ static Binding bindings[]=
 };
 #define NUMBINDINGS (int)(sizeof(bindings)/sizeof(bindings[0]))
 
-#define NUMSETTINGS 20
+#define NUMSETTINGS 21
 static const char *settinglabels[NUMSETTINGS]=
 {
 	"Fullscreen","VSync","Draw distance","Mouse sensitivity","Invert mouse","Volume",
 	"Voice volume","Microphone","Gun over walls","Explosions","Smoke","Impacts and splashes","Muzzle flash","Net stats",
-	"Graphics","Ultra: shadows","Ultra: grass","Ultra: water","Ultra: trees and rocks","Ultra: clouds"
+	"Graphics","Ultra: shadows","Ultra: grass","Ultra: water","Ultra: trees and rocks","Ultra: clouds",
+	"Ultra: render scale"
 };
 static int ultrawanted;    //Graphics: Ultra (renderer.h), when the renderer can
 
@@ -70,7 +71,7 @@ static int ultrawanted;    //Graphics: Ultra (renderer.h), when the renderer can
 #define PANELY2 .9f
 #define TITLEH .13f
 #define ROWTOP .72f            //top of the first row
-#define ROWHEIGHT .075f
+#define ROWHEIGHT (optionstab==1?.062f:.075f)   //Video/Audio: 21 rows above the help
 #define LABELX -.85f
 #define VALUEX .05f
 #define VALUEX2 .85f
@@ -248,7 +249,7 @@ void SetIniValues(const char *filename,const char *keys[],const char *values[],i
 
 static void SaveOptions()
 {
-#define NUMNUMBERS 20
+#define NUMNUMBERS 21
 #define MAXPADVALUES 32
 	const char *keys[NUMBINDINGS+NUMNUMBERS+MAXPADVALUES];
 	const char *values[NUMBINDINGS+NUMNUMBERS+MAXPADVALUES];
@@ -284,9 +285,10 @@ static void SaveOptions()
 	sprintf(numbers[17],"%d",rultraprefs.water);
 	sprintf(numbers[18],"%d",rultraprefs.vegetation);
 	sprintf(numbers[19],"%d",rultraprefs.clouds);
+	sprintf(numbers[20],"%d",rultraprefs.scale);
 	const char *numberkeys[NUMNUMBERS]={"changeres","vsync","drawdistance","mousesensitivity","mousereverse","volume",
 		"voicevolume","voicemic","fxviewmodel","fxexplosions","fxsmoke","fximpacts","fxmuzzleflash","netstats",
-		"graphics","ultrashadows","ultragrass","ultrawater","ultravegetation","ultraclouds"};
+		"graphics","ultrashadows","ultragrass","ultrawater","ultravegetation","ultraclouds","ultrascale"};
 	for(int i=0;i<NUMNUMBERS;i++)
 	{
 		keys[n]=numberkeys[i];
@@ -472,12 +474,25 @@ static void ChangeSetting(int row,int dir)
 	case 17: rultraprefs.water=!rultraprefs.water; break;
 	case 18: rultraprefs.vegetation=(rultraprefs.vegetation+(dir<0?2:1))%3; break;
 	case 19: rultraprefs.clouds=!rultraprefs.clouds; break;
+	case 20:
+	{
+		//the 3D scene's share of the screen's pixels (the HUD stays sharp)
+		static const int steps[]={50,60,67,75,85,100};
+		const int n=(int)(sizeof(steps)/sizeof(steps[0]));
+		int k=n-1;
+		for(int i=0;i<n;i++) if(steps[i]>=rultraprefs.scale) { k=i; break; }
+		k+=dir<0?-1:1;
+		if(k<0) k=0;
+		if(k>=n) k=n-1;
+		rultraprefs.scale=steps[k];
+		break;
+	}
 	}
 }
 
 static int IsStepper(int row)
 {
-	return row==2||row==3||row==5||row==6||row==15||row==16||row==18;
+	return row==2||row==3||row==5||row==6||row==15||row==16||row==18||row==20;
 }
 
 static void SettingText(int row,char *text)
@@ -507,6 +522,7 @@ static void SettingText(int row,char *text)
 	case 17: strcpy(text,rultraprefs.water?"Reflections":"Sky only"); break;
 	case 18: strcpy(text,rultraprefs.vegetation==0?"Off":rultraprefs.vegetation==1?"Near":"Far"); break;
 	case 19: strcpy(text,rultraprefs.clouds?"Volumetric":"Classic layers"); break;
+	case 20: sprintf(text,"%d%%",rultraprefs.scale); break;
 	}
 }
 

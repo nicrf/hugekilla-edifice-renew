@@ -516,19 +516,32 @@ void main() {
 		float snowy = smoothstep(0.5, 0.75, cmin) * (1.0 - smoothstep(0.06, 0.16, (cmax - cmin) / max(cmax, 1e-3)));
 		vec2 p = wpos.xz;
 		// two grasses, mixed at a large scale: no field looks the same twice
-		Mat grass = hd_layer(p, 0.0, 0.17, 16.0, eyedepth);
-		Mat dirt = hd_layer(p, 4.0, 0.19, -1.0, eyedepth);
-		Mat sand = hd_layer(p, 2.0, 0.26, -1.0, eyedepth);
-		Mat snow = hd_layer(p, 3.0, 0.09, -1.0, eyedepth);
-		// rock: triplanar, the slopes are steep
-		vec3 bw = pow(abs(gn), vec3(4.0));
-		bw /= bw.x + bw.y + bw.z;
-		Mat rx = hd_sample(wpos.zy * 0.23, 1.0);
-		Mat ry = hd_sample(wpos.xz * 0.23, 1.0);
-		Mat rz = hd_sample(wpos.xy * 0.23, 1.0);
-		Mat rock = mat_mix(mat_mix(rx, rz, bw.z / max(bw.x + bw.z, 1e-4)), ry, bw.y);
 		float dirtw = 1.0 - clamp(sp.r + sp.g + sp.b + sp.a, 0.0, 1.0);
 		float snoww = max(sp.a, snowy * (1.0 - sp.g));
+		// a layer is read only where it can show: hblend gives 0 when its weight plus
+		// its height (0..1, times 0.6) stays 0.2 below the other side's, so sand, rock
+		// and snow under 0.1, dirt under the grass's weight less 0.8 (the same image,
+		// several texture reads fewer a layer: on a cliff, rock alone is read)
+		Mat grass = hd_layer(p, 0.0, 0.17, 16.0, eyedepth);
+		Mat dirt = mat_zero();
+		Mat sand = mat_zero();
+		Mat snow = mat_zero();
+		Mat rock = mat_zero();
+		if (dirtw > sp.r - 0.8) dirt = hd_layer(p, 4.0, 0.19, -1.0, eyedepth);
+		if (sp.b > 0.1) sand = hd_layer(p, 2.0, 0.26, -1.0, eyedepth);
+		if (snoww > 0.1) snow = hd_layer(p, 3.0, 0.09, -1.0, eyedepth);
+		if (sp.g > 0.1) {
+			// rock: triplanar, the slopes are steep (an axis that weighs nothing isn't read)
+			vec3 bw = pow(abs(gn), vec3(4.0));
+			bw /= bw.x + bw.y + bw.z;
+			Mat rx = mat_zero();
+			Mat ry = mat_zero();
+			Mat rz = mat_zero();
+			if (bw.x > 1e-3) rx = hd_sample(wpos.zy * 0.23, 1.0);
+			if (bw.y > 1e-3) ry = hd_sample(wpos.xz * 0.23, 1.0);
+			if (bw.z > 1e-3) rz = hd_sample(wpos.xy * 0.23, 1.0);
+			rock = mat_mix(mat_mix(rx, rz, bw.z / max(bw.x + bw.z, 1e-4)), ry, bw.y);
+		}
 		// grass tinted like the map's ground (greener, yellower), less vivid than the photo
 		vec3 hue = classic / max(dot(classic, vec3(0.333)), 1e-3);
 		grass.albedo = grass_tint(grass.albedo, hue);
