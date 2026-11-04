@@ -50,11 +50,24 @@ void SmokeSetMode(int on)
 	smokemode=on&&SmokeAllowed();
 }
 
+//the counts the local player's grenade in hand uses: the smoke grenades' in smoke mode
+int *SmokeAmmoInGun(Player *cur)
+{
+	if(cur==GetLocalPlayer()&&cur->weapon==4&&SmokeModeOn()) return &cur->smokeingun;
+	return &cur->ammoingun[cur->weapon];
+}
+
+int *SmokeAmmoReserves(Player *cur)
+{
+	if(cur==GetLocalPlayer()&&cur->weapon==4&&SmokeModeOn()) return &cur->smokereserves;
+	return &cur->ammoreserves[cur->weapon];
+}
+
 int ThrowSmokeGrenade(Player *cur)
 {
 	if(curtime<cur->nextfiretime) return 0;
-	if(cur->ammoingun[4]<=0) return 0;
-	cur->ammoingun[4]--;   //a grenade of the same magazine (the server counts it as one)
+	if(cur->smokeingun<=0) return 0;
+	cur->smokeingun--;   //its own count, apart from the frag grenades
 	cur->nextfiretime=curtime+sv.grenadetimeout;
 	cur->kickvel+=.4;
 	cur->lastfiretime=curtime;

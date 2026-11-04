@@ -132,6 +132,10 @@ void SmokeSetAllowed(int allowed);
 int SmokeAllowed();
 //the local player throws one (FireGun, grenade in smoke mode): 1 if it went
 int ThrowSmokeGrenade(Player *cur);
+//the magazine and reserves of cur's weapon: the smoke grenades' own when the local
+//player holds the grenade in smoke mode
+int *SmokeAmmoInGun(Player *cur);
+int *SmokeAmmoReserves(Player *cur);
 //server: player pnum threw one from pos along dir (already checked); its slot in
 //sobject, -1 if there is no room
 int ServerThrowSmoke(int pnum,const Vector &pos,const Vector &dir);

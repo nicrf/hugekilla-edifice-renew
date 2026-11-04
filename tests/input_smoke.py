@@ -270,6 +270,27 @@ def scene_touch(exe, out):
     return checks, text + text2 + text3
 
 
+def scene_grenadeammo(exe, out):
+    """the smoke grenades have their own count: throwing one leaves the frag grenades'
+    as it was, and the HUD's count follows the mode"""
+    s = ("300:press:rightshoulder;310:press:dpright;330:log;"
+         "335:axis:righttrigger:1;345:axis:righttrigger:0;400:log;"
+         "405:press:dpright;420:log;"
+         "425:axis:righttrigger:1;435:axis:righttrigger:0;490:log")
+    text, exited = run(exe, s, dict(HK_AUTOSTART="1", HK_PLAY="1"), out)
+    st = parse_logs(text)
+    need = [330, 400, 420, 490]
+    missing = [f for f in need if f not in st]
+    if missing:
+        return [(False, "all logs (missing %s)" % missing)], text
+    a, b, c, d = (st[f] for f in need)
+    return [(a["weapon"] == 4 and a["smoke"] == 1, "grenade in hand, smoke mode"),
+            (b["smokes"] == a["smokes"] - 1 and b["frags"] == a["frags"],
+             "a smoke grenade thrown: smokes %d -> %d, frags %d -> %d" % (a["smokes"], b["smokes"], a["frags"], b["frags"])),
+            (c["smoke"] == 0 and d["frags"] == c["frags"] - 1 and d["smokes"] == c["smokes"],
+             "a frag grenade thrown: frags %d -> %d, smokes %d -> %d" % (c["frags"], d["frags"], c["smokes"], d["smokes"]))], text
+
+
 def scene_grenade(exe, out):
     """frag or smoke grenades: the pad's D-pad right switches them (at any time), with
     the grenade in hand the touch controls have a Frag/Smoke button, and the weapon
@@ -301,7 +322,8 @@ def wheel(exe, out):
 
 
 SCENES = [("game", scene_game), ("spawn", scene_spawn), ("menus", scene_menus), ("build", scene_build),
-          ("touch", scene_touch), ("grenade", scene_grenade)]
+          ("touch", scene_touch), ("grenade", scene_grenade),
+          ("grenadeammo", scene_grenadeammo)]
 
 
 def main():

@@ -1448,7 +1448,7 @@ void Redraw()
 	sprintf(tmptext,"%d",(int)(GetLocalPlayer()->ammoreserves[GetLocalPlayer()->weapon]));
 	//DrawText(.3,-.95,tmptext);
 	float offset=-1.2;
-	sprintf(tmptext,"%d",(int)(GetLocalPlayer()->ammoingun[GetLocalPlayer()->weapon]));
+	sprintf(tmptext,"%d",*SmokeAmmoInGun(GetLocalPlayer()));
 	UIText(.37f+offset,-.94f,tmptext,.065f);
 	//the grenade's mode (smoke.h): above its count
 	if(GetLocalPlayer()->weapon==4&&SmokeModeOn()) UIText(.37f+offset,-.875f,"smoke",.04f);
@@ -1477,7 +1477,7 @@ void Redraw()
 	UITextLines(-.4f,-.95f,curscore);
 	
 	TexBind(TEX_AMMOICON);
-	float bf=(float)GetLocalPlayer()->ammoingun[GetLocalPlayer()->weapon]/GetAmmoHold(GetLocalPlayer()->weapon);
+	float bf=(float)*SmokeAmmoInGun(GetLocalPlayer())/GetAmmoHold(GetLocalPlayer()->weapon);
 	RColor4f(bf/2+.5,bf/2+.5,bf/2+.5,bf/2+.5);
 	RBegin(RP_QUADS);
 	RTexCoord2f(0,1);RVertex2f(.35+offset,-.95);
