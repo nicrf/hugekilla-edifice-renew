@@ -74,6 +74,7 @@ struct Player
 	char owngun[20];
 	int ammoingun[20];
 	int ammoreserves[20];
+	int smokeingun,smokereserves;   //the smoke grenades (smoke.h): counted apart from the frag ones
 
 	DWORD timeout;
 	WORD ping;
