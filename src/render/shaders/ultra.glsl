@@ -1199,7 +1199,7 @@ void main() {
 layout(binding=0) uniform texture2D src;
 layout(binding=0) uniform sampler linsmp;
 layout(binding=0) uniform fxaa_params {
-	vec4 texel;         // xy: 1/size
+	vec4 texel;         // xy: 1/frame size, zw: 1/source size (smaller: Ultra's render scale)
 };
 
 out vec4 frag_color;
@@ -1210,7 +1210,7 @@ float luma(vec2 uv) {
 
 void main() {
 	vec2 uv = gl_FragCoord.xy * texel.xy;
-	vec2 t = texel.xy;
+	vec2 t = texel.zw;
 	vec4 center = textureLod(sampler2D(src, linsmp), uv, 0.0);
 	float m = center.a;
 	float n = luma(uv + vec2(0.0, -t.y));

@@ -328,6 +328,8 @@ static void ApplyGraphics()
 		rultraprefs.water=Clampi(v[2],0,1);
 		ULTRA_EXTRA_PREFS(v[3]);
 	}
+	//debug aid: HK_ULTRA_SCALE=percent over control.ini (the 3D scene's size)
+	if(const char *sc=getenv("HK_ULTRA_SCALE")) rultraprefs.scale=Clampi(atoi(sc),50,100);
 	RSetUltra(ultrawanted);
 }
 
@@ -369,6 +371,7 @@ void LoadOptions()
 	if(ini.GetValues("ultrawater")) rultraprefs.water=Clampi(ini.GetValuei("ultrawater"),0,1);
 	if(ini.GetValues("ultraclouds")) rultraprefs.clouds=ini.GetValuei("ultraclouds")!=0;
 	if(ini.GetValues("ultravegetation")) rultraprefs.vegetation=Clampi(ini.GetValuei("ultravegetation"),0,2);
+	if(ini.GetValues("ultrascale")) rultraprefs.scale=Clampi(ini.GetValuei("ultrascale"),50,100);
 	ApplyGraphics();
 }
 

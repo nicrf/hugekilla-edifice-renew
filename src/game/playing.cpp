@@ -772,6 +772,9 @@ void Playloop()
 		for(i=0;i<MAXPLAYERS;i++) tickprev[i]=GetPlayer(i)->pos;
 		correction*=CORRECTIONDECAY;
 		if(Magnitude(correction)<1e-4f) correction=Vector(0,0,0);
+		//the spinning object turns per tick (it turned per frame: faster at high frame rates)
+		for(int k=0;k<MAXSERVEROBJS;k++)
+			if(sobject[k].type==1) sobject[k].dir=Normalize(CrossProduct(sobject[k].dir,Vector(0,1,0))*.01+sobject[k].dir);
 		Play();
 	}
 	tickalpha=(float)(tickleft/TICKMS);
@@ -786,7 +789,6 @@ void Playloop()
 	PropsRefresh();   //which rocks and trees are there (blocks, stations)
 	for(i=0;i<MAXSERVEROBJS;i++)
 	{
-		if(sobject[i].type==1) sobject[i].dir=Normalize(CrossProduct(sobject[i].dir,Vector(0,1,0))*.01+sobject[i].dir);
 		if(sobject[i].attached!=(-1))
 		{
 			sobject[i].pos=GetPlayer(sobject[i].attached)->pos+Vector(0,.3,0);

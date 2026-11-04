@@ -209,6 +209,7 @@ int RUltra();                 //on and supported
 struct RUltraPrefs
 {
 	int shadows,grass,water,vegetation,clouds;
+	int scale;            //the 3D scene's size, in percent of the frame's pixels (50-100)
 };
 extern RUltraPrefs rultraprefs;
 

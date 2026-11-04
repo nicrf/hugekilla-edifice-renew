@@ -1243,6 +1243,7 @@ struct Drawer
 	int reflect;          //mirrored (the reflection pass)
 	Mat4 mirror;          //eye to the mirrored eye
 	int w,h;              //the target's size
+	int fw,fh;            //the frame's (the game's viewports and scissors are in its pixels)
 
 	void Reset()
 	{
@@ -1261,6 +1262,8 @@ struct Drawer
 			v[2]=w;
 			v[3]=h;
 		}
+		else if(fw!=w||fh!=h)
+			for(int i=0;i<4;i++) v[i]=(int)((long long)v[i]*(i%2?h:w)/(i%2?fh:fw));
 		if(memcmp(v,vp,sizeof(v)))
 		{
 			sg_apply_viewport(v[0],v[1],v[2],v[3],false);
@@ -1269,6 +1272,12 @@ struct Drawer
 		const int *s=c.scissor;
 		int full[4]={0,0,1<<15,1<<15};
 		if(reflect) s=full;
+		int scaled[4];
+		if(s!=full&&(fw!=w||fh!=h)&&s[2]<(1<<15))
+		{
+			for(int i=0;i<4;i++) scaled[i]=(int)((long long)s[i]*(i%2?h:w)/(i%2?fh:fw));
+			s=scaled;
+		}
 		if(memcmp(s,sc,sizeof(sc)))
 		{
 			sg_apply_scissor_rect(s[0],s[1],s[2],s[3],false);
@@ -1684,7 +1693,11 @@ void RUltraDrawScene(const RSokolFrame &f,const RSokolCmd *cmds,int n)
 {
 	if(!inited||failed) return;
 	LoadAssets();
-	EnsureTargets(f.width,f.height);
+	//the 3D scene at rultraprefs.scale percent of the frame's pixels, FXAA brings it
+	//back to the frame's size (the HUD stays sharp)
+	int scale=rultraprefs.scale>=50&&rultraprefs.scale<=100?rultraprefs.scale:100;
+	int sw=f.width*scale/100,sh=f.height*scale/100;
+	EnsureTargets(sw>1?sw:1,sh>1?sh:1);
 	UpdateLand();
 	UpdateSky();
 	VegPlace();
@@ -1787,6 +1800,8 @@ void RUltraDrawScene(const RSokolFrame &f,const RSokolCmd *cmds,int n)
 	Drawer d;
 	memset(&d,0,sizeof(d));
 	d.f=&f;
+	d.fw=f.width;
+	d.fh=f.height;
 
 	//3. the water's reflection: the same draws, mirrored in the water's plane
 	int planar=rultraprefs.water>0&&wateru&&!scene.underwater;
@@ -2055,7 +2070,7 @@ void RUltraDrawScene(const RSokolFrame &f,const RSokolCmd *cmds,int n)
 		b.samplers[SMP_linsmp]=linclamp;
 		sg_apply_bindings(&b);
 		fxaa_params_t fx;
-		Set4(fx.texel,1.0f/targetw,1.0f/targeth,0,0);
+		Set4(fx.texel,1.0f/f.width,1.0f/f.height,1.0f/targetw,1.0f/targeth);
 		sg_range r={&fx,sizeof(fx)};
 		sg_apply_uniforms(UB_fxaa_params,&r);
 		sg_draw(0,3,1);
