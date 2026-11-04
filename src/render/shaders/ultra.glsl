@@ -322,6 +322,9 @@ layout(binding=4) uniform texture2DArray hdalb;
 layout(binding=5) uniform texture2DArray hdnrm;
 layout(binding=6) uniform texture2DArray hdorm;
 layout(binding=3) uniform sampler hdsmp;
+// the normals and roughness without anisotropic filtering: it costs as much as the
+// rest of the scene on cliffs seen edge-on, and shows mostly in the colors
+layout(binding=5) uniform sampler hdsmpd;
 layout(binding=7) uniform texture2D shadowmap;
 @image_sample_type shadowmap depth
 layout(binding=4) uniform sampler shadowsmp;
@@ -354,8 +357,8 @@ struct Mat {
 Mat hd_sample(vec2 p, float layer) {
 	Mat m;
 	m.albedo = texture(sampler2DArray(hdalb, hdsmp), vec3(p, layer)).rgb;
-	m.nrm = texture(sampler2DArray(hdnrm, hdsmp), vec3(p, layer)).rgb * 2.0 - 1.0;
-	vec3 orm = texture(sampler2DArray(hdorm, hdsmp), vec3(p, layer)).rgb;
+	m.nrm = texture(sampler2DArray(hdnrm, hdsmpd), vec3(p, layer)).rgb * 2.0 - 1.0;
+	vec3 orm = texture(sampler2DArray(hdorm, hdsmpd), vec3(p, layer)).rgb;
 	m.ao = orm.r;
 	m.rough = orm.g;
 	m.height = orm.b;
@@ -414,10 +417,10 @@ Mat hex_one(vec2 uv, vec2 v, vec2 dx, vec2 dy, float layer, float variant, out f
 	float l = (variant > 0.0 && fract(h.y * 13.7) > 0.55) ? variant : layer;
 	Mat m;
 	m.albedo = textureGrad(sampler2DArray(hdalb, hdsmp), vec3(q, l), qdx, qdy).rgb;
-	vec3 n = textureGrad(sampler2DArray(hdnrm, hdsmp), vec3(q, l), qdx, qdy).rgb * 2.0 - 1.0;
+	vec3 n = textureGrad(sampler2DArray(hdnrm, hdsmpd), vec3(q, l), qdx, qdy).rgb * 2.0 - 1.0;
 	n.xy = transpose(r) * n.xy;
 	m.nrm = n;
-	vec3 orm = textureGrad(sampler2DArray(hdorm, hdsmp), vec3(q, l), qdx, qdy).rgb;
+	vec3 orm = textureGrad(sampler2DArray(hdorm, hdsmpd), vec3(q, l), qdx, qdy).rgb;
 	m.ao = orm.r;
 	m.rough = orm.g;
 	m.height = orm.b;

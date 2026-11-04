@@ -125,7 +125,7 @@ static sg_shader shhdr,shlit,shshadow,shsky,shwater,shgrass,shcopy,shdown,shup,s
 static sg_pipeline hdrpipes[NUMKEYS],litpipes[NUMKEYS],smokepipes[NUMKEYS];
 static sg_shader shsmoke;
 static sg_pipeline shadowpipe,skypipe,waterpipe,grasspipe,copypipe,downpipe,uppipe,rayspipe,compositepipe,fxaapipe;
-static sg_sampler linclamp,pointclamp,linrepeat,hdsampler,shadowsampler,lutsampler;
+static sg_sampler linclamp,pointclamp,linrepeat,hdsampler,hddetailsampler,shadowsampler,lutsampler;
 static int inited,failed;
 
 struct Target
@@ -424,6 +424,7 @@ void RUltraInit()
 		noisesampler=sg_make_sampler(&nd);
 	}
 	hdsampler=Sampler(SG_FILTER_LINEAR,SG_FILTER_LINEAR,SG_WRAP_REPEAT,soft?1:8);
+	hddetailsampler=Sampler(SG_FILTER_LINEAR,SG_FILTER_LINEAR,SG_WRAP_REPEAT,1);   //normals, roughness
 	sg_sampler_desc sd;
 	memset(&sd,0,sizeof(sd));
 	sd.min_filter=sd.mag_filter=SG_FILTER_LINEAR;
@@ -1316,6 +1317,7 @@ struct Drawer
 			b.samplers[SMP_lutsmp]=lutsampler;
 			b.samplers[SMP_landsmp]=linrepeat;
 			b.samplers[SMP_hdsmp]=hdsampler;
+			b.samplers[SMP_hdsmpd]=hddetailsampler;
 			b.samplers[SMP_shadowsmp]=shadowsampler;
 			sg_apply_bindings(&b);
 			view=c.view.id;
