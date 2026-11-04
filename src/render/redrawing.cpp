@@ -173,8 +173,8 @@ static int InLandWedge(float x,float z,float r)
 {
 	float dx=x-landeyex,dz=z-landeyez;
 	float d=sqrtf(dx*dx+dz*dz);
-	float near=r*1.5f+40;
-	if(d<near) return 1;
+	float closeby=r*1.5f+40;   //("near" is a macro of windows.h)
+	if(d<closeby) return 1;
 	float c=(dx*landdirx+dz*landdirz)/d;
 	if(c>1) c=1;
 	if(c<-1) c=-1;
@@ -1712,7 +1712,8 @@ static int UltraBlocked(float x,float y,float z)
 //Debug aid for captures: HK_CAMERA="x,z,above,yaw,pitch" draws the world from x,z
 //(above the land or the water by "above"), looking at yaw (degrees, 0 along +z,
 //90 along +x) and pitch; HK_CAMERA=lake finds a lake's shore near the player and
-//looks across it. Only the view moves: the player stays where he is.
+//looks across it. Only the view moves: the player stays where he is. HK_CAMERA_MOVE
+//slides it a little every frame.
 static Player *DebugCamera(Player *cur)
 {
 	static const char *cam=getenv("HK_CAMERA");
@@ -1760,8 +1761,21 @@ static Player *DebugCamera(Player *cur)
 	}
 	if(!found) return cur;
 	p=*cur;
-	float g=GetLandSmooth(x,z);
-	if(g<WATERHEIGHT) g=WATERHEIGHT;
+	static float g=-1e9f;
+	if(g<-1e8f)
+	{
+		g=GetLandSmooth(x,z);
+		if(g<WATERHEIGHT) g=WATERHEIGHT;
+	}
+	//HK_CAMERA_MOVE="dx,dz": the view slides by that much a frame, at the same height
+	//(what moving does to the water and the land, frame by frame, in one run)
+	static float mx,mz;
+	static int moving=getenv("HK_CAMERA_MOVE")&&sscanf(getenv("HK_CAMERA_MOVE"),"%f,%f",&mx,&mz)==2;
+	if(moving)
+	{
+		x+=mx;
+		z+=mz;
+	}
 	p.pos=Vector(x,g+above,z);
 	float yr=yaw*3.14159265f/180,pr=pitch*3.14159265f/180;
 	p.dir=Vector(sinf(yr)*cosf(pr),sinf(pr),cosf(yr)*cosf(pr));
