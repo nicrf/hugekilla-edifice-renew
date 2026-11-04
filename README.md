@@ -36,7 +36,7 @@ Téléchargez l'archive de votre système dans les [Releases](https://github.com
 
 **Jouer par Internet** : l'hôte choisit une visibilité « Internet » dans *Server Setup* (publique, ou amis/privée avec un code de partie à partager), les autres ouvrent l'onglet *Internet* de l'écran *Join* (ou tapent le code). La connexion est directe et chiffrée entre joueurs, ou passe par le relais du serveur de parties quand rien d'autre ne passe : aucun port à ouvrir sur la box.
 
-Grenade fumigène : `5` une seconde fois la grenade en main, ou la molette (elle s'arrête sur *Smoke grenade* juste après *Grenade*).
+Grenade fumigène : `5` une seconde fois la grenade en main, ou la molette (elle s'arrête sur *Smoke grenade* juste après *Grenade*). Les fumigènes ont leurs propres munitions (autant que de grenades), rechargées à part.
 
 `F6` plein écran · `` ` `` console · `Échap` libérer/capturer la souris. En mode bac à sable, la console permet de construire sans limite : tapez `gamemode 1`.
 
