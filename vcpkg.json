@@ -1,6 +1,6 @@
 {
   "name": "edifice",
-  "version-string": "0.8.1",
+  "version-string": "0.8.2",
   "description": "Edifice (HugeKilla) - optional dependencies, installed by vcpkg only when their feature is enabled",
   "dependencies": [],
   "features": {
