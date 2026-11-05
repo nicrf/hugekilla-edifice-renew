@@ -1538,6 +1538,7 @@ static void DrawWater(const RSokolFrame &f,const RSokolUniforms &u,int planar)
 	Mat4 inv;
 	RSokolInverse(scene.view,&inv);
 	Set4(fs.view,-inv.m[8],-inv.m[9],-inv.m[10],0);
+	Set4(fs.waves,vs.waves[0],vs.waves[1],vs.waves[2],scene.time);
 	r.ptr=&fs;
 	r.size=sizeof(fs);
 	sg_apply_uniforms(UB_water_fs_params,&r);

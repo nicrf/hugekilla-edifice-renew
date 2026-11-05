@@ -712,6 +712,29 @@ void main() {
 
 //---------------------------------------------------------------- water
 
+// Gerstner waves (the vertices and the pixels of the water). The grid follows the
+// camera: a wave is moved only where the grid holds 4 vertices to its length, and its
+// normal is computed at each pixel's own place in the world, faded out where a pixel
+// is wider than a quarter of it (else the waves slid with the camera and shimmered)
+@block waves_fn
+const vec4 WAVES[4] = vec4[4](vec4(1.0, 0.3, 9.0, 0.16), vec4(0.6, 1.0, 5.3, 0.14),
+	vec4(-0.7, 0.5, 3.1, 0.12), vec4(0.2, -1.0, 1.9, 0.10));   // direction xy, wavelength, steepness
+
+// adds wave w (weighted by amp) at p: its offset, and its slopes to the tangents
+vec3 gerstner(vec2 p, vec4 w, float t, float amp, inout vec3 tn, inout vec3 bn) {
+	float k = 2.0 * 3.14159265 / w.z;
+	float c = sqrt(9.8 / k) * 0.6;
+	vec2 d = normalize(w.xy);
+	float f = k * (dot(d, p) - c * t);
+	float a = w.w / k;
+	float s = w.w * sin(f) * amp;
+	float co = w.w * cos(f) * amp;
+	tn += vec3(-d.x * d.x * s, d.x * co, -d.x * d.y * s);
+	bn += vec3(-d.x * d.y * s, d.y * co, -d.y * d.y * s);
+	return vec3(d.x * (a * cos(f)), a * sin(f), d.y * (a * cos(f))) * amp;
+}
+@end
+
 @vs water_vs
 layout(binding=0) uniform water_vs_params {
 	mat4 viewproj;      // world to clip
@@ -722,43 +745,22 @@ layout(binding=0) uniform water_vs_params {
 in vec2 position;       // the grid, around the camera
 
 out vec3 wpos;
-out vec3 wnormal;
-out float crest;
 
-const float PI = 3.14159265;
-
-// Gerstner waves: direction xy, wavelength, steepness
-vec3 gerstner(vec2 p, vec4 w, float t, inout vec3 tn, inout vec3 bn) {
-	float k = 2.0 * PI / w.z;
-	float c = sqrt(9.8 / k) * 0.6;
-	vec2 d = normalize(w.xy);
-	float f = k * (dot(d, p) - c * t);
-	float a = w.w / k;
-	tn += vec3(-d.x * d.x * (w.w * sin(f)), d.x * (w.w * cos(f)), -d.x * d.y * (w.w * sin(f)));
-	bn += vec3(-d.x * d.y * (w.w * sin(f)), d.y * (w.w * cos(f)), -d.y * d.y * (w.w * sin(f)));
-	return vec3(d.x * (a * cos(f)), a * sin(f), d.y * (a * cos(f)));
-}
+@include_block waves_fn
 
 void main() {
 	vec2 p = position + cam.xz;
 	float dist = length(position);
 	float amp = waves.x * (1.0 - smoothstep(waves.y, waves.z, dist));
-	vec3 tn = vec3(1.0, 0.0, 0.0);
-	vec3 bn = vec3(0.0, 0.0, 1.0);
+	// the grid's spacing here (MakeWaterGrid: 160 rings to 1200 as (r/160)^2.4, 256 around)
+	float ring = 160.0 * pow(dist / 1200.0, 1.0 / 2.4);
+	float spacing = max(18.0 * pow(max(ring, 1.0) / 160.0, 1.4), 6.2831853 * dist / 256.0);
+	vec3 tn = vec3(0.0);
+	vec3 bn = vec3(0.0);
 	vec3 o = vec3(0.0);
-	float t = cam.w;
-	vec3 t0 = vec3(0.0);
-	vec3 b0 = vec3(0.0);
-	o += gerstner(p, vec4(1.0, 0.3, 9.0, 0.16), t, t0, b0);
-	o += gerstner(p, vec4(0.6, 1.0, 5.3, 0.14), t, t0, b0);
-	o += gerstner(p, vec4(-0.7, 0.5, 3.1, 0.12), t, t0, b0);
-	o += gerstner(p, vec4(0.2, -1.0, 1.9, 0.10), t, t0, b0);
-	o *= amp;
-	tn += t0 * amp;
-	bn += b0 * amp;
+	for (int i = 0; i < 4; i++)
+		o += gerstner(p, WAVES[i], cam.w, amp * (1.0 - smoothstep(WAVES[i].z / 8.0, WAVES[i].z / 4.0, spacing)), tn, bn);
 	wpos = vec3(p.x + o.x, cam.y + o.y, p.y + o.z);
-	wnormal = normalize(cross(bn, tn));
-	crest = o.y / max(waves.x * 0.25, 1e-3);
 	gl_Position = viewproj * vec4(wpos, 1.0);
 }
 @end
@@ -783,13 +785,13 @@ layout(binding=4) uniform sampler shadowsmp;
 layout(binding=1) uniform water_fs_params {
 	vec4 screen;        // xy: 1/size of the frame, z: planar reflection on, w: -
 	vec4 view;          // the camera's forward direction (eye depth of a point), w: -
+	vec4 waves;         // as water_vs_params: x amplitude scale, y fade start, z fade end; w: time
 };
 @include_block sky_fn
 @include_block shadow_fn
+@include_block waves_fn
 
 in vec3 wpos;
-in vec3 wnormal;
-in float crest;
 
 out vec4 frag_color;
 
@@ -799,6 +801,17 @@ void main() {
 	float dist = length(toeye);
 	vec3 v = toeye / dist;
 	float t = suncolor.w;
+	// the waves' normal and height here, in the world (not where the grid's vertices are)
+	float amp = waves.x * (1.0 - smoothstep(waves.y, waves.z, length(wpos.xz - eyepos.xz)));
+	vec2 fw = fwidth(wpos.xz);
+	float px = max(fw.x, fw.y);
+	vec3 tn = vec3(0.0);
+	vec3 bn = vec3(0.0);
+	float wy = 0.0;
+	for (int i = 0; i < 4; i++)
+		wy += gerstner(wpos.xz, WAVES[i], waves.w, amp * (1.0 - smoothstep(WAVES[i].z * 0.25, WAVES[i].z * 0.5, px)), tn, bn).y;
+	vec3 wnormal = normalize(cross(vec3(0.0, 0.0, 1.0) + bn, vec3(1.0, 0.0, 0.0) + tn));
+	float crest = wy / max(waves.x * 0.25, 1e-3);
 	// small waves: two scrolling normal maps over the Gerstner normal
 	vec2 p = wpos.xz;
 	vec3 n1 = texture(sampler2D(wnormals, repsmp), p * 0.11 + vec2(t * 0.021, t * 0.013)).xzy * 2.0 - 1.0;
