@@ -772,6 +772,9 @@ void Playloop()
 		for(i=0;i<MAXPLAYERS;i++) tickprev[i]=GetPlayer(i)->pos;
 		correction*=CORRECTIONDECAY;
 		if(Magnitude(correction)<1e-4f) correction=Vector(0,0,0);
+		//the spinning object turns per tick (it turned per frame: faster at high frame rates)
+		for(int k=0;k<MAXSERVEROBJS;k++)
+			if(sobject[k].type==1) sobject[k].dir=Normalize(CrossProduct(sobject[k].dir,Vector(0,1,0))*.01+sobject[k].dir);
 		Play();
 	}
 	tickalpha=(float)(tickleft/TICKMS);
@@ -786,7 +789,6 @@ void Playloop()
 	PropsRefresh();   //which rocks and trees are there (blocks, stations)
 	for(i=0;i<MAXSERVEROBJS;i++)
 	{
-		if(sobject[i].type==1) sobject[i].dir=Normalize(CrossProduct(sobject[i].dir,Vector(0,1,0))*.01+sobject[i].dir);
 		if(sobject[i].attached!=(-1))
 		{
 			sobject[i].pos=GetPlayer(sobject[i].attached)->pos+Vector(0,.3,0);
@@ -993,7 +995,7 @@ static void AimBot(Player *cur)
 	if(fire)
 	{
 		cur->firing=1;
-		if(cur->playstate==10&&cur->ammoingun[cur->weapon]<=0) HandleKey(controls.reload,0);
+		if(cur->playstate==10&&*SmokeAmmoInGun(cur)<=0) HandleKey(controls.reload,0);
 	}
 	if(target==GetLocalNum()||target<0||target>=GetNumPlayers()||!PlayerSlotUsed(target)) return;
 	Player *t=GetPlayer(target);
@@ -1068,6 +1070,8 @@ void Play()
 				cur->ammoreserves[i]=500;
 				cur->owngun[i]=0;
 			}
+			cur->smokeingun=GetAmmoHold(4);
+			cur->smokereserves=500;
 			cur->owngun[0]=0;
 			cur->owngun[1]=0;
 			cur->owngun[2]=0;
@@ -1648,18 +1652,20 @@ void HandleKey(DWORD key,DWORD flags)
 	if(key==KEY_F3) LoadSounds();
 	if(key==controls.reload&&curtime>GetLocalPlayer()->nextfiretime) 
 	{
-		int transferamt=GetAmmoHold(GetLocalPlayer()->weapon);
-		transferamt-=GetLocalPlayer()->ammoingun[GetLocalPlayer()->weapon];
+		Player *me=GetLocalPlayer();
+		int *ingun=SmokeAmmoInGun(me),*reserves=SmokeAmmoReserves(me);   //the smoke grenades' own, in smoke mode
+		int transferamt=GetAmmoHold(me->weapon);
+		transferamt-=*ingun;
 		if(transferamt)
 		{
-			TryFireGun(GetLocalNum(),GetLocalPlayer()->pos,GetLocalPlayer()->dir,1);
-			if(GetLocalPlayer()->ammoreserves[GetLocalPlayer()->weapon]<transferamt)
+			TryFireGun(GetLocalNum(),me->pos,me->dir,1);
+			if(*reserves<transferamt)
 			{
-				transferamt=GetLocalPlayer()->ammoreserves[GetLocalPlayer()->weapon];
+				transferamt=*reserves;
 			}
-			GetLocalPlayer()->gundowntime=curtime;
-			GetLocalPlayer()->ammoingun[GetLocalPlayer()->weapon]+=transferamt;
-			GetLocalPlayer()->nextfiretime=curtime+GetReloadTime(GetLocalPlayer()->weapon);
+			me->gundowntime=curtime;
+			*ingun+=transferamt;
+			me->nextfiretime=curtime+GetReloadTime(me->weapon);
 		}
 	}
 }

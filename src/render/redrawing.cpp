@@ -43,6 +43,9 @@ float cloudmistposx,cloudmistposy;
 Vector camup;
 
 int curfps;
+//this frame's time in 60ths of a second: the clouds and the water's ripples move by
+//it (they moved a fixed step a frame: faster at high frame rates)
+static float drawstep=1;
 int framefps;
 float sunflarebright;
 
@@ -141,6 +144,53 @@ if(curtex!=landtex[(x&LANDGRIDSIZE-1)/LANDTEXBLOCKSIZE][(y&LANDGRIDSIZE-1)/LANDT
 {REnd();TexBind((curtex=landtex[(x&LANDGRIDSIZE-1)/LANDTEXBLOCKSIZE][(y&LANDGRIDSIZE-1)/LANDTEXBLOCKSIZE])+TEX_GROUND0);RBegin(type);}\
 
 
+//the land outside the camera's horizontal field of view isn't drawn (it was drawn all
+//around the player, then again for every Ultra shadow cascade and the reflection).
+//A wide wedge (wider screens, the shadows of what is just aside), nothing culled near
+//the player, nor when looking steeply down. HK_NOLANDCULL: everything (to compare).
+static int landcull;
+static float landeyex,landeyez,landdirx,landdirz,landhalf;
+static float landshadow;   //Ultra's shadows: how far towards the sun (+z) the land may cast into view
+
+static void SetLandCull(const Vector &eye,const Vector &dir)
+{
+	static int off=getenv("HK_NOLANDCULL")!=0;
+	float l=sqrtf(dir.x*dir.x+dir.z*dir.z);
+	landcull=!off&&l>0.45f;   //about 63 degrees down and more: all of it
+	if(!landcull) return;
+	landeyex=eye.x;
+	landeyez=eye.z;
+	landdirx=dir.x/l;
+	landdirz=dir.z/l;
+	landhalf=75*3.1415926f/180;   //half the wedge: a 70-degree, aspect 1.2 view is 40, a 21:9 screen about 58
+	//the sun is at (0,sunheight,1) (DrawSun): 150 units of relief cast 150/sunheight
+	float sh=GetSkySettings()->sunheight;
+	landshadow=0;
+	if(ultrascene&&rultraprefs.shadows) landshadow=sh>0.375f?150/sh:400;
+}
+
+static int InLandWedge(float x,float z,float r)
+{
+	float dx=x-landeyex,dz=z-landeyez;
+	float d=sqrtf(dx*dx+dz*dz);
+	float closeby=r*1.5f+40;   //("near" is a macro of windows.h)
+	if(d<closeby) return 1;
+	float c=(dx*landdirx+dz*landdirz)/d;
+	if(c>1) c=1;
+	if(c<-1) c=-1;
+	return acosf(c)<=landhalf+atanf(r*1.5f/d);
+}
+
+//the square of half side r at (x,z) may be in view
+static int LandVisible(float x,float z,float r)
+{
+	if(!landcull||InLandWedge(x,z,r)) return 1;
+	//its shadow falls away from the sun, on z-t
+	for(int k=1;k<=4&&landshadow>0;k++)
+		if(InLandWedge(x,z-landshadow*k/4,r+landshadow/8)) return 1;
+	return 0;
+}
+
 //draws a block of land with a hole in the middle to allow for less detail far away by calling this function a few times
 
 void DrawMip(float fcx,float fcy,float fhcx,float fhcy,int prevsize,int newsize,int res)
@@ -187,6 +237,7 @@ void DrawMip(float fcx,float fcy,float fhcx,float fhcy,int prevsize,int newsize,
 	
 	for(x=minx+res;x<=maxx-res;x+=res*2)
 	{
+		if(!LandVisible(x+res,y+res,res)) continue;
 		TEXTURESWITCH(x,y,RP_TRIANGLES);
 		LANDVERTEX(x,y);
 		LANDVERTEX(x,y+res*2);
@@ -205,6 +256,7 @@ void DrawMip(float fcx,float fcy,float fhcx,float fhcy,int prevsize,int newsize,
 	RBegin(RP_TRIANGLES);
 	for(x=minx+res;x<=maxx-res;x+=res*2)
 	{
+		if(!LandVisible(x+res,y+res,res)) continue;
 		TEXTURESWITCH(x,y,RP_TRIANGLES);
 		LANDVERTEX(x,y+res*2);
 		LANDVERTEX(x,y);
@@ -223,6 +275,7 @@ void DrawMip(float fcx,float fcy,float fhcx,float fhcy,int prevsize,int newsize,
 	RBegin(RP_TRIANGLES);
 	for(y=miny+res;y<=maxy-res;y+=res*2)
 	{
+		if(!LandVisible(x+res,y+res,res)) continue;
 		TEXTURESWITCH(x,y,RP_TRIANGLES);
 		LANDVERTEX(x+res*2,y);
 		LANDVERTEX(x,y);
@@ -241,6 +294,7 @@ void DrawMip(float fcx,float fcy,float fhcx,float fhcy,int prevsize,int newsize,
 	RBegin(RP_TRIANGLES);
 	for(y=miny+res;y<=maxy-res;y+=res*2)
 	{
+		if(!LandVisible(x+res,y+res,res)) continue;
 		TEXTURESWITCH(x,y,RP_TRIANGLES);
 		LANDVERTEX(x,y);
 		LANDVERTEX(x+res*2,y);
@@ -293,55 +347,89 @@ void DrawMip(float fcx,float fcy,float fhcx,float fhcy,int prevsize,int newsize,
 	{
 		
 		RBegin(LANDSCAPERENDER);		
+		int on=1;
 		for(x=minx+res;x<=maxx;x+=res)
 		{
+			if(!LandVisible(x,y+res*0.5f,res))
+			{
+				if(on) REnd();
+				on=0;
+				continue;
+			}
+			if(!on) RBegin(LANDSCAPERENDER);
+			on=1;
 			LANDVERTEX(x,y);
 			LANDVERTEX(x,y+res);
 			TEXTURESWITCHRD(x,y,LANDSCAPERENDER,x,y,x,y+res);
 			
 			
 		}
-		REnd();
+		if(on) REnd();
 		
 	}
 	for(y=miny+res;y<inminy;y+=res)
 	{
 		RBegin(LANDSCAPERENDER);		
+		int on=1;
 		for(x=minx+res;x<=maxx;x+=res)
 		{
+			if(!LandVisible(x,y+res*0.5f,res))
+			{
+				if(on) REnd();
+				on=0;
+				continue;
+			}
+			if(!on) RBegin(LANDSCAPERENDER);
+			on=1;
 			LANDVERTEX(x,y);
 			LANDVERTEX(x,y+res);
 			TEXTURESWITCHRD(x,y,LANDSCAPERENDER,x,y,x,y+res);
 			
 		}
-		REnd();
+		if(on) REnd();
 	}
 	RCullFace(RFACE_FRONT);
 	for(x=minx+res;x<inminx;x+=res)
 	{
 		RBegin(LANDSCAPERENDER);		
+		int on=1;
 		for(y=inminy;y<=inmaxy;y+=res)
 		{
-			
+			if(!LandVisible(x+res*0.5f,y,res))
+			{
+				if(on) REnd();
+				on=0;
+				continue;
+			}
+			if(!on) RBegin(LANDSCAPERENDER);
+			on=1;
 			LANDVERTEX(x,y);
 			LANDVERTEX(x+res,y);
 			TEXTURESWITCHRD(x,y,LANDSCAPERENDER,x,y,x+res,y);
 			
 		}
-		REnd();
+		if(on) REnd();
 	}
 	for(x=inmaxx;x<maxx;x+=res)
 	{
 		RBegin(LANDSCAPERENDER);		
+		int on=1;
 		for(y=inminy;y<=inmaxy;y+=res)
 		{
-			
+			if(!LandVisible(x+res*0.5f,y,res))
+			{
+				if(on) REnd();
+				on=0;
+				continue;
+			}
+			if(!on) RBegin(LANDSCAPERENDER);
+			on=1;
 			LANDVERTEX(x,y);
 			LANDVERTEX(x+res,y);
 			TEXTURESWITCHRD(x,y,LANDSCAPERENDER,x,y,x+res,y);
 			
 		}
-		REnd();
+		if(on) REnd();
 	}
 }	
 
@@ -926,8 +1014,8 @@ void DrawWater(int size,float cx,float cy)
 	{
 		//Ultra: its own surface, waves and all (visual only: the game's water stays
 		//at WATERHEIGHT); the lily pads would sink in the waves
-		woy+=.0009;
-		wox+=.0003;
+		woy+=.0009f*drawstep;
+		wox+=.0003f*drawstep;
 		if(wox>4) wox-=4;
 		if(woy>4) woy-=4;
 		RUltraWater();
@@ -939,8 +1027,8 @@ void DrawWater(int size,float cx,float cy)
 	cy/=WATERBLOCKSIZE;
 	int isdrawing;
 	int isvisible;
-	woy+=.0009;
-	wox+=.0003;
+	woy+=.0009f*drawstep;
+	wox+=.0003f*drawstep;
 	if(wox>4) wox-=4;
 	if(woy>4) woy-=4;
 	RDisable(RCAP_CULL);
@@ -1326,10 +1414,17 @@ void Redraw()
 	RGetViewport(viewport);
 	//(an aspect and zoom scale was multiplied into the projection here, which Draw
 	//replaced before drawing anything)
-	cloudposx+=GetSkySettings()->cloudvelx;
-	cloudposy+=GetSkySettings()->cloudvely;
-	cloudmistposx+=GetSkySettings()->cloudmistvelx;
-	cloudmistposy+=GetSkySettings()->cloudmistvely;
+	{
+		static uint32_t last;
+		uint32_t now=HKPerfMillis();
+		drawstep=last?(float)(now-last)*60/1000:1;
+		if(drawstep>15) drawstep=15;   //a stall
+		last=now;
+	}
+	cloudposx+=GetSkySettings()->cloudvelx*drawstep;
+	cloudposy+=GetSkySettings()->cloudvely*drawstep;
+	cloudmistposx+=GetSkySettings()->cloudmistvelx*drawstep;
+	cloudmistposy+=GetSkySettings()->cloudmistvely*drawstep;
 
 	blockfaces=0;
 	landfaces=0;
@@ -1448,7 +1543,7 @@ void Redraw()
 	sprintf(tmptext,"%d",(int)(GetLocalPlayer()->ammoreserves[GetLocalPlayer()->weapon]));
 	//DrawText(.3,-.95,tmptext);
 	float offset=-1.2;
-	sprintf(tmptext,"%d",(int)(GetLocalPlayer()->ammoingun[GetLocalPlayer()->weapon]));
+	sprintf(tmptext,"%d",*SmokeAmmoInGun(GetLocalPlayer()));
 	UIText(.37f+offset,-.94f,tmptext,.065f);
 	//the grenade's mode (smoke.h): above its count
 	if(GetLocalPlayer()->weapon==4&&SmokeModeOn()) UIText(.37f+offset,-.875f,"smoke",.04f);
@@ -1477,7 +1572,7 @@ void Redraw()
 	UITextLines(-.4f,-.95f,curscore);
 	
 	TexBind(TEX_AMMOICON);
-	float bf=(float)GetLocalPlayer()->ammoingun[GetLocalPlayer()->weapon]/GetAmmoHold(GetLocalPlayer()->weapon);
+	float bf=(float)*SmokeAmmoInGun(GetLocalPlayer())/GetAmmoHold(GetLocalPlayer()->weapon);
 	RColor4f(bf/2+.5,bf/2+.5,bf/2+.5,bf/2+.5);
 	RBegin(RP_QUADS);
 	RTexCoord2f(0,1);RVertex2f(.35+offset,-.95);
@@ -1617,7 +1712,8 @@ static int UltraBlocked(float x,float y,float z)
 //Debug aid for captures: HK_CAMERA="x,z,above,yaw,pitch" draws the world from x,z
 //(above the land or the water by "above"), looking at yaw (degrees, 0 along +z,
 //90 along +x) and pitch; HK_CAMERA=lake finds a lake's shore near the player and
-//looks across it. Only the view moves: the player stays where he is.
+//looks across it. Only the view moves: the player stays where he is. HK_CAMERA_MOVE
+//slides it a little every frame.
 static Player *DebugCamera(Player *cur)
 {
 	static const char *cam=getenv("HK_CAMERA");
@@ -1665,8 +1761,21 @@ static Player *DebugCamera(Player *cur)
 	}
 	if(!found) return cur;
 	p=*cur;
-	float g=GetLandSmooth(x,z);
-	if(g<WATERHEIGHT) g=WATERHEIGHT;
+	static float g=-1e9f;
+	if(g<-1e8f)
+	{
+		g=GetLandSmooth(x,z);
+		if(g<WATERHEIGHT) g=WATERHEIGHT;
+	}
+	//HK_CAMERA_MOVE="dx,dz": the view slides by that much a frame, at the same height
+	//(what moving does to the water and the land, frame by frame, in one run)
+	static float mx,mz;
+	static int moving=getenv("HK_CAMERA_MOVE")&&sscanf(getenv("HK_CAMERA_MOVE"),"%f,%f",&mx,&mz)==2;
+	if(moving)
+	{
+		x+=mx;
+		z+=mz;
+	}
 	p.pos=Vector(x,g+above,z);
 	float yr=yaw*3.14159265f/180,pr=pitch*3.14159265f/180;
 	p.dir=Vector(sinf(yr)*cosf(pr),sinf(pr),cosf(yr)*cosf(pr));
@@ -1921,6 +2030,7 @@ void Draw(float offset)
 	dxpos=cur->pos.x+cur->dir.x*0;
 	dypos=cur->pos.z+cur->dir.z*0;
 	int unisize=20;
+	SetLandCull(eyepos,cur->dir);
 	RSetMaterial(RMAT_TERRAIN);
 	DrawMip(dxpos,dypos,dxpos,dypos,0,unisize,1);
 	odxpos=dxpos;odypos=dypos;

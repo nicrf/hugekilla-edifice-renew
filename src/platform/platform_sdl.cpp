@@ -710,7 +710,7 @@ static void Frame()
 	redraw = 1;
 #else
 	Uint32 flags = SDL_GetWindowFlags(window);
-	if (((flags & SDL_WINDOW_INPUT_FOCUS) || getenv("HK_SHOT") || getenv("HK_DUMPFRAMES")) && !(flags & SDL_WINDOW_MINIMIZED))
+	if (((flags & SDL_WINDOW_INPUT_FOCUS) || getenv("HK_SHOT") || getenv("HK_DUMPFRAMES") || getenv("HK_FRAMETIME")) && !(flags & SDL_WINDOW_MINIMIZED))
 		redraw = 1;
 	else
 		HKSleep(4);

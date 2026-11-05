@@ -657,11 +657,11 @@ static void PadTestLog()
 	float yaw = atan2f(me->fwd.x, me->fwd.z) * 180 / 3.14159265f;
 	fprintf(stderr, "padtest: frame %d pads %d ingame %d playstate %d pos %.2f %.2f %.2f yaw %.1f tilt %.3f "
 		"weapon %d firing %d jetpack %d zoom %.1f menu %d buildmenu %d up %d down %d left %d right %d focus %d "
-		"options %d join %d setup %d touch %d smoke %d\n",
+		"options %d join %d setup %d touch %d smoke %d frags %d smokes %d\n",
 		testframe, numpads, HKInGame(), me->playstate, me->pos.x, me->pos.y, me->pos.z, yaw, me->tilt.y,
 		me->weapon, me->firing, me->jetpack, me->fzoom, menu, IsBuildMenuOpen(), me->up, me->down,
 		me->lstrafe, me->rstrafe, UIFocusCount(), IsOptionsOpen(), IsJoinScreenOpen(), IsServerSetupOpen(), TouchShown(),
-		SmokeModeOn());
+		SmokeModeOn(), me->ammoingun[4], me->smokeingun);
 }
 
 static void PadTestFrame()
