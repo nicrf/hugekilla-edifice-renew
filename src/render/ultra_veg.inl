@@ -357,6 +357,62 @@ static float VegWrap(float d)
 	return d;
 }
 
+//the view's wedge (the land's, redrawing.cpp): the horizontal half angle a wide
+//screen sees, plus what is close, plus what may cast a shadow into it (towards the
+//sun); the reflection looks the same way. HK_NOVEGCULL=1 to compare
+static int vegcull;
+static float vegex,vegez,vegdx,vegdz,vegshx,vegshz;
+
+static void VegSetCull()
+{
+	static int off=getenv("HK_NOVEGCULL")!=0;
+	Mat4 inv;
+	RSokolInverse(scene.view,&inv);
+	float fx=-inv.m[8],fz=-inv.m[10];
+	float l=sqrtf(fx*fx+fz*fz);
+	vegcull=!off&&l>0.45f;   //looking far down: all of it
+	if(!vegcull) return;
+	vegex=scene.eye[0];
+	vegez=scene.eye[2];
+	vegdx=fx/l;
+	vegdz=fz/l;
+	//a tree's top (about 15 units for the tallest) casts this far, away from the sun
+	vegshx=vegshz=0;
+	V3 sun=Norm(v3(scene.sundir[0],scene.sundir[1],scene.sundir[2]));
+	if(rultraprefs.shadows&&sun.y>0)
+	{
+		float k=15/(sun.y>0.04f?sun.y:0.04f);
+		vegshx=-sun.x*k;
+		vegshz=-sun.z*k;
+		float len=sqrtf(vegshx*vegshx+vegshz*vegshz);
+		if(len>400)
+		{
+			vegshx*=400/len;
+			vegshz*=400/len;
+		}
+	}
+}
+
+static int VegInWedge(float x,float z,float r)
+{
+	float dx=x-vegex,dz=z-vegez;
+	float d=sqrtf(dx*dx+dz*dz);
+	if(d<r+20) return 1;
+	float c=(dx*vegdx+dz*vegdz)/d;
+	if(c>1) c=1;
+	if(c<-1) c=-1;
+	return acosf(c)<=75*3.1415926f/180+atanf(r/d);
+}
+
+//(x,z) with radius r (scale times the mesh's) may show or cast its shadow in view
+static int VegVisible(float x,float z,float r)
+{
+	if(!vegcull||VegInWedge(x,z,r)) return 1;
+	for(int k=1;k<=4&&(vegshx!=0||vegshz!=0);k++)
+		if(VegInWedge(x+vegshx*k/4,z+vegshz*k/4,r+4)) return 1;
+	return 0;
+}
+
 //what stands around the camera this frame
 static void VegPlace()
 {
@@ -370,12 +426,14 @@ static void VegPlace()
 	unsigned seed=landhash;
 	float trange=q>=2?260.0f:170.0f;
 	float rrange=q>=2?150.0f:90.0f;
+	VegSetCull();
 	//the game's trees and boulders (props.h): where they block
 	for(int i=0;i<scene.numprops;i++)
 	{
 		const RProp &pr=scene.props[i];
 		float dx=VegWrap(pr.x-ex),dz=VegWrap(pr.z-ez),d2=dx*dx+dz*dz;
 		float x=ex+dx,z=ez+dz;
+		if(!VegVisible(x,z,pr.scale*6+3)) continue;
 		if(pr.mesh>=2)
 		{
 			if(d2>rrange*rrange) continue;
@@ -413,6 +471,7 @@ static void VegPlace()
 			float x=(cx+0.15f+0.7f*VegRand(s))*tc,z=(cz+0.15f+0.7f*VegRand(s))*tc;
 			float ddx=x-ex,ddz=z-ez,d2=ddx*ddx+ddz*ddz;
 			if(d2>trange*trange) continue;
+			if(!VegVisible(x,z,4)) continue;
 			V3 n;
 			float h=VegLand(x,z,&n);
 			if(h<w+1.5f||1-n.y>0.28f||h>w+60) continue;
@@ -438,6 +497,7 @@ static void VegPlace()
 			float x=(cx+VegRand(s))*rc,z=(cz+VegRand(s))*rc;
 			float ddx=x-ex,ddz=z-ez,d2=ddx*ddx+ddz*ddz;
 			if(d2>rrange*rrange) continue;
+			if(!VegVisible(x,z,3)) continue;
 			V3 n;
 			float h=VegLand(x,z,&n);
 			float slope=1-n.y;
