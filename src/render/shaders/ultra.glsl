@@ -805,6 +805,7 @@ layout(binding=9) uniform texture2D scenedepth;
 layout(binding=10) uniform texture2D refl;
 layout(binding=1) uniform texture2D skylut;
 layout(binding=11) uniform texture2D wnormals;
+layout(binding=12) uniform texture2D icemask;
 layout(binding=4) uniform texture2DArray hdalb;
 layout(binding=7) uniform texture2D shadowmap;
 layout(binding=5) uniform sampler clampsmp;
@@ -815,7 +816,7 @@ layout(binding=7) uniform sampler repsmp;
 layout(binding=4) uniform sampler shadowsmp;
 layout(binding=1) uniform water_fs_params {
 	vec4 screen;        // xy: 1/size of the frame, z: planar reflection on, w: frozen (ice)
-	vec4 view;          // the camera's forward direction (eye depth of a point), w: -
+	vec4 view;          // the camera's forward direction (eye depth of a point), w: the land's size (icemask)
 	vec4 waves;         // as water_vs_params: x amplitude scale, y fade start, z fade end; w: time
 };
 @include_block sky_fn
@@ -845,8 +846,8 @@ float crack_edge(vec2 x) {
 			}
 		}
 	md = 8.0;
-	for (int j = -2; j <= 2; j++)
-		for (int i = -2; i <= 2; i++) {
+	for (int j = -1; j <= 1; j++)
+		for (int i = -1; i <= 1; i++) {
 			vec2 g = mg + vec2(float(i), float(j));
 			vec2 r = g + fract(sin(vec2(dot(ip + g, vec2(127.1, 311.7)), dot(ip + g, vec2(269.5, 183.3)))) * 43758.5453) - fp;
 			if (dot(mr - r, mr - r) > 1e-5) md = min(md, dot(0.5 * (mr + r), normalize(r - mr)));
@@ -856,7 +857,7 @@ float crack_edge(vec2 x) {
 
 // a frozen lake, seen from above: the ground through thin ice near the shore, milky
 // further out, cracks, frost and drifts of snow; no waves, a blurred reflection
-vec3 ice_color(vec3 under, float thick, float dist, vec3 v, vec2 suv, float eyed) {
+vec3 ice_color(vec3 under, float thick, float dist, vec3 v, vec2 suv, float eyed, float rim) {
 	vec2 p = wpos.xz;
 	float px = max(fwidth(p).x, fwidth(p).y);
 	float far = smoothstep(40.0, 140.0, dist);
@@ -866,12 +867,15 @@ vec3 ice_color(vec3 under, float thick, float dist, vec3 v, vec2 suv, float eyed
 	// cracks: long ones across the lake and a finer web, fading before they alias
 	// (warped, so they wander instead of tiling; some fade out along their way)
 	vec2 q = p + (vec2(vnoise(p * 0.045), vnoise(p * 0.045 + 5.2)) - 0.5) * 16.0;
-	float e1 = crack_edge(q * 0.09);
-	float e2 = crack_edge(q * 0.41 + 17.3);
-	float c1 = (1.0 - smoothstep(0.0, 0.02 + px * 0.2, e1)) * smoothstep(0.4, 0.7, vnoise(q * 0.05 + 2.0));
-	float c2 = (1.0 - smoothstep(0.0, 0.025 + px * 0.8, e2)) * 0.4 * smoothstep(0.45, 0.75, vnoise(q * 0.17 + 9.0));
-	c2 *= 1.0 - smoothstep(25.0, 70.0, dist);
-	float crack = max(c1 * (1.0 - smoothstep(70.0, 200.0, dist)), c2);
+	float c1 = 0.0;
+	float c2 = 0.0;
+	if (dist < 200.0)
+		c1 = (1.0 - smoothstep(0.0, 0.02 + px * 0.2, crack_edge(q * 0.09))) * smoothstep(0.4, 0.7, vnoise(q * 0.05 + 2.0)) * (1.0 - smoothstep(70.0, 200.0, dist));
+	if (dist < 70.0)
+		c2 = (1.0 - smoothstep(0.0, 0.025 + px * 0.8, crack_edge(q * 0.41 + 17.3))) * 0.4 * smoothstep(0.45, 0.75, vnoise(q * 0.17 + 9.0)) * (1.0 - smoothstep(25.0, 70.0, dist));
+	// around a hole: a web of fresh cracks, and the ice darker where water came up
+	if (rim > 0.01) c2 = max(c2, (1.0 - smoothstep(0.0, 0.03 + px * 0.8, crack_edge(q * 1.3 + 3.7))) * rim);
+	float crack = max(c1, c2);
 	// the body: clear ice, dark over deep water, the ground showing through it over
 	// the shallows; whiter with the air trapped in it here and there
 	float shadow = shadow_at(wpos, n, eyed);
@@ -880,12 +884,13 @@ vec3 ice_color(vec3 under, float thick, float dist, vec3 v, vec2 suv, float eyed
 	float milk = 0.18 + 0.3 * smoothstep(0.3, 5.0, thick) + 0.3 * bubbles;
 	vec3 icec = vec3(0.42, 0.56, 0.62) * light * 0.55;
 	vec3 seen = under * vec3(0.7, 0.85, 0.93) * exp(-thick * vec3(0.35, 0.15, 0.1));
-	vec3 body = mix(seen, icec, milk);
+	vec3 body = mix(seen, icec, milk) * (1.0 - rim * 0.3);
 	// the cracks: white fractures in the ice
 	body = mix(body, vec3(0.8, 0.9, 0.95) * light * 0.7, crack * 0.5);
 	// a dusting of frost, and drifts of snow, more of them along the shore
 	float shore = 1.0 - smoothstep(0.0, 2.5, thick);
 	float drift = smoothstep(0.6, 0.85, vnoise(p * 0.05) * 0.65 + vnoise(p * 0.23) * 0.35 + shore * 0.3);
+	drift *= 1.0 - rim;
 	float frost = 0.08 + 0.1 * vnoise(p * 1.7);
 	vec3 snowc = vec3(0.93, 0.96, 1.0) * (suncolor.rgb * max(sundir.y, 0.0) * shadow + hemi_sky() * 1.1) * 0.8;
 	body = mix(body, snowc, clamp(drift + frost, 0.0, 1.0));
@@ -940,7 +945,12 @@ void main() {
 	if (below) n = -n;
 	float eyed = dot(-toeye, view.xyz);
 	// what is under the surface, and how much water the light crossed
-	vec2 off = screen.w > 0.5 ? vec2(0.0) : n.xz * 0.035 / max(eyed * 0.08, 1.0);   // ice: still
+	// the frozen water: whole ice, or open where it was broken (icemask), with its
+	// floating shards
+	float brk = 0.0;
+	if (screen.w > 0.5) brk = texture(sampler2D(icemask, repsmp), wpos.xz / view.w).r;
+	bool ice = screen.w > 0.5 && brk < 0.5;
+	vec2 off = ice ? vec2(0.0) : n.xz * 0.035 / max(eyed * 0.08, 1.0);   // ice: still
 	float sd = textureLod(sampler2D(scenedepth, pointsmp), suv + off, 0.0).r;
 	if (sd < eyed) {
 		off = vec2(0.0);
@@ -965,8 +975,9 @@ void main() {
 		frag_color = vec4(apply_fog(c, wpos), 1.0);
 		return;
 	}
-	if (screen.w > 0.5) {
-		frag_color = vec4(apply_fog(ice_color(under, thick, dist, v, suv, eyed), wpos), 1.0);
+	if (ice) {
+		float rim = smoothstep(0.02, 0.45, brk);
+		frag_color = vec4(apply_fog(ice_color(under, thick, dist, v, suv, eyed, rim), wpos), 1.0);
 		return;
 	}
 	if (screen.z > 0.5) {
@@ -992,6 +1003,18 @@ void main() {
 	foam *= 1.0 - smoothstep(60.0, 140.0, dist);
 	vec3 foamc = (suncolor.rgb * max(sundir.y, 0.1) * shadow + hemi_sky()) * 0.75;
 	c = mix(c, foamc, foam);
+	// broken ice: pieces of it floating in the hole, fewer towards its middle
+	if (screen.w > 0.5) {
+		vec2 cp = wpos.xz * 1.6;
+		vec2 ci = floor(cp + 0.5 * sin(cp.yx * 0.7));
+		float h = fract(sin(dot(ci, vec2(41.3, 289.1))) * 43758.5453);
+		float e = crack_edge(cp + 0.5 * sin(cp.yx * 0.7));
+		float shard = step(h, 0.5 - (brk - 0.5) * 0.9) * smoothstep(0.04, 0.1, e);
+		shard *= 1.0 - smoothstep(30.0, 80.0, dist);
+		// the open water between them dark and still, against the bright ice
+		c = mix(c, refr * 0.7, 0.45);
+		c = mix(c, ice_color(under, thick, dist, v, suv, eyed, 1.0) * 1.05, shard);
+	}
 	// the water meets the shore softly
 	c = mix(under, c, smoothstep(0.0, 0.08, thick));
 	frag_color = vec4(apply_fog(c, wpos), 1.0);

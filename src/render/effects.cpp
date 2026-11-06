@@ -24,6 +24,7 @@
 #include "playing.h"
 #include "land.h"
 #include "smoke.h"
+#include "multiplay.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -376,6 +377,8 @@ void FxBulletImpact(const Vector &hit,const Vector &dir,int onblock)
 
 void FxExplosion(const Vector &at)
 {
+	//under the ice: a hole, wider the nearer the surface
+	if(at.y<WATERHEIGHT&&WATERHEIGHT-at.y<6) FxIceBreak(at.x,at.z,4.5f-(WATERHEIGHT-at.y)*.5f);
 	if(fxprefs.impacts&&at.y<WATERHEIGHT-.3f)
 	{
 		//under water: no fire, a dull flash, a burst of bubbles, and the water
@@ -1152,4 +1155,83 @@ void FxDrawSmokeClouds()
 	}
 	RPopAttrib();
 	RDepthMask(1);
+}
+
+//---- Ultra's frozen water: where it is broken ----
+
+static std::vector<unsigned char> icemask;
+static unsigned iceversion=1;
+
+int FxIceFrozen()
+{
+	static const char *force=getenv("HK_ULTRA_ICE");
+	if(force) return atoi(force)!=0;
+	return GetSkySettings()->precipitation==11;
+}
+
+void FxIceReset()
+{
+	icemask.clear();
+	iceversion++;
+}
+
+void FxIceBreak(float x,float z,float r)
+{
+	if(!FxIceFrozen()||r<=0) return;
+	if(icemask.empty()) icemask.assign((size_t)ICEMASK*ICEMASK,0);
+	const float tpu=(float)ICEMASK/LANDGRIDSIZE;   //texels a unit
+	float cx=x*tpu,cz=z*tpu,cr=r*tpu;
+	int ext=(int)(cr*1.4f)+2;
+	//a jagged edge: the radius wanders with the angle, the same for the same spot
+	unsigned seed=(unsigned)((int)floorf(x*4)*73856093)^(unsigned)((int)floorf(z*4)*19349663);
+	float ph[3];
+	for(int k=0;k<3;k++)
+	{
+		seed=seed*1664525u+1013904223u;
+		ph[k]=(seed>>8)*(6.2831853f/16777216.0f);
+	}
+	int changed=0;
+	for(int dz=-ext;dz<=ext;dz++)
+		for(int dx=-ext;dx<=ext;dx++)
+		{
+			float px=floorf(cx)+dx+.5f-cx,pz=floorf(cz)+dz+.5f-cz;
+			float d=sqrtf(px*px+pz*pz);
+			float a=atan2f(pz,px);
+			float jr=cr*(1+.18f*sinf(a*3+ph[0])+.12f*sinf(a*5+ph[1])+.07f*sinf(a*9+ph[2]));
+			float v=(jr-d)*.5f+.5f;   //a texel of soft edge
+			if(v<=0) continue;
+			if(v>1) v=1;
+			int tx=(((int)floorf(cx)+dx)%ICEMASK+ICEMASK)%ICEMASK;
+			int tz=(((int)floorf(cz)+dz)%ICEMASK+ICEMASK)%ICEMASK;
+			unsigned char &t=icemask[(size_t)tz*ICEMASK+tx];
+			unsigned char nv=(unsigned char)(v*255+.5f);
+			if(nv>t)
+			{
+				t=nv;
+				changed=1;
+			}
+		}
+	if(changed) iceversion++;
+}
+
+const unsigned char *FxIceMask(unsigned *version)
+{
+	if(version) *version=iceversion;
+	return icemask.empty()?0:icemask.data();
+}
+
+void FxIcePlayers()
+{
+	if(!FxIceFrozen()) return;
+	for(int i=0;i<GetNumPlayers();i++)
+	{
+		Player *p=GetPlayer(i);
+		if(p->playstate!=10) continue;
+		//the body through the surface (pos is the eyes, about 2 above the feet), where
+		//the water is deep enough
+		float feet=p->pos.y-2;
+		if(feet>WATERHEIGHT+.2f||p->pos.y<WATERHEIGHT-.5f) continue;
+		if(GetLandSmooth(p->pos.x,p->pos.z)>=WATERHEIGHT-.2f) continue;
+		FxIceBreak(p->pos.x,p->pos.z,1.3f);
+	}
 }

@@ -377,9 +377,12 @@ static void GrenadeFly(Object *o,float mysf,int effects)
 	Vector before=o->pos;
 	o->pos+=o->vel*mysf;
 	PropsBounce(o->pos,before,o->vel);   //a grenade off a trunk
-	//into the water (M13.5): a splash where it went in
-	if(effects&&fxprefs.impacts&&prevy>=WATERHEIGHT&&o->pos.y<WATERHEIGHT&&GetLandSmooth(o->pos.x,o->pos.z)<WATERHEIGHT)
-		FxWaterSplash(o->pos,2);
+	//into the water (M13.5): a splash where it went in, through the ice if frozen
+	if(effects&&prevy>=WATERHEIGHT&&o->pos.y<WATERHEIGHT&&GetLandSmooth(o->pos.x,o->pos.z)<WATERHEIGHT)
+	{
+		FxIceBreak(o->pos.x,o->pos.z,.9f);
+		if(fxprefs.impacts) FxWaterSplash(o->pos,2);
+	}
 	o->vel.y-=sv.gravity*mysf;
 	if(o->pos.y<GetHeight(o->pos)) 
 	{
@@ -597,7 +600,13 @@ void TickObjects(float sf)
 				AcBulletTick(&object[i],prev);   //server: the players it hits (M11)
 				FxBulletThroughSmoke(prev,object[i].pos);   //Ultra: the smoke it crosses, pushed aside
 				//the water (M13.5): a splash where it goes in, then a wake of bubbles
-				//(the bullet itself keeps its speed: what it hits is the game's)
+				//(the bullet itself keeps its speed: what it hits is the game's); a
+				//small hole in the ice
+				if(object[i].type&&object[i].pos.y<WATERHEIGHT&&prev.y>=WATERHEIGHT&&GetLandSmooth(object[i].pos.x,object[i].pos.z)<WATERHEIGHT)
+				{
+					Vector at=prev+(object[i].pos-prev)*((prev.y-WATERHEIGHT)/(prev.y-object[i].pos.y));
+					FxIceBreak(at.x,at.z,.45f);
+				}
 				if(fxprefs.impacts&&object[i].type&&object[i].pos.y<WATERHEIGHT)
 				{
 					Vector &now=object[i].pos;

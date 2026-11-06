@@ -1897,9 +1897,9 @@ void Draw(float offset)
 		us.waterheight=WATERHEIGHT;
 		us.time=(float)(curtime%(1<<24))/1000;
 		us.underwater=cur->pos.y<WATERHEIGHT;
-		us.frozen=GetSkySettings()->precipitation==11;
-		//debug aid: HK_ULTRA_ICE=1 freezes the water under any sky, 0 never
-		if(getenv("HK_ULTRA_ICE")) us.frozen=atoi(getenv("HK_ULTRA_ICE"))!=0;
+		us.frozen=FxIceFrozen();
+		FxIcePlayers();
+		us.icemask=FxIceMask(0);
 		us.land=&land[0][0];
 		us.landsize=LANDGRIDSIZE;
 		//the flags and stations stay in the open

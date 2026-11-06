@@ -15,6 +15,7 @@
 #include "playing.h"
 #include "sound.h"
 #include "props.h"
+#include "effects.h"
 
 #define RND ((float)rand()/RAND_MAX)
 char clouds[1024*1024];
@@ -515,6 +516,7 @@ reposition:
 
 void CreateLand(LandDefs &ldfs)
 {
+	FxIceReset();   //Ultra's frozen water, whole again
 	ConsoleDisplayText("Creating land");
 	GReset();
 	LandSettings ls;

@@ -180,6 +180,10 @@ static int targetw,targeth,shadowsize;
 //textures
 static sg_image skylutimg,heightimg,landnrmimg,landsplatimg,hdalbimg,hdnrmimg,hdormimg,wnormalimg;
 static sg_view skylut,heightview,landnrm,landsplat,hdalb,hdnrm,hdorm,wnormal;
+//the frozen water's broken ice (RUltraScene's icemask), written each frame it is drawn
+#define ICEMASKSIZE 1024          //effects.h ICEMASK
+static sg_image iceimg;
+static sg_view iceview;
 static int hdblocklayer[32];      //TEX_BLOCK0+i: its HD layer, -1 none
 #define HDLAYERS 17               //grass rock sand snow dirt foam wall0..9 grass2
 #define HDBLOCK0 6
@@ -625,6 +629,16 @@ static void MakeWaterNormals()
 	id.label="ultra water normals";
 	wnormalimg=sg_make_image(&id);
 	wnormal=TexView(wnormalimg);
+	{
+		sg_image_desc ii;
+		memset(&ii,0,sizeof(ii));
+		ii.width=ii.height=ICEMASKSIZE;
+		ii.pixel_format=SG_PIXELFORMAT_R8;
+		ii.usage.write_transient=true;
+		ii.label="ultra ice mask";
+		iceimg=sg_make_image(&ii);
+		iceview=TexView(iceimg);
+	}
 }
 
 //a tiling 3D noise for the clouds: billowy (inverted cell distances) over a value
@@ -1518,6 +1532,27 @@ static void DrawWater(const RSokolFrame &f,const RSokolUniforms &u,int planar)
 	b.views[VIEW_wnormals]=wnormal;
 	b.views[VIEW_hdalb]=hdalb;
 	b.views[VIEW_shadowmap]=shadowatlas.tex;
+	//the broken ice: a transient image, written before it is bound (whole ice: zeros)
+	b.views[VIEW_icemask]=wnormal;
+	if(scene.frozen)
+	{
+		static std::vector<unsigned char> whole;
+		const unsigned char *m=scene.icemask;
+		if(!m)
+		{
+			whole.assign((size_t)ICEMASKSIZE*ICEMASKSIZE,0);
+			m=whole.data();
+		}
+		sg_write_image_desc wd;
+		memset(&wd,0,sizeof(wd));
+		wd.src.data.ptr=m;
+		wd.src.data.size=(size_t)ICEMASKSIZE*ICEMASKSIZE;
+		wd.dst.image=iceimg;
+		wd.size.width=wd.size.height=ICEMASKSIZE;
+		wd.size.num_slices=1;
+		sg_write_image_transient(&wd);
+		b.views[VIEW_icemask]=iceview;
+	}
 	b.samplers[SMP_clampsmp]=linclamp;
 	b.samplers[SMP_pointsmp]=pointclamp;
 	b.samplers[SMP_lutsmp]=lutsampler;
@@ -1538,6 +1573,7 @@ static void DrawWater(const RSokolFrame &f,const RSokolUniforms &u,int planar)
 	Mat4 inv;
 	RSokolInverse(scene.view,&inv);
 	Set4(fs.view,-inv.m[8],-inv.m[9],-inv.m[10],0);
+	fs.view[3]=(float)(scene.landsize>0?scene.landsize:512);   //the ice mask's span
 	Set4(fs.waves,vs.waves[0],vs.waves[1],vs.waves[2],scene.time);
 	r.ptr=&fs;
 	r.size=sizeof(fs);
