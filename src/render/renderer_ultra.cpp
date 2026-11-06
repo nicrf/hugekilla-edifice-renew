@@ -1529,12 +1529,12 @@ static void DrawWater(const RSokolFrame &f,const RSokolUniforms &u,int planar)
 	vs.viewproj=Mat4Mul(u.proj,u.modelview);
 	Set4(vs.cam,scene.eye[0],scene.waterheight,scene.eye[2],scene.time);
 	//waves: fade with distance (no aliasing), calmer under a clear sky
-	Set4(vs.waves,0.9f+overcast*0.6f,40,140,0);
+	Set4(vs.waves,scene.frozen?0.0f:0.9f+overcast*0.6f,40,140,0);   //ice: no waves
 	sg_range r={&vs,sizeof(vs)};
 	sg_apply_uniforms(UB_water_vs_params,&r);
 	water_fs_params_t fs;
 	memset(&fs,0,sizeof(fs));
-	Set4(fs.screen,1.0f/targetw,1.0f/targeth,planar?1.0f:0.0f,0);
+	Set4(fs.screen,1.0f/targetw,1.0f/targeth,planar?1.0f:0.0f,scene.frozen?1.0f:0.0f);
 	Mat4 inv;
 	RSokolInverse(scene.view,&inv);
 	Set4(fs.view,-inv.m[8],-inv.m[9],-inv.m[10],0);

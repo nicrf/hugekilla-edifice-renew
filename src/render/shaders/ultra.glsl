@@ -814,7 +814,7 @@ layout(binding=1) uniform sampler lutsmp;
 layout(binding=7) uniform sampler repsmp;
 layout(binding=4) uniform sampler shadowsmp;
 layout(binding=1) uniform water_fs_params {
-	vec4 screen;        // xy: 1/size of the frame, z: planar reflection on, w: -
+	vec4 screen;        // xy: 1/size of the frame, z: planar reflection on, w: frozen (ice)
 	vec4 view;          // the camera's forward direction (eye depth of a point), w: -
 	vec4 waves;         // as water_vs_params: x amplitude scale, y fade start, z fade end; w: time
 };
@@ -825,6 +825,93 @@ layout(binding=1) uniform water_fs_params {
 in vec3 wpos;
 
 out vec4 frag_color;
+
+// the distance to the nearest edge of a Voronoi cell (Quilez): the ice's cracks
+float crack_edge(vec2 x) {
+	vec2 ip = floor(x);
+	vec2 fp = fract(x);
+	vec2 mg = vec2(0.0);
+	vec2 mr = vec2(0.0);
+	float md = 8.0;
+	for (int j = -1; j <= 1; j++)
+		for (int i = -1; i <= 1; i++) {
+			vec2 g = vec2(float(i), float(j));
+			vec2 r = g + fract(sin(vec2(dot(ip + g, vec2(127.1, 311.7)), dot(ip + g, vec2(269.5, 183.3)))) * 43758.5453) - fp;
+			float d = dot(r, r);
+			if (d < md) {
+				md = d;
+				mr = r;
+				mg = g;
+			}
+		}
+	md = 8.0;
+	for (int j = -2; j <= 2; j++)
+		for (int i = -2; i <= 2; i++) {
+			vec2 g = mg + vec2(float(i), float(j));
+			vec2 r = g + fract(sin(vec2(dot(ip + g, vec2(127.1, 311.7)), dot(ip + g, vec2(269.5, 183.3)))) * 43758.5453) - fp;
+			if (dot(mr - r, mr - r) > 1e-5) md = min(md, dot(0.5 * (mr + r), normalize(r - mr)));
+		}
+	return md;
+}
+
+// a frozen lake, seen from above: the ground through thin ice near the shore, milky
+// further out, cracks, frost and drifts of snow; no waves, a blurred reflection
+vec3 ice_color(vec3 under, float thick, float dist, vec3 v, vec2 suv, float eyed) {
+	vec2 p = wpos.xz;
+	float px = max(fwidth(p).x, fwidth(p).y);
+	float far = smoothstep(40.0, 140.0, dist);
+	// frozen ripples: the normal map, still and faint
+	vec3 n1 = texture(sampler2D(wnormals, repsmp), p * 0.06).xzy * 2.0 - 1.0;
+	vec3 n = normalize(vec3(0.0, 1.0, 0.0) + vec3(n1.x, 0.0, n1.z) * 0.07 * (1.0 - far));
+	// cracks: long ones across the lake and a finer web, fading before they alias
+	// (warped, so they wander instead of tiling; some fade out along their way)
+	vec2 q = p + (vec2(vnoise(p * 0.045), vnoise(p * 0.045 + 5.2)) - 0.5) * 16.0;
+	float e1 = crack_edge(q * 0.09);
+	float e2 = crack_edge(q * 0.41 + 17.3);
+	float c1 = (1.0 - smoothstep(0.0, 0.02 + px * 0.2, e1)) * smoothstep(0.4, 0.7, vnoise(q * 0.05 + 2.0));
+	float c2 = (1.0 - smoothstep(0.0, 0.025 + px * 0.8, e2)) * 0.4 * smoothstep(0.45, 0.75, vnoise(q * 0.17 + 9.0));
+	c2 *= 1.0 - smoothstep(25.0, 70.0, dist);
+	float crack = max(c1 * (1.0 - smoothstep(70.0, 200.0, dist)), c2);
+	// the body: clear ice, dark over deep water, the ground showing through it over
+	// the shallows; whiter with the air trapped in it here and there
+	float shadow = shadow_at(wpos, n, eyed);
+	vec3 light = suncolor.rgb * max(sundir.y, 0.0) * shadow * 0.75 + hemi_sky();
+	float bubbles = smoothstep(0.55, 0.9, vnoise(q * 0.13 + 4.0));
+	float milk = 0.18 + 0.3 * smoothstep(0.3, 5.0, thick) + 0.3 * bubbles;
+	vec3 icec = vec3(0.42, 0.56, 0.62) * light * 0.55;
+	vec3 seen = under * vec3(0.7, 0.85, 0.93) * exp(-thick * vec3(0.35, 0.15, 0.1));
+	vec3 body = mix(seen, icec, milk);
+	// the cracks: white fractures in the ice
+	body = mix(body, vec3(0.8, 0.9, 0.95) * light * 0.7, crack * 0.5);
+	// a dusting of frost, and drifts of snow, more of them along the shore
+	float shore = 1.0 - smoothstep(0.0, 2.5, thick);
+	float drift = smoothstep(0.6, 0.85, vnoise(p * 0.05) * 0.65 + vnoise(p * 0.23) * 0.35 + shore * 0.3);
+	float frost = 0.08 + 0.1 * vnoise(p * 1.7);
+	vec3 snowc = vec3(0.93, 0.96, 1.0) * (suncolor.rgb * max(sundir.y, 0.0) * shadow + hemi_sky() * 1.1) * 0.8;
+	body = mix(body, snowc, clamp(drift + frost, 0.0, 1.0));
+	// a smooth surface but not a mirror: a weaker, blurred reflection and a broad sheen
+	float nv = max(dot(n, v), 0.0);
+	float fres = (0.02 + 0.98 * pow(1.0 - nv, 5.0)) * (1.0 - drift) * 0.7;
+	vec3 r = reflect(-v, n);
+	vec3 refl_c = sky_color(vec3(r.x, max(r.y, 0.0), r.z));
+	if (screen.z > 0.5) {
+		vec2 tx = screen.xy * 3.0;
+		vec4 rp = textureLod(sampler2D(refl, clampsmp), suv, 0.0) * 0.4
+			+ textureLod(sampler2D(refl, clampsmp), suv + vec2(tx.x, 0.0), 0.0) * 0.15
+			+ textureLod(sampler2D(refl, clampsmp), suv - vec2(tx.x, 0.0), 0.0) * 0.15
+			+ textureLod(sampler2D(refl, clampsmp), suv + vec2(0.0, tx.y), 0.0) * 0.15
+			+ textureLod(sampler2D(refl, clampsmp), suv - vec2(0.0, tx.y), 0.0) * 0.15;
+		refl_c = mix(refl_c, rp.rgb, rp.a);
+	}
+	vec3 h = normalize(sundir.xyz + v);
+	float nh = max(dot(n, h), 0.0);
+	float a = 0.09;
+	float d = a * a / (PI * pow(nh * nh * (a * a - 1.0) + 1.0, 2.0));
+	vec3 sheen = suncolor.rgb * d * fres * 0.2 * max(dot(n, sundir.xyz), 0.0) * shadow;
+	vec3 c = mix(body, refl_c, fres) + sheen;
+	// the ice meets the shore softly
+	return mix(under, c, smoothstep(0.0, 0.05, thick));
+}
 
 void main() {
 	vec2 suv = gl_FragCoord.xy * screen.xy;
@@ -853,7 +940,7 @@ void main() {
 	if (below) n = -n;
 	float eyed = dot(-toeye, view.xyz);
 	// what is under the surface, and how much water the light crossed
-	vec2 off = n.xz * 0.035 / max(eyed * 0.08, 1.0);
+	vec2 off = screen.w > 0.5 ? vec2(0.0) : n.xz * 0.035 / max(eyed * 0.08, 1.0);   // ice: still
 	float sd = textureLod(sampler2D(scenedepth, pointsmp), suv + off, 0.0).r;
 	if (sd < eyed) {
 		off = vec2(0.0);
@@ -876,6 +963,10 @@ void main() {
 		refr = sky_color(vec3(r.x, abs(r.y), r.z)) * 0.6;
 		vec3 c = mix(refr, refl_c, fres);
 		frag_color = vec4(apply_fog(c, wpos), 1.0);
+		return;
+	}
+	if (screen.w > 0.5) {
+		frag_color = vec4(apply_fog(ice_color(under, thick, dist, v, suv, eyed), wpos), 1.0);
 		return;
 	}
 	if (screen.z > 0.5) {
