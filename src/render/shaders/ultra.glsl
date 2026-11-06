@@ -547,15 +547,23 @@ void main() {
 		// its height (0..1, times 0.6) stays 0.2 below the other side's, so sand, rock
 		// and snow under 0.1, dirt under the grass's weight less 0.8 (the same image,
 		// several texture reads fewer a layer: on a cliff, rock alone is read)
-		Mat grass = hd_layer(p, 0.0, 0.17, 16.0, eyedepth);
+		// and a layer under one that weighs 0.9 or more doesn't show at all (its weight
+		// less 0.2 beats 1 less it plus 0.6 whatever the heights): under a cliff's rock,
+		// neither grass, dirt nor sand is read
+		int cover = snoww >= 0.9 ? 4 : (sp.g >= 0.9 ? 3 : (sp.b >= 0.9 ? 2 : 0));
+		Mat grass = mat_zero();
 		Mat dirt = mat_zero();
 		Mat sand = mat_zero();
 		Mat snow = mat_zero();
 		Mat rock = mat_zero();
-		if (dirtw > sp.r - 0.8) dirt = hd_layer(p, 4.0, 0.19, -1.0, eyedepth);
-		if (sp.b > 0.1) sand = hd_layer(p, 2.0, 0.26, -1.0, eyedepth);
+		if (cover < 2) {
+			grass = hd_layer(p, 0.0, 0.17, 16.0, eyedepth);
+			// dirt shows where its weight plus 0.6 beats the grass's with its height, less 0.2
+			if (dirtw > sp.r + grass.height * 0.6 - 0.8) dirt = hd_layer(p, 4.0, 0.19, -1.0, eyedepth);
+		}
+		if (cover < 3 && sp.b > 0.1) sand = hd_layer(p, 2.0, 0.26, -1.0, eyedepth);
 		if (snoww > 0.1) snow = hd_layer(p, 3.0, 0.09, -1.0, eyedepth);
-		if (sp.g > 0.1) {
+		if (cover < 4 && sp.g > 0.1) {
 			// rock: triplanar, the slopes are steep (an axis that weighs nothing isn't read)
 			vec3 bw = pow(abs(gn), vec3(4.0));
 			bw /= bw.x + bw.y + bw.z;
