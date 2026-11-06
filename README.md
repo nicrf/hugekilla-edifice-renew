@@ -38,6 +38,8 @@ Téléchargez l'archive de votre système dans les [Releases](https://github.com
 
 Grenade fumigène : `5` une seconde fois la grenade en main, ou la molette (elle s'arrête sur *Smoke grenade* juste après *Grenade*). Les fumigènes ont leurs propres munitions (autant que de grenades), rechargées à part.
 
+En graphismes Ultra, sous un ciel qui neige, l'eau des lacs gèle. La glace se brise, avec son bruit, là où une balle ou une grenade la traverse et autour des joueurs qui tombent ou nagent dedans. C'est pour l'œil seulement : on y nage toujours, et chaque joueur voit ses propres trous (rien ne passe par le réseau).
+
 `F6` plein écran · `` ` `` console · `Échap` libérer/capturer la souris. En mode bac à sable, la console permet de construire sans limite : tapez `gamemode 1`.
 
 **Manette** (réglages et boutons dans *Options → Pad / Touch*) : stick gauche se déplacer, stick droit regarder, `RT` tirer, `LT` jetpack/planeur, `A` sauter, `B` prendre/poser un objet (station, drapeau), `X` recharger, `Y` construire, `LB`/`RB` arme précédente/suivante (en posant une structure : la tourner), `R3` zoom, `Back` scores, croix haut/gauche/bas parler/parler à l'équipe/push-to-talk, croix droite grenade ou fumigène, `Start` menu. Dans les menus : croix ou stick gauche pour choisir, `A` valider, `B` retour. Une manette inconnue de SDL se déclare dans un `gamecontrollerdb.txt` du dossier des réglages (voir BUILD.md).

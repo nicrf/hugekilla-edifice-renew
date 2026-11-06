@@ -25,6 +25,7 @@
 #include "land.h"
 #include "smoke.h"
 #include "multiplay.h"
+#include "sound.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1190,7 +1191,7 @@ void FxIceBreak(float x,float z,float r)
 		seed=seed*1664525u+1013904223u;
 		ph[k]=(seed>>8)*(6.2831853f/16777216.0f);
 	}
-	int changed=0;
+	int changed=0,broke=0;
 	for(int dz=-ext;dz<=ext;dz++)
 		for(int dx=-ext;dx<=ext;dx++)
 		{
@@ -1207,11 +1208,25 @@ void FxIceBreak(float x,float z,float r)
 			unsigned char nv=(unsigned char)(v*255+.5f);
 			if(nv>t)
 			{
+				if(t<128&&nv>=128) broke++;   //whole ice opened here
 				t=nv;
 				changed=1;
 			}
 		}
 	if(changed) iceversion++;
+	//the sound of it breaking, louder the more broke (a bullet's hole is a couple of
+	//texels, a player falling in a dozen or more); not for a player only widening
+	//his hole, nor more often than every 60 ms
+	static DWORD lastcrack;
+	static int next;
+	if(broke>=2&&curtime-lastcrack>60)   //(unsigned: a clock gone back plays too)
+	{
+		lastcrack=curtime;
+		int num=142+next++%3;
+		SetSoundPosition(num,Vector(x,WATERHEIGHT,z));
+		SetSoundVolume(num,broke>=12?0:-900+broke*70);
+		PlaySound(num,0);
+	}
 }
 
 const unsigned char *FxIceMask(unsigned *version)
