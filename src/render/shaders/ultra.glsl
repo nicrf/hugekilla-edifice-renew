@@ -354,14 +354,31 @@ struct Mat {
 	float height;
 };
 
+// what the terrain reads (set by main): its normal maps only while they show
+// (they fade out far away), and in the water's reflection (small, rippled) a
+// single plain read a layer instead of the hex tiling at two scales
+bool hd_normals = true;
+bool hd_cheap = false;
+
 Mat hd_sample(vec2 p, float layer) {
 	Mat m;
 	m.albedo = texture(sampler2DArray(hdalb, hdsmp), vec3(p, layer)).rgb;
-	m.nrm = texture(sampler2DArray(hdnrm, hdsmpd), vec3(p, layer)).rgb * 2.0 - 1.0;
+	m.nrm = vec3(0.0, 0.0, 1.0);
+	if (hd_normals) m.nrm = texture(sampler2DArray(hdnrm, hdsmpd), vec3(p, layer)).rgb * 2.0 - 1.0;
 	vec3 orm = texture(sampler2DArray(hdorm, hdsmpd), vec3(p, layer)).rgb;
 	m.ao = orm.r;
 	m.rough = orm.g;
 	m.height = orm.b;
+	return m;
+}
+
+Mat mat_zero() {
+	Mat m;
+	m.albedo = vec3(0.0);
+	m.nrm = vec3(0.0, 0.0, 1.0);
+	m.ao = 1.0;
+	m.rough = 1.0;
+	m.height = 0.0;
 	return m;
 }
 
@@ -417,9 +434,12 @@ Mat hex_one(vec2 uv, vec2 v, vec2 dx, vec2 dy, float layer, float variant, out f
 	float l = (variant > 0.0 && fract(h.y * 13.7) > 0.55) ? variant : layer;
 	Mat m;
 	m.albedo = textureGrad(sampler2DArray(hdalb, hdsmp), vec3(q, l), qdx, qdy).rgb;
-	vec3 n = textureGrad(sampler2DArray(hdnrm, hdsmpd), vec3(q, l), qdx, qdy).rgb * 2.0 - 1.0;
-	n.xy = transpose(r) * n.xy;
-	m.nrm = n;
+	m.nrm = vec3(0.0, 0.0, 1.0);
+	if (hd_normals) {
+		vec3 n = textureGrad(sampler2DArray(hdnrm, hdsmpd), vec3(q, l), qdx, qdy).rgb * 2.0 - 1.0;
+		n.xy = transpose(r) * n.xy;
+		m.nrm = n;
+	}
 	vec3 orm = textureGrad(sampler2DArray(hdorm, hdsmpd), vec3(q, l), qdx, qdy).rgb;
 	m.ao = orm.r;
 	m.rough = orm.g;
@@ -434,12 +454,20 @@ Mat hex_sample(vec2 uv, float layer, float variant) {
 	hex_grid(uv, w, v1, v2, v3);
 	vec2 dx = dFdx(uv);
 	vec2 dy = dFdy(uv);
-	float l1, l2, l3;
-	Mat a = hex_one(uv, v1, dx, dy, layer, variant, l1);
-	Mat b = hex_one(uv, v2, dx, dy, layer, variant, l2);
-	Mat c = hex_one(uv, v3, dx, dy, layer, variant, l3);
+	// the sharpened weights: most of the time one hexagon is nearly all of it, and
+	// one that weighs under 1 % isn't read (its share stays under about 2.5 % with
+	// the luminance below)
+	vec3 w7 = pow(w, vec3(7.0));
+	w7 /= w7.x + w7.y + w7.z;
+	float l1 = 0.0, l2 = 0.0, l3 = 0.0;
+	Mat a = mat_zero();
+	Mat b = mat_zero();
+	Mat c = mat_zero();
+	if (w7.x > 0.01) a = hex_one(uv, v1, dx, dy, layer, variant, l1); else w7.x = 0.0;
+	if (w7.y > 0.01) b = hex_one(uv, v2, dx, dy, layer, variant, l2); else w7.y = 0.0;
+	if (w7.z > 0.01) c = hex_one(uv, v3, dx, dy, layer, variant, l3); else w7.z = 0.0;
 	vec3 lw = mix(vec3(1.0), vec3(l1, l2, l3), 0.6);
-	vec3 W = lw * pow(w, vec3(7.0));
+	vec3 W = lw * w7;
 	W /= W.x + W.y + W.z;
 	Mat m;
 	m.albedo = a.albedo * W.x + b.albedo * W.y + c.albedo * W.z;
@@ -450,20 +478,11 @@ Mat hex_sample(vec2 uv, float layer, float variant) {
 	return m;
 }
 
-Mat mat_zero() {
-	Mat m;
-	m.albedo = vec3(0.0);
-	m.nrm = vec3(0.0, 0.0, 1.0);
-	m.ao = 1.0;
-	m.rough = 1.0;
-	m.height = 0.0;
-	return m;
-}
-
 // a layer hex-tiled at two scales, the coarser one taking over with distance
 // (no repeat near, no repeat far); variant: a second photo of the layer (-1 none)
 Mat hd_layer(vec2 p, float layer, float scale, float variant, float dist) {
-	float k = smoothstep(14.0, 70.0, dist);
+	float k = smoothstep(20.0, 45.0, dist);
+	if (hd_cheap) return hd_sample(k < 0.5 ? p * scale : p * scale * 0.29 + 0.17, layer);
 	Mat a = mat_zero();
 	Mat b = mat_zero();
 	if (k < 0.999) a = hex_sample(p * scale, layer, variant);
@@ -518,6 +537,9 @@ void main() {
 		float cmax = max(classic.r, max(classic.g, classic.b));
 		float snowy = smoothstep(0.5, 0.75, cmin) * (1.0 - smoothstep(0.06, 0.16, (cmax - cmin) / max(cmax, 1e-3)));
 		vec2 p = wpos.xz;
+		hd_cheap = land.y > 0.5;
+		float nfade = hd_cheap ? 0.0 : 1.0 - smoothstep(90.0, 130.0, eyedepth);
+		hd_normals = nfade > 0.0;
 		// two grasses, mixed at a large scale: no field looks the same twice
 		float dirtw = 1.0 - clamp(sp.r + sp.g + sp.b + sp.a, 0.0, 1.0);
 		float snoww = max(sp.a, snowy * (1.0 - sp.g));
@@ -540,6 +562,7 @@ void main() {
 			Mat rx = mat_zero();
 			Mat ry = mat_zero();
 			Mat rz = mat_zero();
+			if (hd_cheap) bw = step(max(bw.x, max(bw.y, bw.z)), bw);   // the main axis alone
 			if (bw.x > 1e-3) rx = hd_sample(wpos.zy * 0.23, 1.0);
 			if (bw.y > 1e-3) ry = hd_sample(wpos.xz * 0.23, 1.0);
 			if (bw.z > 1e-3) rz = hd_sample(wpos.xy * 0.23, 1.0);
@@ -577,7 +600,7 @@ void main() {
 		// the land's frame: x along u, z along v
 		vec3 t = normalize(vec3(1.0, 0.0, 0.0) - gn * gn.x);
 		vec3 b = normalize(cross(t, gn));
-		n = normalize(gn + (t * m.nrm.x - b * m.nrm.y) * 0.8);
+		n = normalize(gn + (t * m.nrm.x - b * m.nrm.y) * 0.8 * nfade);
 		metal = 0.0;
 	}
 	else {
