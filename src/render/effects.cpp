@@ -1222,7 +1222,8 @@ void FxIceBreak(float x,float z,float r)
 	if(broke>=2&&curtime-lastcrack>60)   //(unsigned: a clock gone back plays too)
 	{
 		lastcrack=curtime;
-		int num=142+next++%3;
+		//a small hole the short cracks (sound_sdl.cpp 142-143), a big one the long ones
+		int num=broke<12?142+next++%2:144+next++%3;
 		SetSoundPosition(num,Vector(x,WATERHEIGHT,z));
 		SetSoundVolume(num,broke>=12?0:-900+broke*70);
 		PlaySound(num,0);
