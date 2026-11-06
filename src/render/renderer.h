@@ -247,6 +247,8 @@ struct RUltraScene
 	float waterheight;
 	float time;           //seconds, for the waves and the wind
 	int underwater;
+	int frozen;           //a snowing sky (skies.ini precipitation 11): the water is ice, to the eye only
+	const unsigned char *icemask;   //where it is broken (effects.h FxIceMask, ICEMASK texels a side over landsize), 0 whole
 	const float *land;    //heights, land[x*landsize+z], the world repeating every landsize
 	int landsize;
 	//no tree nor rock there: around these points (flags, stations), nor where

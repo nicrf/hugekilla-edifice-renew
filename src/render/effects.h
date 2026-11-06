@@ -38,6 +38,23 @@ void FxBulletThroughSmoke(const Vector &from,const Vector &to);
 //the muzzle flashes (Ultra raymarches them with the explosions' smoke instead)
 void FxDrawSmokeClouds();
 
+//Ultra's frozen water (a snowing sky, skies.ini precipitation 11; HK_ULTRA_ICE=1/0
+//forces it): the ice breaks where a bullet or a grenade goes through it, where an
+//explosion under it throws the water up, and where a player is in the water. Seen
+//from what every client knows (the shots, the players), nothing goes over the
+//network; to the eye only (the water is still water to the game)
+int FxIceFrozen();
+//a hole of radius r (units) at x, z: the caller checks the water is there
+void FxIceBreak(float x,float z,float r);
+//the broken ice, ICEMASK x ICEMASK texels over the land (repeating every
+//LANDGRIDSIZE units), 255 open water; version changes when it does
+#define ICEMASK 1024
+const unsigned char *FxIceMask(unsigned *version);
+//a new land: the ice whole again
+void FxIceReset();
+//the players in the water break it around them (each frame, Draw)
+void FxIcePlayers();
+
 //procedural textures of the effects (LoadTextures)
 void FxLoadTextures();
 //moves and draws the effects: Draw (redrawing.cpp), with the scene's camera; layer

@@ -1897,6 +1897,9 @@ void Draw(float offset)
 		us.waterheight=WATERHEIGHT;
 		us.time=(float)(curtime%(1<<24))/1000;
 		us.underwater=cur->pos.y<WATERHEIGHT;
+		us.frozen=FxIceFrozen();
+		FxIcePlayers();
+		us.icemask=FxIceMask(0);
 		us.land=&land[0][0];
 		us.landsize=LANDGRIDSIZE;
 		//the flags and stations stay in the open
