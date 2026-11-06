@@ -379,11 +379,13 @@ void LoadSounds()
 	LoadSound("sound/landing.wav",120,1);
 	LoadSound("sound/thump.wav",130,1);
 	LoadSound("sound/splash4.wav",140,1);
-	//the frozen water breaking (effects.cpp FxIceBreak, tools/ice_sound.py): three
-	//sources taken in turn, so quick shots don't cut each other
+	//the frozen water breaking (effects.cpp FxIceBreak; licenses/ice-sounds.txt),
+	//shortest first: 142-143 a bullet's hole, 144-146 a grenade or a player
 	LoadSound("sound/icecrack1.wav",142,1);
 	LoadSound("sound/icecrack2.wav",143,1);
 	LoadSound("sound/icecrack3.wav",144,1);
+	LoadSound("sound/icecrack4.wav",145,1);
+	LoadSound("sound/icecrack5.wav",146,1);
 	LoadSound("sound/hit1.wav",150,0);
 	LoadSound("sound/death.wav",160,0);
 	LoadSound("sound/hit1.wav",151,1);
