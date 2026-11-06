@@ -1023,20 +1023,20 @@ static void SubmitVolumes()
 			s.numvol++;
 		}
 	}
-	static std::vector<SortItem> near;
-	near.clear();
+	static std::vector<SortItem> closest;
+	closest.clear();
 	for(size_t i=0;i<parts.size();i++)
 	{
 		const FxParticle &p=parts[i];
 		if(!p.vol||p.age<0) continue;
 		Vector d=p.pos-cameye;
 		SortItem it={-DotProduct(d,d),(int)i};   //the sort puts far first: nearest first here
-		near.push_back(it);
+		closest.push_back(it);
 	}
-	std::sort(near.begin(),near.end());
-	for(size_t k=0;k<near.size()&&s.numvol<RSMOKE_MAXVOLUMES;k++)
+	std::sort(closest.begin(),closest.end());
+	for(size_t k=0;k<closest.size()&&s.numvol<RSMOKE_MAXVOLUMES;k++)
 	{
-		const FxParticle &p=parts[near[k].index];
+		const FxParticle &p=parts[closest[k].index];
 		float t=p.age/p.life;
 		float size=p.size0+(p.size1-p.size0)*Ease(t);
 		//thickens quickly, then thins out as it spreads
